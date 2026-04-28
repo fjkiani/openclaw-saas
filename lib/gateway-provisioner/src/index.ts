@@ -117,10 +117,8 @@ export async function getServiceStatus(serviceId: string): Promise<string> {
     const text = await res.text();
     throw new Error(`Render API error ${res.status} on getStatus: ${text}`);
   }
-  const data = (await res.json()) as {
-    service: { suspended: string; state?: string };
-  };
-  if (data.service.suspended === "suspended") return "stopped";
-  if (data.service.state === "available") return "running";
-  return "provisioning";
+  // GET /services/:id returns the service object directly (no .service wrapper)
+  const svc = (await res.json()) as { suspended: string; serviceDetails?: { url?: string } };
+  if (svc.suspended === "suspended") return "stopped";
+  return "running";
 }
