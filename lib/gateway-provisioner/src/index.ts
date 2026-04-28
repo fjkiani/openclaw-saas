@@ -1,6 +1,5 @@
 const RENDER_API = "https://api.render.com/v1";
 const GATEWAY_IMAGE = "docker.io/cloudlookup/openclaw:latest";
-const GATEWAY_MOUNT_PATH = "/home/node/.openclaw";
 
 function renderHeaders(): Record<string, string> {
   const key = process.env.RENDER_API_KEY;
@@ -33,7 +32,7 @@ export async function provisionTenant(
   const serviceName = `openclaw-gateway-${tenantId}`;
 
   const body = {
-    type: "private_service",
+    type: "web_service",
     name: serviceName,
     ownerId: owner,
     image: {
@@ -48,13 +47,8 @@ export async function provisionTenant(
         { key: "ANTHROPIC_API_KEY", value: anthropicKey },
         { key: "NODE_ENV", value: "production" },
       ],
-      disk: {
-        name: `tenant-${tenantId}-disk`,
-        mountPath: GATEWAY_MOUNT_PATH,
-        sizeGB: 1,
-      },
     },
-    plan: "starter",
+    plan: "free",
   };
 
   const res = await fetch(`${RENDER_API}/services`, {
