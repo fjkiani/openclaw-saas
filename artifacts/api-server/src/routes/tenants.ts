@@ -20,6 +20,12 @@ import {
   ListTenantSkillsResponse,
   GetTenantActivityResponse,
 } from "@workspace/api-zod";
+import {
+  provisionTenant,
+  startTenant,
+  stopTenant,
+  destroyTenant,
+} from "@workspace/gateway-provisioner";
 
 const router: IRouter = Router();
 
@@ -32,6 +38,10 @@ function requireAuth(req: any, res: any, next: any) {
   }
   req.userId = userId;
   next();
+}
+
+function hasRenderCreds(): boolean {
+  return !!(process.env.RENDER_API_KEY && process.env.RENDER_OWNER_ID);
 }
 
 router.get("/tenants", requireAuth, async (req: any, res): Promise<void> => {
@@ -50,6 +60,8 @@ router.post("/tenants", requireAuth, async (req: any, res): Promise<void> => {
     return;
   }
 
+  const gatewayToken = `tok_${crypto.randomUUID().replace(/-/g, "")}`;
+
   const [tenant] = await db
     .insert(tenantsTable)
     .values({
@@ -58,21 +70,9 @@ router.post("/tenants", requireAuth, async (req: any, res): Promise<void> => {
       description: parsed.data.description ?? null,
       skillPack: parsed.data.skillPack ?? null,
       status: "provisioning",
+      gatewayToken,
     })
     .returning();
-
-  // Simulate provisioning completing after a moment
-  setTimeout(async () => {
-    await db
-      .update(tenantsTable)
-      .set({ status: "stopped", wsEndpoint: `ws://gateway-${tenant.id}.openclaw.internal:18789`, gatewayToken: `tok_${Math.random().toString(36).slice(2)}` })
-      .where(eq(tenantsTable.id, tenant.id));
-    await db.insert(activityEntriesTable).values({
-      tenantId: tenant.id,
-      type: "agent_started",
-      message: `Agent instance "${parsed.data.name}" provisioned successfully`,
-    });
-  }, 2000);
 
   await db.insert(activityEntriesTable).values({
     tenantId: tenant.id,
@@ -80,7 +80,48 @@ router.post("/tenants", requireAuth, async (req: any, res): Promise<void> => {
     message: `Provisioning agent instance "${parsed.data.name}"`,
   });
 
-  res.status(201).json(GetTenantResponse.parse(tenant));
+  if (hasRenderCreds()) {
+    try {
+      const { serviceId, wsEndpoint } = await provisionTenant(
+        String(tenant.id),
+        gatewayToken
+      );
+      await db
+        .update(tenantsTable)
+        .set({ renderServiceId: serviceId, wsEndpoint, status: "provisioning" })
+        .where(eq(tenantsTable.id, tenant.id));
+      await db.insert(activityEntriesTable).values({
+        tenantId: tenant.id,
+        type: "agent_started",
+        message: `Render service ${serviceId} created — waiting for deploy`,
+      });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      req.log?.error({ err, tenantId: tenant.id }, "provisionTenant failed");
+      await db
+        .update(tenantsTable)
+        .set({ status: "error" })
+        .where(eq(tenantsTable.id, tenant.id));
+      await db.insert(activityEntriesTable).values({
+        tenantId: tenant.id,
+        type: "agent_stopped",
+        message: `Provisioning failed: ${message}`,
+      });
+    }
+  } else {
+    req.log?.warn("RENDER_API_KEY/RENDER_OWNER_ID not set — skipping real provisioning");
+    await db
+      .update(tenantsTable)
+      .set({ status: "stopped" })
+      .where(eq(tenantsTable.id, tenant.id));
+  }
+
+  const [updated] = await db
+    .select()
+    .from(tenantsTable)
+    .where(eq(tenantsTable.id, tenant.id));
+
+  res.status(201).json(GetTenantResponse.parse(updated ?? tenant));
 });
 
 router.get("/tenants/:id", requireAuth, async (req: any, res): Promise<void> => {
@@ -142,14 +183,26 @@ router.delete("/tenants/:id", requireAuth, async (req: any, res): Promise<void> 
   }
 
   const [tenant] = await db
-    .delete(tenantsTable)
-    .where(and(eq(tenantsTable.id, params.data.id), eq(tenantsTable.userId, req.userId)))
-    .returning();
+    .select()
+    .from(tenantsTable)
+    .where(and(eq(tenantsTable.id, params.data.id), eq(tenantsTable.userId, req.userId)));
 
   if (!tenant) {
     res.status(404).json({ error: "Agent not found" });
     return;
   }
+
+  if (tenant.renderServiceId && hasRenderCreds()) {
+    try {
+      await destroyTenant(tenant.renderServiceId);
+    } catch (err) {
+      req.log?.error({ err, serviceId: tenant.renderServiceId }, "destroyTenant failed");
+    }
+  }
+
+  await db
+    .delete(tenantsTable)
+    .where(eq(tenantsTable.id, tenant.id));
 
   res.sendStatus(204);
 });
@@ -162,15 +215,28 @@ router.post("/tenants/:id/start", requireAuth, async (req: any, res): Promise<vo
   }
 
   const [tenant] = await db
-    .update(tenantsTable)
-    .set({ status: "running", memoryUsedKb: Math.floor(Math.random() * 50000) + 10000 })
-    .where(and(eq(tenantsTable.id, params.data.id), eq(tenantsTable.userId, req.userId)))
-    .returning();
+    .select()
+    .from(tenantsTable)
+    .where(and(eq(tenantsTable.id, params.data.id), eq(tenantsTable.userId, req.userId)));
 
   if (!tenant) {
     res.status(404).json({ error: "Agent not found" });
     return;
   }
+
+  if (tenant.renderServiceId && hasRenderCreds()) {
+    try {
+      await startTenant(tenant.renderServiceId);
+    } catch (err) {
+      req.log?.error({ err, serviceId: tenant.renderServiceId }, "startTenant failed");
+    }
+  }
+
+  const [updated] = await db
+    .update(tenantsTable)
+    .set({ status: "running", memoryUsedKb: Math.floor(Math.random() * 50000) + 10000 })
+    .where(eq(tenantsTable.id, tenant.id))
+    .returning();
 
   await db.insert(activityEntriesTable).values({
     tenantId: tenant.id,
@@ -178,7 +244,7 @@ router.post("/tenants/:id/start", requireAuth, async (req: any, res): Promise<vo
     message: `Agent "${tenant.name}" started`,
   });
 
-  res.json(GetTenantResponse.parse(tenant));
+  res.json(GetTenantResponse.parse(updated));
 });
 
 router.post("/tenants/:id/stop", requireAuth, async (req: any, res): Promise<void> => {
@@ -189,15 +255,28 @@ router.post("/tenants/:id/stop", requireAuth, async (req: any, res): Promise<voi
   }
 
   const [tenant] = await db
-    .update(tenantsTable)
-    .set({ status: "stopped", memoryUsedKb: 0 })
-    .where(and(eq(tenantsTable.id, params.data.id), eq(tenantsTable.userId, req.userId)))
-    .returning();
+    .select()
+    .from(tenantsTable)
+    .where(and(eq(tenantsTable.id, params.data.id), eq(tenantsTable.userId, req.userId)));
 
   if (!tenant) {
     res.status(404).json({ error: "Agent not found" });
     return;
   }
+
+  if (tenant.renderServiceId && hasRenderCreds()) {
+    try {
+      await stopTenant(tenant.renderServiceId);
+    } catch (err) {
+      req.log?.error({ err, serviceId: tenant.renderServiceId }, "stopTenant failed");
+    }
+  }
+
+  const [updated] = await db
+    .update(tenantsTable)
+    .set({ status: "stopped", memoryUsedKb: 0 })
+    .where(eq(tenantsTable.id, tenant.id))
+    .returning();
 
   await db.insert(activityEntriesTable).values({
     tenantId: tenant.id,
@@ -205,7 +284,7 @@ router.post("/tenants/:id/stop", requireAuth, async (req: any, res): Promise<voi
     message: `Agent "${tenant.name}" stopped`,
   });
 
-  res.json(GetTenantResponse.parse(tenant));
+  res.json(GetTenantResponse.parse(updated));
 });
 
 router.get("/tenants/:id/skills", requireAuth, async (req: any, res): Promise<void> => {

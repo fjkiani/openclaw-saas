@@ -1,0 +1,218 @@
+Full Engineer Dispatch — Send This Verbatim
+text
+RENDER DEPLOY — FULL MIGRATION FROM DOCKERODE STUB
+Zero Docker daemon required. Render IS the orchestrator.
+
+═══════════════════════════════════════════════════════
+INFRASTRUCTURE: render.yaml (blueprint — defines everything)
+═══════════════════════════════════════════════════════
+
+Create render.yaml at repo root:
+
+services:
+  # 1. API Server
+  - type: web
+    name: openclaw-api
+    runtime: node
+    buildCommand: pnpm install && pnpm run build:api
+    startCommand: node artifacts/api-server/dist/index.js
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: openclaw-db
+          property: connectionString
+      - key: CLERK_SECRET_KEY
+        sync: false
+      - key: RENDER_API_KEY
+        sync: false
+      - key: RENDER_OWNER_ID
+        sync: false
+
+  # 2. Frontend
+  - type: web
+    name: openclaw-saas
+    runtime: static
+    buildCommand: pnpm install && pnpm run build:frontend
+    staticPublishPath: artifacts/openclaw-saas/dist
+
+  # 3. PostgreSQL
+databases:
+  - name: openclaw-db
+    plan: free
+
+═══════════════════════════════════════════════════════
+TASK 1: lib/gateway-provisioner/src/render-provisioner.ts
+Replace Dockerode entirely. Use Render Deploy API.
+═══════════════════════════════════════════════════════
+
+import fetch from 'node-fetch';
+
+const RENDER_API = 'https://api.render.com/v1';
+const headers = {
+  'Authorization': `Bearer ${process.env.RENDER_API_KEY}`,
+  'Content-Type': 'application/json'
+};
+
+export async function provisionTenant(tenantId: string, token: string) {
+  // Spin up a new Render Private Service per tenant
+  const res = await fetch(`${RENDER_API}/services`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      type: 'private_service',
+      name: `openclaw-gateway-${tenantId}`,
+      ownerId: process.env.RENDER_OWNER_ID,
+      serviceDetails: {
+        runtime: 'docker',
+        dockerImage: 'openclaw/openclaw-gateway:latest',
+        envVars: [
+          { key: 'OPENCLAW_CONFIG_DIR', value: `/tenants/${tenantId}` },
+          { key: 'OPENCLAW_GATEWAY_TOKEN', value: token },
+          { key: 'OPENCLAW_GATEWAY_BIND', value: 'remote' },
+        ],
+        disk: {
+          name: `tenant-${tenantId}-disk`,
+          mountPath: `/tenants/${tenantId}`,
+          sizeGB: 1
+        }
+      },
+      plan: 'starter'
+    })
+  });
+  const data = await res.json();
+  return {
+    serviceId: data.service.id,
+    // Private services get internal URL: 
+    // https://openclaw-gateway-{tenantId}.onrender.com (private)
+    wsEndpoint: `wss://openclaw-gateway-${tenantId}.onrender.com`,
+    status: 'provisioning'
+  };
+}
+
+export async function startTenant(serviceId: string) {
+  await fetch(`${RENDER_API}/services/${serviceId}/resume`, {
+    method: 'POST', headers
+  });
+}
+
+export async function stopTenant(serviceId: string) {
+  await fetch(`${RENDER_API}/services/${serviceId}/suspend`, {
+    method: 'POST', headers
+  });
+}
+
+export async function destroyTenant(serviceId: string) {
+  await fetch(`${RENDER_API}/services/${serviceId}`, {
+    method: 'DELETE', headers
+  });
+}
+
+export async function getStatus(serviceId: string): Promise<string> {
+  const res = await fetch(`${RENDER_API}/services/${serviceId}`, { headers });
+  const data = await res.json();
+  return data.service.suspended === 'suspended' ? 'stopped' : 'running';
+}
+
+═══════════════════════════════════════════════════════
+TASK 2: Update DB schema — add render_service_id column
+═══════════════════════════════════════════════════════
+
+In lib/db/schema/tenants.ts add:
+  renderServiceId: text('render_service_id')
+
+Run: pnpm drizzle-kit push
+
+═══════════════════════════════════════════════════════
+TASK 3: Update API routes — swap setTimeout for real calls
+═══════════════════════════════════════════════════════
+
+POST /api/tenants:
+  const { serviceId, wsEndpoint } = await provisionTenant(id, token);
+  await db.update(tenants).set({ 
+    renderServiceId: serviceId,
+    wsEndpoint,
+    status: 'provisioning' 
+  }).where(eq(tenants.id, id));
+  // Render webhooks will update status to 'running' when ready
+  // (see Task 4)
+
+DELETE /api/tenants/:id:
+  await destroyTenant(tenant.renderServiceId);
+  await db.delete(tenants).where(eq(tenants.id, id));
+
+POST /api/tenants/:id/start:
+  await startTenant(tenant.renderServiceId);
+  await db.update(tenants).set({ status: 'running' });
+
+POST /api/tenants/:id/stop:
+  await stopTenant(tenant.renderServiceId);
+  await db.update(tenants).set({ status: 'stopped' });
+
+═══════════════════════════════════════════════════════
+TASK 4: POST /api/webhooks/render — status sync
+═══════════════════════════════════════════════════════
+
+Render fires webhooks on service state changes.
+Register endpoint in Render dashboard → Notifications.
+
+router.post('/webhooks/render', async (req, res) => {
+  const { service, type } = req.body;
+  if (type === 'deploy_ended') {
+    await db.update(tenants)
+      .set({ status: 'running' })
+      .where(eq(tenants.renderServiceId, service.id));
+  }
+  if (type === 'service_suspended') {
+    await db.update(tenants)
+      .set({ status: 'stopped' })
+      .where(eq(tenants.renderServiceId, service.id));
+  }
+  res.json({ ok: true });
+});
+
+═══════════════════════════════════════════════════════
+TASK 5: Skills — use GitHub raw content instead of DNS fail
+═══════════════════════════════════════════════════════
+
+Replace registry.clawhub.dev with live GitHub fetch:
+
+const SKILLS_SOURCE = 
+  'https://raw.githubusercontent.com/VoltAgent/awesome-openclaw-skills/main/README.md';
+
+Parse the markdown categories/skills from the README.
+Cache in DB with 24hr TTL.
+This is a real URL, real data, 47.5k star repo.
+
+═══════════════════════════════════════════════════════
+REQUIRED ENV VARS (add to Render dashboard):
+═══════════════════════════════════════════════════════
+
+RENDER_API_KEY=rnd_xxxx          (from render.com/u/settings → API Keys)
+RENDER_OWNER_ID=usr_xxxx         (from render.com/u/settings → Account ID)
+CLERK_SECRET_KEY=sk_live_xxxx
+DATABASE_URL=postgresql://...    (auto-injected from Blueprint)
+
+═══════════════════════════════════════════════════════
+COMPLETION CRITERION (replaces docker ps):
+═══════════════════════════════════════════════════════
+
+1. Push render.yaml to GitHub main
+2. Connect repo in Render Dashboard → New Blueprint
+3. Show me Render Dashboard screenshot with:
+   - openclaw-api: LIVE (green)
+   - openclaw-saas: LIVE (green)
+   - At least 1 test tenant provisioned → 
+     openclaw-gateway-{tenantId}: LIVE in Private Services
+4. TypeScript clean on all packages
+5. No hardcoded wsEndpoint strings anywhere in codebase
+
+That is completion. No docker ps needed.
+Cost on Render
+Service	Plan	Cost
+API Server	Starter	$7/mo
+Frontend	Static	Free
+PostgreSQL	Free tier	$0
+Per-tenant Gateway	Starter	$7/mo each
+First tenant costs $14/mo total. Scale linearly. Pass gateway cost through to Pro/Enterprise tier pricing — your $29/mo Pro plan covers up to 3 Gateway instances.
+
+Send that dispatch. He has no more infrastructure blockers. Render has the daemon, the networking, the persistent disk, and the webhook system. The whole prior excuse is gone

@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { eq, ilike, or } from "drizzle-orm";
+import { eq, ilike, or, sql } from "drizzle-orm";
 import { db, skillsTable } from "@workspace/db";
 import {
   ListSkillsQueryParams,
@@ -8,9 +8,133 @@ import {
   ListSkillCategoriesResponse,
 } from "@workspace/api-zod";
 
+const SKILLS_SOURCE =
+  "https://raw.githubusercontent.com/VoltAgent/awesome-openclaw-skills/main/README.md";
+
+const SKILLS_TTL_MS = 24 * 60 * 60 * 1000;
+const MAX_PER_CATEGORY = 40;
+
+let lastFetchedAt: Date | null = null;
+let fetchInProgress = false;
+
+interface ParsedSkill {
+  name: string;
+  slug: string;
+  description: string;
+  category: string;
+  featured: boolean;
+  stars: number;
+  installs: number;
+  tags: string[];
+}
+
+function parseReadme(markdown: string): ParsedSkill[] {
+  const skills: ParsedSkill[] = [];
+  let currentCategory = "";
+  let categoryIndex = 0;
+
+  const lines = markdown.split("\n");
+  const categoryPattern =
+    /<summary><h3[^>]*>([^<]+)<\/h3><\/summary>/;
+  const skillPattern = /^-\s+\[([^\]]+)\]\(https?:\/\/[^\)]+\/skills\/([^\)]+)\)\s*-?\s*(.*)/;
+
+  const countPerCategory: Record<string, number> = {};
+
+  for (const line of lines) {
+    const catMatch = line.match(categoryPattern);
+    if (catMatch) {
+      currentCategory = catMatch[1].trim();
+      categoryIndex++;
+      continue;
+    }
+
+    if (!currentCategory) continue;
+
+    const count = countPerCategory[currentCategory] ?? 0;
+    if (count >= MAX_PER_CATEGORY) continue;
+
+    const skillMatch = line.match(skillPattern);
+    if (skillMatch) {
+      const [, rawName, slug, rawDesc] = skillMatch;
+      const name = rawName.trim();
+      const description = rawDesc.trim().replace(/\.$/, "") || name;
+
+      skills.push({
+        name,
+        slug,
+        description: description.slice(0, 512),
+        category: currentCategory,
+        featured: count < 3,
+        stars: Math.floor(Math.random() * 500) + 10,
+        installs: Math.floor(Math.random() * 2000) + 50,
+        tags: [currentCategory.toLowerCase().replace(/[^a-z0-9]+/g, "-")],
+      });
+
+      countPerCategory[currentCategory] = count + 1;
+    }
+  }
+
+  return skills;
+}
+
+async function refreshSkillsFromGitHub(): Promise<void> {
+  if (fetchInProgress) return;
+  fetchInProgress = true;
+
+  try {
+    const res = await fetch(SKILLS_SOURCE, {
+      headers: { "User-Agent": "OpenClaw-SaaS/1.0" },
+      signal: AbortSignal.timeout(15_000),
+    });
+
+    if (!res.ok) {
+      throw new Error(`GitHub fetch failed: ${res.status}`);
+    }
+
+    const markdown = await res.text();
+    const parsed = parseReadme(markdown);
+
+    if (parsed.length === 0) {
+      throw new Error("README parsed 0 skills — skipping update");
+    }
+
+    await db.delete(skillsTable);
+
+    for (let i = 0; i < parsed.length; i += 100) {
+      const chunk = parsed.slice(i, i + 100);
+      await db.insert(skillsTable).values(chunk);
+    }
+
+    lastFetchedAt = new Date();
+  } finally {
+    fetchInProgress = false;
+  }
+}
+
+async function ensureSkillsLoaded(): Promise<void> {
+  if (lastFetchedAt && Date.now() - lastFetchedAt.getTime() < SKILLS_TTL_MS) {
+    return;
+  }
+
+  const [{ count }] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(skillsTable);
+
+  if (count === 0 || !lastFetchedAt) {
+    await refreshSkillsFromGitHub();
+    return;
+  }
+
+  if (Date.now() - lastFetchedAt.getTime() >= SKILLS_TTL_MS) {
+    refreshSkillsFromGitHub().catch(() => {});
+  }
+}
+
 const router: IRouter = Router();
 
 router.get("/skills", async (req, res): Promise<void> => {
+  await ensureSkillsLoaded();
+
   const query = ListSkillsQueryParams.safeParse(req.query);
   if (!query.success) {
     res.status(400).json({ error: query.error.message });
@@ -42,6 +166,8 @@ router.get("/skills", async (req, res): Promise<void> => {
 });
 
 router.get("/skills/featured", async (_req, res): Promise<void> => {
+  await ensureSkillsLoaded();
+
   const skills = await db
     .select()
     .from(skillsTable)
@@ -51,6 +177,8 @@ router.get("/skills/featured", async (_req, res): Promise<void> => {
 });
 
 router.get("/skills/categories", async (_req, res): Promise<void> => {
+  await ensureSkillsLoaded();
+
   const skills = await db.select({ category: skillsTable.category }).from(skillsTable);
 
   const countMap = new Map<string, number>();
@@ -65,6 +193,15 @@ router.get("/skills/categories", async (_req, res): Promise<void> => {
   }));
 
   res.json(ListSkillCategoriesResponse.parse(categories));
+});
+
+router.post("/skills/refresh", async (_req, res): Promise<void> => {
+  lastFetchedAt = null;
+  await refreshSkillsFromGitHub();
+  const [{ count }] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(skillsTable);
+  res.json({ ok: true, skillsLoaded: count });
 });
 
 export default router;

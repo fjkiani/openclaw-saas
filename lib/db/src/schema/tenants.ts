@@ -20,6 +20,7 @@ export const tenantsTable = pgTable("tenants", {
   memoryUsedKb: integer("memory_used_kb").notNull().default(0),
   wsEndpoint: text("ws_endpoint"),
   gatewayToken: text("gateway_token"),
+  renderServiceId: text("render_service_id"),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
