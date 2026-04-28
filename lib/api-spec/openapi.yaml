@@ -3,20 +3,27 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: OpenClaw SaaS API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: tenants
+    description: Agent tenant management
+  - name: skills
+    description: Skill catalog and installation
+  - name: dashboard
+    description: Dashboard summaries and activity
+  - name: billing
+    description: Billing and plan management
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -24,6 +31,314 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /tenants:
+    get:
+      operationId: listTenants
+      tags: [tenants]
+      summary: List all agent instances for current user
+      responses:
+        "200":
+          description: List of tenants
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Tenant"
+    post:
+      operationId: createTenant
+      tags: [tenants]
+      summary: Provision a new agent instance
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTenantBody"
+      responses:
+        "201":
+          description: Tenant created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Tenant"
+
+  /tenants/{id}:
+    get:
+      operationId: getTenant
+      tags: [tenants]
+      summary: Get a tenant by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Tenant details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Tenant"
+        "404":
+          description: Not found
+    patch:
+      operationId: updateTenant
+      tags: [tenants]
+      summary: Update a tenant
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateTenantBody"
+      responses:
+        "200":
+          description: Updated tenant
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Tenant"
+    delete:
+      operationId: deleteTenant
+      tags: [tenants]
+      summary: Delete a tenant
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /tenants/{id}/start:
+    post:
+      operationId: startTenant
+      tags: [tenants]
+      summary: Start an agent instance
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Agent started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Tenant"
+
+  /tenants/{id}/stop:
+    post:
+      operationId: stopTenant
+      tags: [tenants]
+      summary: Stop a running agent instance
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Agent stopped
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Tenant"
+
+  /tenants/{id}/skills:
+    get:
+      operationId: listTenantSkills
+      tags: [tenants]
+      summary: List skills installed on a tenant
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of installed skills
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TenantSkill"
+    post:
+      operationId: installSkillOnTenant
+      tags: [tenants]
+      summary: Install a skill on a tenant
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InstallSkillBody"
+      responses:
+        "201":
+          description: Skill installed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantSkill"
+
+  /tenants/{id}/skills/{skillId}:
+    delete:
+      operationId: uninstallSkillFromTenant
+      tags: [tenants]
+      summary: Uninstall a skill from a tenant
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: skillId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Skill uninstalled
+
+  /tenants/{id}/activity:
+    get:
+      operationId: getTenantActivity
+      tags: [tenants]
+      summary: Get recent activity log for a tenant
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Activity entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ActivityEntry"
+
+  /skills:
+    get:
+      operationId: listSkills
+      tags: [skills]
+      summary: Browse skill catalog
+      parameters:
+        - name: category
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: search
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Skill catalog
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Skill"
+
+  /skills/featured:
+    get:
+      operationId: listFeaturedSkills
+      tags: [skills]
+      summary: Get featured and trending skill packs
+      responses:
+        "200":
+          description: Featured skills
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Skill"
+
+  /skills/categories:
+    get:
+      operationId: listSkillCategories
+      tags: [skills]
+      summary: Get all skill categories
+      responses:
+        "200":
+          description: Category list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SkillCategory"
+
+  /dashboard/summary:
+    get:
+      operationId: getDashboardSummary
+      tags: [dashboard]
+      summary: Get dashboard summary stats
+      responses:
+        "200":
+          description: Summary stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardSummary"
+
+  /billing/plan:
+    get:
+      operationId: getBillingPlan
+      tags: [billing]
+      summary: Get current billing plan and limits
+      responses:
+        "200":
+          description: Billing plan
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BillingPlan"
+
+  /billing/usage:
+    get:
+      operationId: getBillingUsage
+      tags: [billing]
+      summary: Get current usage statistics
+      responses:
+        "200":
+          description: Usage stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BillingUsage"
+
 components:
   schemas:
     HealthStatus:
@@ -31,6 +346,181 @@ components:
       properties:
         status:
           type: string
-      required:
-        - status
+      required: [status]
 
+    Tenant:
+      type: object
+      properties:
+        id:
+          type: integer
+        userId:
+          type: string
+        name:
+          type: string
+        description:
+          type: ["string", "null"]
+        status:
+          type: string
+          enum: [provisioning, running, stopped, error]
+        skillPack:
+          type: ["string", "null"]
+        agentCount:
+          type: integer
+        memoryUsedKb:
+          type: integer
+        wsEndpoint:
+          type: ["string", "null"]
+        gatewayToken:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+      required: [id, userId, name, status, agentCount, memoryUsedKb, createdAt, updatedAt]
+
+    CreateTenantBody:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: ["string", "null"]
+        skillPack:
+          type: ["string", "null"]
+      required: [name]
+
+    UpdateTenantBody:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: ["string", "null"]
+
+    TenantSkill:
+      type: object
+      properties:
+        id:
+          type: integer
+        tenantId:
+          type: integer
+        skillId:
+          type: integer
+        skillName:
+          type: string
+        skillSlug:
+          type: string
+        category:
+          type: string
+        installedAt:
+          type: string
+      required: [id, tenantId, skillId, skillName, skillSlug, category, installedAt]
+
+    InstallSkillBody:
+      type: object
+      properties:
+        skillId:
+          type: integer
+      required: [skillId]
+
+    ActivityEntry:
+      type: object
+      properties:
+        id:
+          type: integer
+        tenantId:
+          type: integer
+        type:
+          type: string
+          enum: [agent_started, agent_stopped, skill_installed, skill_uninstalled, task_completed, error]
+        message:
+          type: string
+        createdAt:
+          type: string
+      required: [id, tenantId, type, message, createdAt]
+
+    Skill:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        slug:
+          type: string
+        description:
+          type: string
+        category:
+          type: string
+        stars:
+          type: integer
+        installs:
+          type: integer
+        featured:
+          type: boolean
+        tags:
+          type: array
+          items:
+            type: string
+      required: [id, name, slug, description, category, stars, installs, featured, tags]
+
+    SkillCategory:
+      type: object
+      properties:
+        name:
+          type: string
+        slug:
+          type: string
+        count:
+          type: integer
+      required: [name, slug, count]
+
+    DashboardSummary:
+      type: object
+      properties:
+        totalAgents:
+          type: integer
+        runningAgents:
+          type: integer
+        totalSkillsInstalled:
+          type: integer
+        totalTasksCompleted:
+          type: integer
+        planName:
+          type: string
+        agentLimit:
+          type: integer
+      required: [totalAgents, runningAgents, totalSkillsInstalled, totalTasksCompleted, planName, agentLimit]
+
+    BillingPlan:
+      type: object
+      properties:
+        name:
+          type: string
+          enum: [free, pro, enterprise]
+        agentLimit:
+          type: integer
+        priceMonthly:
+          type: number
+        features:
+          type: array
+          items:
+            type: string
+      required: [name, agentLimit, priceMonthly, features]
+
+    BillingUsage:
+      type: object
+      properties:
+        agentsUsed:
+          type: integer
+        agentLimit:
+          type: integer
+        skillsInstalled:
+          type: integer
+        tasksThisMonth:
+          type: integer
+        periodStart:
+          type: string
+        periodEnd:
+          type: string
+      required: [agentsUsed, agentLimit, skillsInstalled, tasksThisMonth, periodStart, periodEnd]
