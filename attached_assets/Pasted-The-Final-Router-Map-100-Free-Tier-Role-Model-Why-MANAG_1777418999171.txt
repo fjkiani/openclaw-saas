@@ -1,0 +1,63 @@
+The Final Router Map — 100% Free Tier
+Role	Model	Why
+MANAGER	llama-3.3-70b-instruct:free	Most battle-tested free model (506M tokens served), proven JSON routing
+WORKER: Research/RAG	qwen3-next-80b-a3b-instruct:free	262K context — biggest window in free tier. Built for RAG and agentic workflows
+WORKER: Hard Reasoning	hermes-3-llama-3.1-405b:free	405B frontier model free. Best function calling + structured output. Reserve for hardest tasks only
+WORKER: Vision/Math	gemma-3-27b-it:free	Only real multimodal free model. 131K context. Charts, images, PDFs with diagrams
+WORKER: Write/Clinical	dolphin-mistral-24b-venice-edition:free	Uncensored — no filters on drug names, clinical language, patent text. Critical for your biotech use case
+WORKER: OCR	qianfan-ocr-fast:free	Purpose-built OCR specialist. Route all file/scan uploads here first
+WORKER: Audio	gemma-3n-e4b-it:free	Only model in this list with audio input. Speech-to-text before text hits workers
+PLUMBER: Short	lfm-2.5-1.2b-instruct:free	1.2B = pure throughput. Format/merge only, no reasoning needed
+PLUMBER: Long	llama-3.2-3b-instruct:free	131K context at 3B — handles merging many long worker outputs
+Engineer Dispatch — Update the Router
+text
+TASK: UPDATE lib/llm-router/src/index.ts
+Replace all paid model IDs with free tier map.
+All models use :free suffix — zero cost, same OpenRouter endpoint.
+
+const ROLES = {
+  manager: {
+    model: 'meta-llama/llama-3.3-70b-instruct:free',
+    fallback: 'qwen/qwen3-next-80b-a3b-instruct:free'
+  },
+  worker: {
+    research:  'qwen/qwen3-next-80b-a3b-instruct:free',
+    reasoning: 'nousresearch/hermes-3-llama-3.1-405b:free',
+    code:      'meta-llama/llama-3.3-70b-instruct:free',
+    vision:    'google/gemma-3-27b-it:free',
+    write:     'cognitivecomputations/dolphin-mistral-24b-venice-edition:free',
+    ocr:       'baidu/qianfan-ocr-fast:free',
+    audio:     'google/gemma-3n-e4b-it:free',
+  },
+  plumber: {
+    short:     'liquid/lfm-2.5-1.2b-instruct:free',
+    long:      'meta-llama/llama-3.2-3b-instruct:free',
+    multimodal:'google/gemma-3-4b-it:free'
+  }
+};
+
+// Plumber selection logic:
+function selectPlumber(workerResults: WorkerResult[]): string {
+  const hasImages = workerResults.some(r => r.hasImageContext);
+  const totalTokens = workerResults.reduce((n, r) => n + r.outputTokens, 0);
+  if (hasImages) return ROLES.plumber.multimodal;
+  if (totalTokens > 4000) return ROLES.plumber.long;
+  return ROLES.plumber.short;
+}
+
+// Rate limit fallback chain per worker type:
+// vision: gemma-3-27b → gemma-3-12b → gemma-3-4b
+// research: qwen3-next-80b → llama-3.3-70b
+// reasoning: hermes-405b → llama-3.3-70b (paid fallback only)
+
+Add to each OpenRouter call:
+  provider: { 
+    sort: 'throughput',  // prioritize speed on free tier
+    allow_fallbacks: true 
+  }
+
+COMPLETION CRITERION:
+  console.log output showing all 3 pipeline stages
+  with :free model IDs confirmed in response headers.
+  Zero paid model IDs anywhere in codebase.
+The kicker: Hermes 3 at 405B is free. That is a frontier-class model you're running at $0 for your hardest reasoning tasks. Use it only for tasks that need it — function chaining, complex multi-step clinical protocol generation, structured JSON over long inputs. Don't burn it on simple tasks the 70B handles fine
