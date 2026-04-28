@@ -58,6 +58,7 @@ Per-tenant Gateway (Render Private Services):
 - `skills` — global skill catalog (791+ real skills, refreshed from GitHub awesome-openclaw-skills)
 - `tenant_skills` — many-to-many installed skills per agent
 - `activity_entries` — audit log per agent
+- `chat_messages` — per-tenant chat history (id, tenantId, role: user|assistant|error, content, createdAt)
 
 ## Packages
 
@@ -115,3 +116,4 @@ Connect repo at render.com → New → Blueprint to deploy. Per-tenant gateways 
 - Billing page: current plan, usage bar, upgrade CTAs
 - Real gateway provisioning: no setTimeout stubs, no hardcoded wsEndpoint strings
 - Render webhook handler for async status sync
+- Agent chat: `GET/POST /api/tenants/:id/chat` — stores messages in DB, proxies POST to gateway HTTP API when running; graceful error messages on timeout/gateway-down; tabbed agent detail page (Overview | Skills | Chat) with threaded message UI, animated thinking dots, Enter-to-send

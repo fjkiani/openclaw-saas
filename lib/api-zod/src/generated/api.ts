@@ -180,6 +180,41 @@ export const UninstallSkillFromTenantParams = zod.object({
 });
 
 /**
+ * @summary Get chat history for a tenant
+ */
+export const GetChatHistoryParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const GetChatHistoryResponseItem = zod.object({
+  id: zod.number(),
+  tenantId: zod.number(),
+  role: zod.enum(["user", "assistant", "error"]),
+  content: zod.string(),
+  createdAt: zod.string(),
+});
+export const GetChatHistoryResponse = zod.array(GetChatHistoryResponseItem);
+
+/**
+ * @summary Send a chat message to the agent
+ */
+export const SendChatMessageParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const SendChatMessageBody = zod.object({
+  message: zod.string(),
+});
+
+export const SendChatMessageResponse = zod.object({
+  id: zod.number(),
+  tenantId: zod.number(),
+  role: zod.enum(["user", "assistant", "error"]),
+  content: zod.string(),
+  createdAt: zod.string(),
+});
+
+/**
  * @summary Get recent activity log for a tenant
  */
 export const GetTenantActivityParams = zod.object({

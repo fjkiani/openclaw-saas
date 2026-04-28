@@ -223,6 +223,56 @@ paths:
         "204":
           description: Skill uninstalled
 
+  /tenants/{id}/chat:
+    get:
+      operationId: getChatHistory
+      tags: [tenants]
+      summary: Get chat history for a tenant
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Chat messages
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ChatMessage"
+    post:
+      operationId: sendChatMessage
+      tags: [tenants]
+      summary: Send a chat message to the agent
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SendChatMessageBody"
+      responses:
+        "200":
+          description: Assistant reply
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatMessage"
+        "409":
+          description: Agent not running
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
   /tenants/{id}/activity:
     get:
       operationId: getTenantActivity
@@ -524,3 +574,33 @@ components:
         periodEnd:
           type: string
       required: [agentsUsed, agentLimit, skillsInstalled, tasksThisMonth, periodStart, periodEnd]
+
+    ChatMessage:
+      type: object
+      properties:
+        id:
+          type: integer
+        tenantId:
+          type: integer
+        role:
+          type: string
+          enum: [user, assistant, error]
+        content:
+          type: string
+        createdAt:
+          type: string
+      required: [id, tenantId, role, content, createdAt]
+
+    SendChatMessageBody:
+      type: object
+      properties:
+        message:
+          type: string
+      required: [message]
+
+    ApiError:
+      type: object
+      properties:
+        error:
+          type: string
+      required: [error]

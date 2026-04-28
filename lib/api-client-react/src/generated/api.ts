@@ -18,13 +18,16 @@ import type {
 
 import type {
   ActivityEntry,
+  ApiError,
   BillingPlan,
   BillingUsage,
+  ChatMessage,
   CreateTenantBody,
   DashboardSummary,
   HealthStatus,
   InstallSkillBody,
   ListSkillsParams,
+  SendChatMessageBody,
   Skill,
   SkillCategory,
   Tenant,
@@ -956,6 +959,180 @@ export const useUninstallSkillFromTenant = <
   TContext
 > => {
   return useMutation(getUninstallSkillFromTenantMutationOptions(options));
+};
+
+/**
+ * @summary Get chat history for a tenant
+ */
+export const getGetChatHistoryUrl = (id: number) => {
+  return `/api/tenants/${id}/chat`;
+};
+
+export const getChatHistory = async (
+  id: number,
+  options?: RequestInit,
+): Promise<ChatMessage[]> => {
+  return customFetch<ChatMessage[]>(getGetChatHistoryUrl(id), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetChatHistoryQueryKey = (id: number) => {
+  return [`/api/tenants/${id}/chat`] as const;
+};
+
+export const getGetChatHistoryQueryOptions = <
+  TData = Awaited<ReturnType<typeof getChatHistory>>,
+  TError = ErrorType<unknown>,
+>(
+  id: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getChatHistory>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetChatHistoryQueryKey(id);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getChatHistory>>> = ({
+    signal,
+  }) => getChatHistory(id, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getChatHistory>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetChatHistoryQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getChatHistory>>
+>;
+export type GetChatHistoryQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Get chat history for a tenant
+ */
+
+export function useGetChatHistory<
+  TData = Awaited<ReturnType<typeof getChatHistory>>,
+  TError = ErrorType<unknown>,
+>(
+  id: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getChatHistory>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetChatHistoryQueryOptions(id, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Send a chat message to the agent
+ */
+export const getSendChatMessageUrl = (id: number) => {
+  return `/api/tenants/${id}/chat`;
+};
+
+export const sendChatMessage = async (
+  id: number,
+  sendChatMessageBody: SendChatMessageBody,
+  options?: RequestInit,
+): Promise<ChatMessage> => {
+  return customFetch<ChatMessage>(getSendChatMessageUrl(id), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(sendChatMessageBody),
+  });
+};
+
+export const getSendChatMessageMutationOptions = <
+  TError = ErrorType<ApiError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof sendChatMessage>>,
+    TError,
+    { id: number; data: BodyType<SendChatMessageBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof sendChatMessage>>,
+  TError,
+  { id: number; data: BodyType<SendChatMessageBody> },
+  TContext
+> => {
+  const mutationKey = ["sendChatMessage"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof sendChatMessage>>,
+    { id: number; data: BodyType<SendChatMessageBody> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return sendChatMessage(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type SendChatMessageMutationResult = NonNullable<
+  Awaited<ReturnType<typeof sendChatMessage>>
+>;
+export type SendChatMessageMutationBody = BodyType<SendChatMessageBody>;
+export type SendChatMessageMutationError = ErrorType<ApiError>;
+
+/**
+ * @summary Send a chat message to the agent
+ */
+export const useSendChatMessage = <
+  TError = ErrorType<ApiError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof sendChatMessage>>,
+    TError,
+    { id: number; data: BodyType<SendChatMessageBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof sendChatMessage>>,
+  TError,
+  { id: number; data: BodyType<SendChatMessageBody> },
+  TContext
+> => {
+  return useMutation(getSendChatMessageMutationOptions(options));
 };
 
 /**

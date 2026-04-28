@@ -137,6 +137,31 @@ export interface BillingUsage {
   periodEnd: string;
 }
 
+export type ChatMessageRole =
+  (typeof ChatMessageRole)[keyof typeof ChatMessageRole];
+
+export const ChatMessageRole = {
+  user: "user",
+  assistant: "assistant",
+  error: "error",
+} as const;
+
+export interface ChatMessage {
+  id: number;
+  tenantId: number;
+  role: ChatMessageRole;
+  content: string;
+  createdAt: string;
+}
+
+export interface SendChatMessageBody {
+  message: string;
+}
+
+export interface ApiError {
+  error: string;
+}
+
 export type ListSkillsParams = {
   category?: string;
   search?: string;
