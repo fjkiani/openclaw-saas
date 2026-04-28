@@ -1,6 +1,8 @@
 const RENDER_API = "https://api.render.com/v1";
+const GATEWAY_IMAGE = "docker.io/cloudlookup/openclaw:latest";
+const GATEWAY_MOUNT_PATH = "/home/node/.openclaw";
 
-function headers(): Record<string, string> {
+function renderHeaders(): Record<string, string> {
   const key = process.env.RENDER_API_KEY;
   if (!key) throw new Error("RENDER_API_KEY environment variable is not set");
   return {
@@ -26,36 +28,45 @@ export async function provisionTenant(
   tenantId: string,
   token: string
 ): Promise<ProvisionResult> {
+  const owner = ownerId();
+  const anthropicKey = process.env.ANTHROPIC_API_KEY ?? "";
+  const serviceName = `openclaw-gateway-${tenantId}`;
+
+  const body = {
+    type: "private_service",
+    name: serviceName,
+    ownerId: owner,
+    image: {
+      imagePath: GATEWAY_IMAGE,
+      ownerId: owner,
+    },
+    serviceDetails: {
+      runtime: "image",
+      region: "oregon",
+      envVars: [
+        { key: "OPENCLAW_GATEWAY_TOKEN", value: token },
+        { key: "ANTHROPIC_API_KEY", value: anthropicKey },
+        { key: "NODE_ENV", value: "production" },
+      ],
+      disk: {
+        name: `tenant-${tenantId}-disk`,
+        mountPath: GATEWAY_MOUNT_PATH,
+        sizeGB: 1,
+      },
+    },
+    plan: "starter",
+  };
+
   const res = await fetch(`${RENDER_API}/services`, {
     method: "POST",
-    headers: headers(),
-    body: JSON.stringify({
-      type: "private_service",
-      name: `openclaw-gateway-${tenantId}`,
-      ownerId: ownerId(),
-      serviceDetails: {
-        runtime: "docker",
-        dockerImage: "openclaw/openclaw-gateway:latest",
-        envVars: [
-          { key: "OPENCLAW_CONFIG_DIR", value: `/tenants/${tenantId}` },
-          { key: "OPENCLAW_GATEWAY_TOKEN", value: token },
-          { key: "OPENCLAW_GATEWAY_BIND", value: "remote" },
-          { key: "OPENCLAW_GATEWAY_PORT", value: "18789" },
-        ],
-        disk: {
-          name: `tenant-${tenantId}-disk`,
-          mountPath: `/tenants/${tenantId}`,
-          sizeGB: 1,
-        },
-      },
-      plan: "starter",
-    }),
+    headers: renderHeaders(),
+    body: JSON.stringify(body),
   });
 
   if (!res.ok) {
-    const body = await res.text();
+    const text = await res.text();
     throw new Error(
-      `Render API error ${res.status} on provisionTenant: ${body}`
+      `Render API error ${res.status} on provisionTenant: ${text}`
     );
   }
 
@@ -64,7 +75,7 @@ export async function provisionTenant(
 
   return {
     serviceId,
-    wsEndpoint: `wss://openclaw-gateway-${tenantId}.onrender.com`,
+    wsEndpoint: `wss://${serviceName}.onrender.com`,
     status: "provisioning",
   };
 }
@@ -72,45 +83,45 @@ export async function provisionTenant(
 export async function startTenant(serviceId: string): Promise<void> {
   const res = await fetch(`${RENDER_API}/services/${serviceId}/resume`, {
     method: "POST",
-    headers: headers(),
+    headers: renderHeaders(),
   });
   if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`Render API error ${res.status} on startTenant: ${body}`);
+    const text = await res.text();
+    throw new Error(`Render API error ${res.status} on startTenant: ${text}`);
   }
 }
 
 export async function stopTenant(serviceId: string): Promise<void> {
   const res = await fetch(`${RENDER_API}/services/${serviceId}/suspend`, {
     method: "POST",
-    headers: headers(),
+    headers: renderHeaders(),
   });
   if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`Render API error ${res.status} on stopTenant: ${body}`);
+    const text = await res.text();
+    throw new Error(`Render API error ${res.status} on stopTenant: ${text}`);
   }
 }
 
 export async function destroyTenant(serviceId: string): Promise<void> {
   const res = await fetch(`${RENDER_API}/services/${serviceId}`, {
     method: "DELETE",
-    headers: headers(),
+    headers: renderHeaders(),
   });
   if (!res.ok && res.status !== 404) {
-    const body = await res.text();
+    const text = await res.text();
     throw new Error(
-      `Render API error ${res.status} on destroyTenant: ${body}`
+      `Render API error ${res.status} on destroyTenant: ${text}`
     );
   }
 }
 
 export async function getServiceStatus(serviceId: string): Promise<string> {
   const res = await fetch(`${RENDER_API}/services/${serviceId}`, {
-    headers: headers(),
+    headers: renderHeaders(),
   });
   if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`Render API error ${res.status} on getStatus: ${body}`);
+    const text = await res.text();
+    throw new Error(`Render API error ${res.status} on getStatus: ${text}`);
   }
   const data = (await res.json()) as {
     service: { suspended: string; state?: string };
