@@ -1,0 +1,130 @@
+The Core Architectural Principle
+Every vertical (IR, marketing, legal, HR, sales) is just a bundle of skills + a knowledge graph + a playbook. The platform itself never knows what industry it's serving. It only knows:
+
+Tenants — who owns this instance
+
+Skills — what capabilities are installed
+
+Graphs — what data is grounded to
+
+Agents — what orchestration logic runs
+
+Playbooks — what workflow is triggered
+
+A law firm and a biotech and a VC fund all run on identical infrastructure. They just have different skill bundles installed.
+
+The Infrastructure Layer Model
+text
+┌─────────────────────────────────────────────────────┐
+│                  TENANT LAYER                        │
+│   Auth · Billing · Permissions · Isolation           │
+├─────────────────────────────────────────────────────┤
+│                  AGENT RUNTIME                       │
+│   Start/Stop · Gateway Proxy · Chat · History        │
+├──────────────┬──────────────────────────────────────┤
+│  SKILL BUS   │         KNOWLEDGE GRAPH BUS           │
+│              │                                       │
+│  Skills are  │  Each graph is scoped to a tenant     │
+│  registered  │  and tagged to one or more skills     │
+│  in a        │                                       │
+│  registry    │  Graph A: Investor Profiles           │
+│              │  Graph B: Company Data Room           │
+│  IRResearch  │  Graph C: Brand Guidelines            │
+│  IROutreach  │  Graph D: Compliance Rules            │
+│  IRPitch     │  Graph N: ...                         │
+│  MktCampaign │                                       │
+│  LegalDraft  │                                       │
+│  HRScreen    │                                       │
+│  ...         │                                       │
+├──────────────┴──────────────────────────────────────┤
+│                  PLAYBOOK ENGINE                     │
+│   A playbook = ordered skill chain + graph bindings  │
+│   Tenant configures, platform executes               │
+├─────────────────────────────────────────────────────┤
+│               CONNECTOR REGISTRY                     │
+│   CRM · Email · Slack · LinkedIn · Databases · APIs  │
+│   Each skill declares which connectors it needs      │
+└─────────────────────────────────────────────────────┘
+The Skill Contract — This Is the Key
+Every skill in the registry must conform to one interface. This is what makes the platform infinitely extensible:
+
+typescript
+interface Skill {
+  id: string                    // "ir-research-v1"
+  name: string                  // "Investor Research"
+  version: string
+  category: SkillCategory       // RESEARCH | GENERATE | VALIDATE | SEND | ANALYZE
+  inputs: JSONSchema            // what it expects
+  outputs: JSONSchema           // what it returns
+  requiredConnectors: string[]  // ["crunchbase", "linkedin"]
+  requiredGraphs: string[]      // ["investor-profiles"]
+  execute: (input, ctx) => Promise<SkillOutput>
+}
+When a tenant installs a skill:
+
+Platform checks if required connectors are authorized
+
+Platform checks if required graphs exist (prompts to create if not)
+
+Skill appears in the agent's available tool palette
+
+Agent can call it from any playbook
+
+What You Build Once, Use Forever
+Infrastructure Piece	Built Once	Powers
+Skill registry + install flow	✅ Already partially there	Every vertical
+Connector auth framework (OAuth, API key vault)	Build next	CRM, email, LinkedIn, any API
+Knowledge Graph manager (create, ingest, bind to skill)	Build next	Every grounded skill
+Playbook engine (chain skills in sequence)	Build next	Every workflow
+Output store (structured results per run)	Build next	Audit trail, analytics
+Tenant config UI (bind skills → graphs → connectors)	Build next	Self-serve onboarding
+What the IR Bundle Looks Like as a First Vertical
+Once the infra is in place, the entire IR vertical is just:
+
+text
+IR Skill Bundle v1.0
+├── ir-research.skill.ts      → finds investors
+├── ir-outreach.skill.ts      → drafts emails
+├── ir-pitch.skill.ts         → answers diligence
+├── graphs/
+│   ├── investor-profiles.graph   (public data, scraped)
+│   └── data-room.graph           (tenant uploads)
+├── connectors/
+│   ├── crunchbase.connector
+│   └── gmail.connector
+└── playbooks/
+    └── full-ir-workflow.playbook
+Any other tenant installs this bundle in one click. Their data room, their investors, their emails — same infrastructure.
+
+The Build Sequence
+Phase 1 — Infra hardening (build now)
+
+Connector registry with OAuth + API key vault
+
+Knowledge Graph manager (create, ingest, bind)
+
+Skill contract interface + validation layer
+
+Phase 2 — Playbook engine
+
+Chain skills in sequence with state passing between steps
+
+Conditional branching (if compliance flag → route to human review)
+
+Run history + output store
+
+Phase 3 — Tenant self-serve
+
+Skill marketplace UI (install, configure, bind to graphs)
+
+Connector authorization flow (one-click OAuth per connector)
+
+Playbook builder (visual or JSON)
+
+Phase 4 — First vertical bundle
+
+IR bundle ships as the reference implementation
+
+Every future vertical (marketing, legal, HR) follows the same pattern
+
+The agent that just shipped the chat layer is already 40% of the way to Phase 1. The next thing to build is the Connector Registry — because every skill from here forward will need to talk to something external, and you want that auth infrastructure centralized once rather than baked into each skill.
