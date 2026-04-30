@@ -240,6 +240,155 @@ export const GetTenantActivityResponse = zod.array(
 );
 
 /**
+ * @summary List all available connector types
+ */
+export const ListConnectorRegistryResponseItem = zod.object({
+  id: zod.number(),
+  slug: zod.string(),
+  name: zod.string(),
+  description: zod.string(),
+  authType: zod.enum(["api_key", "oauth2"]),
+  credentialLabel: zod.string(),
+  category: zod.string(),
+  createdAt: zod.string(),
+});
+export const ListConnectorRegistryResponse = zod.array(
+  ListConnectorRegistryResponseItem,
+);
+
+/**
+ * @summary List connectors installed on a tenant
+ */
+export const ListTenantConnectorsParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const ListTenantConnectorsResponseItem = zod.object({
+  id: zod.number(),
+  tenantId: zod.number(),
+  connectorId: zod.number(),
+  connectorSlug: zod.string(),
+  connectorName: zod.string(),
+  verified: zod.boolean(),
+  createdAt: zod.string(),
+});
+export const ListTenantConnectorsResponse = zod.array(
+  ListTenantConnectorsResponseItem,
+);
+
+/**
+ * @summary Install a connector and store encrypted credential
+ */
+export const InstallConnectorOnTenantParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const InstallConnectorOnTenantBody = zod.object({
+  connectorId: zod.number(),
+  credential: zod.string(),
+});
+
+/**
+ * @summary Remove a connector from a tenant
+ */
+export const RemoveConnectorFromTenantParams = zod.object({
+  id: zod.coerce.number(),
+  connectorId: zod.coerce.number(),
+});
+
+/**
+ * @summary List knowledge graphs for a tenant
+ */
+export const ListKnowledgeGraphsParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const ListKnowledgeGraphsResponseItem = zod.object({
+  id: zod.number(),
+  tenantId: zod.number(),
+  name: zod.string(),
+  description: zod.string().nullish(),
+  graphType: zod.string(),
+  documentCount: zod.number(),
+  createdAt: zod.string(),
+  updatedAt: zod.string(),
+});
+export const ListKnowledgeGraphsResponse = zod.array(
+  ListKnowledgeGraphsResponseItem,
+);
+
+/**
+ * @summary Create a new knowledge graph
+ */
+export const CreateKnowledgeGraphParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const CreateKnowledgeGraphBody = zod.object({
+  name: zod.string(),
+  description: zod.string().nullish(),
+  graphType: zod.string().optional(),
+});
+
+/**
+ * @summary Delete a knowledge graph and all its documents
+ */
+export const DeleteKnowledgeGraphParams = zod.object({
+  id: zod.coerce.number(),
+  graphId: zod.coerce.number(),
+});
+
+/**
+ * @summary List documents in a knowledge graph
+ */
+export const ListGraphDocumentsParams = zod.object({
+  id: zod.coerce.number(),
+  graphId: zod.coerce.number(),
+});
+
+export const ListGraphDocumentsResponseItem = zod.object({
+  id: zod.number(),
+  graphId: zod.number(),
+  filename: zod.string(),
+  mimeType: zod.string(),
+  sizeBytes: zod.number(),
+  status: zod.enum(["processing", "ready", "error"]),
+  chunkCount: zod.number(),
+  errorMessage: zod.string().nullish(),
+  createdAt: zod.string(),
+  updatedAt: zod.string(),
+});
+export const ListGraphDocumentsResponse = zod.array(
+  ListGraphDocumentsResponseItem,
+);
+
+/**
+ * @summary Full-text search against a knowledge graph
+ */
+export const QueryKnowledgeGraphParams = zod.object({
+  id: zod.coerce.number(),
+  graphId: zod.coerce.number(),
+});
+
+export const QueryKnowledgeGraphBody = zod.object({
+  query: zod.string(),
+  limit: zod.number().optional(),
+});
+
+export const QueryKnowledgeGraphResponse = zod.object({
+  chunks: zod.array(
+    zod.object({
+      id: zod.number(),
+      documentId: zod.number(),
+      chunkIndex: zod.number(),
+      content: zod.string(),
+      rank: zod.number(),
+    }),
+  ),
+  totalFound: zod.number(),
+});
+
+/**
  * @summary Browse skill catalog
  */
 export const ListSkillsQueryParams = zod.object({

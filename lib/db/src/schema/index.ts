@@ -3,3 +3,8 @@ export * from "./skills";
 export * from "./tenantSkills";
 export * from "./activityEntries";
 export * from "./chatMessages";
+export * from "./connectors";
+export * from "./tenantConnectors";
+export * from "./knowledgeGraphs";
+export * from "./graphDocuments";
+export * from "./graphChunks";

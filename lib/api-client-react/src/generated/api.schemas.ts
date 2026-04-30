@@ -162,6 +162,100 @@ export interface ApiError {
   error: string;
 }
 
+export type ConnectorDefAuthType =
+  (typeof ConnectorDefAuthType)[keyof typeof ConnectorDefAuthType];
+
+export const ConnectorDefAuthType = {
+  api_key: "api_key",
+  oauth2: "oauth2",
+} as const;
+
+export interface ConnectorDef {
+  id: number;
+  slug: string;
+  name: string;
+  description: string;
+  authType: ConnectorDefAuthType;
+  credentialLabel: string;
+  category: string;
+  createdAt: string;
+}
+
+export interface TenantConnector {
+  id: number;
+  tenantId: number;
+  connectorId: number;
+  connectorSlug: string;
+  connectorName: string;
+  verified: boolean;
+  createdAt: string;
+}
+
+export interface InstallConnectorBody {
+  connectorId: number;
+  credential: string;
+}
+
+export interface KnowledgeGraph {
+  id: number;
+  tenantId: number;
+  name: string;
+  /** @nullable */
+  description?: string | null;
+  graphType: string;
+  documentCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateKnowledgeGraphBody {
+  name: string;
+  /** @nullable */
+  description?: string | null;
+  graphType?: string;
+}
+
+export type GraphDocumentStatus =
+  (typeof GraphDocumentStatus)[keyof typeof GraphDocumentStatus];
+
+export const GraphDocumentStatus = {
+  processing: "processing",
+  ready: "ready",
+  error: "error",
+} as const;
+
+export interface GraphDocument {
+  id: number;
+  graphId: number;
+  filename: string;
+  mimeType: string;
+  sizeBytes: number;
+  status: GraphDocumentStatus;
+  chunkCount: number;
+  /** @nullable */
+  errorMessage?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GraphQueryBody {
+  query: string;
+  limit?: number;
+}
+
+export interface GraphChunk {
+  id: number;
+  documentId: number;
+  chunkIndex: number;
+  content: string;
+  rank: number;
+}
+
+export interface GraphQueryResult {
+  chunks: GraphChunk[];
+  totalFound: number;
+}
+
 export type ListSkillsParams = {
   category?: string;
   search?: string;

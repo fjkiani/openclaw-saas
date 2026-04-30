@@ -17,6 +17,8 @@ import {
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Layout, PageHeader, StatusBadge, ActivityIcon } from "@/components/Layout";
+import ConnectorsTab from "@/components/ConnectorsTab";
+import KnowledgeTab from "@/components/KnowledgeTab";
 import { useToast } from "@/hooks/use-toast";
 import {
   Play,
@@ -31,7 +33,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 
-type Tab = "overview" | "skills" | "chat";
+type Tab = "overview" | "skills" | "chat" | "connectors" | "knowledge";
 
 function AddSkillModal({ tenantId, onClose }: { tenantId: number; onClose: () => void }) {
   const [search, setSearch] = useState("");
@@ -302,6 +304,8 @@ export default function AgentDetailPage() {
     { id: "overview", label: "Overview" },
     { id: "skills", label: `Skills (${skills?.length ?? 0})` },
     { id: "chat", label: "Chat" },
+    { id: "connectors", label: "Connectors" },
+    { id: "knowledge", label: "Knowledge" },
   ];
 
   return (
@@ -489,6 +493,16 @@ export default function AgentDetailPage() {
         {/* Chat */}
         {activeTab === "chat" && (
           <ChatPanel tenantId={tenantId} isRunning={isRunning} />
+        )}
+
+        {/* Connectors */}
+        {activeTab === "connectors" && (
+          <ConnectorsTab tenantId={tenantId} />
+        )}
+
+        {/* Knowledge */}
+        {activeTab === "knowledge" && (
+          <KnowledgeTab tenantId={tenantId} />
         )}
       </div>
 

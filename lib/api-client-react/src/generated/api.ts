@@ -22,15 +22,23 @@ import type {
   BillingPlan,
   BillingUsage,
   ChatMessage,
+  ConnectorDef,
+  CreateKnowledgeGraphBody,
   CreateTenantBody,
   DashboardSummary,
+  GraphDocument,
+  GraphQueryBody,
+  GraphQueryResult,
   HealthStatus,
+  InstallConnectorBody,
   InstallSkillBody,
+  KnowledgeGraph,
   ListSkillsParams,
   SendChatMessageBody,
   Skill,
   SkillCategory,
   Tenant,
+  TenantConnector,
   TenantSkill,
   UpdateTenantBody,
 } from "./api.schemas";
@@ -1221,6 +1229,785 @@ export function useGetTenantActivity<
 
   return { ...query, queryKey: queryOptions.queryKey };
 }
+
+/**
+ * @summary List all available connector types
+ */
+export const getListConnectorRegistryUrl = () => {
+  return `/api/connectors`;
+};
+
+export const listConnectorRegistry = async (
+  options?: RequestInit,
+): Promise<ConnectorDef[]> => {
+  return customFetch<ConnectorDef[]>(getListConnectorRegistryUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListConnectorRegistryQueryKey = () => {
+  return [`/api/connectors`] as const;
+};
+
+export const getListConnectorRegistryQueryOptions = <
+  TData = Awaited<ReturnType<typeof listConnectorRegistry>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listConnectorRegistry>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListConnectorRegistryQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listConnectorRegistry>>
+  > = ({ signal }) => listConnectorRegistry({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listConnectorRegistry>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListConnectorRegistryQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listConnectorRegistry>>
+>;
+export type ListConnectorRegistryQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List all available connector types
+ */
+
+export function useListConnectorRegistry<
+  TData = Awaited<ReturnType<typeof listConnectorRegistry>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listConnectorRegistry>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListConnectorRegistryQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary List connectors installed on a tenant
+ */
+export const getListTenantConnectorsUrl = (id: number) => {
+  return `/api/tenants/${id}/connectors`;
+};
+
+export const listTenantConnectors = async (
+  id: number,
+  options?: RequestInit,
+): Promise<TenantConnector[]> => {
+  return customFetch<TenantConnector[]>(getListTenantConnectorsUrl(id), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListTenantConnectorsQueryKey = (id: number) => {
+  return [`/api/tenants/${id}/connectors`] as const;
+};
+
+export const getListTenantConnectorsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listTenantConnectors>>,
+  TError = ErrorType<unknown>,
+>(
+  id: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listTenantConnectors>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListTenantConnectorsQueryKey(id);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listTenantConnectors>>
+  > = ({ signal }) => listTenantConnectors(id, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof listTenantConnectors>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListTenantConnectorsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listTenantConnectors>>
+>;
+export type ListTenantConnectorsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List connectors installed on a tenant
+ */
+
+export function useListTenantConnectors<
+  TData = Awaited<ReturnType<typeof listTenantConnectors>>,
+  TError = ErrorType<unknown>,
+>(
+  id: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listTenantConnectors>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListTenantConnectorsQueryOptions(id, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Install a connector and store encrypted credential
+ */
+export const getInstallConnectorOnTenantUrl = (id: number) => {
+  return `/api/tenants/${id}/connectors`;
+};
+
+export const installConnectorOnTenant = async (
+  id: number,
+  installConnectorBody: InstallConnectorBody,
+  options?: RequestInit,
+): Promise<TenantConnector> => {
+  return customFetch<TenantConnector>(getInstallConnectorOnTenantUrl(id), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(installConnectorBody),
+  });
+};
+
+export const getInstallConnectorOnTenantMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof installConnectorOnTenant>>,
+    TError,
+    { id: number; data: BodyType<InstallConnectorBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof installConnectorOnTenant>>,
+  TError,
+  { id: number; data: BodyType<InstallConnectorBody> },
+  TContext
+> => {
+  const mutationKey = ["installConnectorOnTenant"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof installConnectorOnTenant>>,
+    { id: number; data: BodyType<InstallConnectorBody> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return installConnectorOnTenant(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type InstallConnectorOnTenantMutationResult = NonNullable<
+  Awaited<ReturnType<typeof installConnectorOnTenant>>
+>;
+export type InstallConnectorOnTenantMutationBody =
+  BodyType<InstallConnectorBody>;
+export type InstallConnectorOnTenantMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Install a connector and store encrypted credential
+ */
+export const useInstallConnectorOnTenant = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof installConnectorOnTenant>>,
+    TError,
+    { id: number; data: BodyType<InstallConnectorBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof installConnectorOnTenant>>,
+  TError,
+  { id: number; data: BodyType<InstallConnectorBody> },
+  TContext
+> => {
+  return useMutation(getInstallConnectorOnTenantMutationOptions(options));
+};
+
+/**
+ * @summary Remove a connector from a tenant
+ */
+export const getRemoveConnectorFromTenantUrl = (
+  id: number,
+  connectorId: number,
+) => {
+  return `/api/tenants/${id}/connectors/${connectorId}`;
+};
+
+export const removeConnectorFromTenant = async (
+  id: number,
+  connectorId: number,
+  options?: RequestInit,
+): Promise<void> => {
+  return customFetch<void>(getRemoveConnectorFromTenantUrl(id, connectorId), {
+    ...options,
+    method: "DELETE",
+  });
+};
+
+export const getRemoveConnectorFromTenantMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof removeConnectorFromTenant>>,
+    TError,
+    { id: number; connectorId: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof removeConnectorFromTenant>>,
+  TError,
+  { id: number; connectorId: number },
+  TContext
+> => {
+  const mutationKey = ["removeConnectorFromTenant"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof removeConnectorFromTenant>>,
+    { id: number; connectorId: number }
+  > = (props) => {
+    const { id, connectorId } = props ?? {};
+
+    return removeConnectorFromTenant(id, connectorId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RemoveConnectorFromTenantMutationResult = NonNullable<
+  Awaited<ReturnType<typeof removeConnectorFromTenant>>
+>;
+
+export type RemoveConnectorFromTenantMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Remove a connector from a tenant
+ */
+export const useRemoveConnectorFromTenant = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof removeConnectorFromTenant>>,
+    TError,
+    { id: number; connectorId: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof removeConnectorFromTenant>>,
+  TError,
+  { id: number; connectorId: number },
+  TContext
+> => {
+  return useMutation(getRemoveConnectorFromTenantMutationOptions(options));
+};
+
+/**
+ * @summary List knowledge graphs for a tenant
+ */
+export const getListKnowledgeGraphsUrl = (id: number) => {
+  return `/api/tenants/${id}/graphs`;
+};
+
+export const listKnowledgeGraphs = async (
+  id: number,
+  options?: RequestInit,
+): Promise<KnowledgeGraph[]> => {
+  return customFetch<KnowledgeGraph[]>(getListKnowledgeGraphsUrl(id), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListKnowledgeGraphsQueryKey = (id: number) => {
+  return [`/api/tenants/${id}/graphs`] as const;
+};
+
+export const getListKnowledgeGraphsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listKnowledgeGraphs>>,
+  TError = ErrorType<unknown>,
+>(
+  id: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listKnowledgeGraphs>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListKnowledgeGraphsQueryKey(id);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listKnowledgeGraphs>>
+  > = ({ signal }) => listKnowledgeGraphs(id, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof listKnowledgeGraphs>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListKnowledgeGraphsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listKnowledgeGraphs>>
+>;
+export type ListKnowledgeGraphsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List knowledge graphs for a tenant
+ */
+
+export function useListKnowledgeGraphs<
+  TData = Awaited<ReturnType<typeof listKnowledgeGraphs>>,
+  TError = ErrorType<unknown>,
+>(
+  id: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listKnowledgeGraphs>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListKnowledgeGraphsQueryOptions(id, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Create a new knowledge graph
+ */
+export const getCreateKnowledgeGraphUrl = (id: number) => {
+  return `/api/tenants/${id}/graphs`;
+};
+
+export const createKnowledgeGraph = async (
+  id: number,
+  createKnowledgeGraphBody: CreateKnowledgeGraphBody,
+  options?: RequestInit,
+): Promise<KnowledgeGraph> => {
+  return customFetch<KnowledgeGraph>(getCreateKnowledgeGraphUrl(id), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(createKnowledgeGraphBody),
+  });
+};
+
+export const getCreateKnowledgeGraphMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createKnowledgeGraph>>,
+    TError,
+    { id: number; data: BodyType<CreateKnowledgeGraphBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createKnowledgeGraph>>,
+  TError,
+  { id: number; data: BodyType<CreateKnowledgeGraphBody> },
+  TContext
+> => {
+  const mutationKey = ["createKnowledgeGraph"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createKnowledgeGraph>>,
+    { id: number; data: BodyType<CreateKnowledgeGraphBody> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return createKnowledgeGraph(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateKnowledgeGraphMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createKnowledgeGraph>>
+>;
+export type CreateKnowledgeGraphMutationBody =
+  BodyType<CreateKnowledgeGraphBody>;
+export type CreateKnowledgeGraphMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Create a new knowledge graph
+ */
+export const useCreateKnowledgeGraph = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createKnowledgeGraph>>,
+    TError,
+    { id: number; data: BodyType<CreateKnowledgeGraphBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createKnowledgeGraph>>,
+  TError,
+  { id: number; data: BodyType<CreateKnowledgeGraphBody> },
+  TContext
+> => {
+  return useMutation(getCreateKnowledgeGraphMutationOptions(options));
+};
+
+/**
+ * @summary Delete a knowledge graph and all its documents
+ */
+export const getDeleteKnowledgeGraphUrl = (id: number, graphId: number) => {
+  return `/api/tenants/${id}/graphs/${graphId}`;
+};
+
+export const deleteKnowledgeGraph = async (
+  id: number,
+  graphId: number,
+  options?: RequestInit,
+): Promise<void> => {
+  return customFetch<void>(getDeleteKnowledgeGraphUrl(id, graphId), {
+    ...options,
+    method: "DELETE",
+  });
+};
+
+export const getDeleteKnowledgeGraphMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteKnowledgeGraph>>,
+    TError,
+    { id: number; graphId: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof deleteKnowledgeGraph>>,
+  TError,
+  { id: number; graphId: number },
+  TContext
+> => {
+  const mutationKey = ["deleteKnowledgeGraph"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof deleteKnowledgeGraph>>,
+    { id: number; graphId: number }
+  > = (props) => {
+    const { id, graphId } = props ?? {};
+
+    return deleteKnowledgeGraph(id, graphId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DeleteKnowledgeGraphMutationResult = NonNullable<
+  Awaited<ReturnType<typeof deleteKnowledgeGraph>>
+>;
+
+export type DeleteKnowledgeGraphMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Delete a knowledge graph and all its documents
+ */
+export const useDeleteKnowledgeGraph = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteKnowledgeGraph>>,
+    TError,
+    { id: number; graphId: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof deleteKnowledgeGraph>>,
+  TError,
+  { id: number; graphId: number },
+  TContext
+> => {
+  return useMutation(getDeleteKnowledgeGraphMutationOptions(options));
+};
+
+/**
+ * @summary List documents in a knowledge graph
+ */
+export const getListGraphDocumentsUrl = (id: number, graphId: number) => {
+  return `/api/tenants/${id}/graphs/${graphId}/documents`;
+};
+
+export const listGraphDocuments = async (
+  id: number,
+  graphId: number,
+  options?: RequestInit,
+): Promise<GraphDocument[]> => {
+  return customFetch<GraphDocument[]>(getListGraphDocumentsUrl(id, graphId), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListGraphDocumentsQueryKey = (id: number, graphId: number) => {
+  return [`/api/tenants/${id}/graphs/${graphId}/documents`] as const;
+};
+
+export const getListGraphDocumentsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listGraphDocuments>>,
+  TError = ErrorType<unknown>,
+>(
+  id: number,
+  graphId: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listGraphDocuments>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListGraphDocumentsQueryKey(id, graphId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listGraphDocuments>>
+  > = ({ signal }) =>
+    listGraphDocuments(id, graphId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!(id && graphId),
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof listGraphDocuments>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListGraphDocumentsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listGraphDocuments>>
+>;
+export type ListGraphDocumentsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List documents in a knowledge graph
+ */
+
+export function useListGraphDocuments<
+  TData = Awaited<ReturnType<typeof listGraphDocuments>>,
+  TError = ErrorType<unknown>,
+>(
+  id: number,
+  graphId: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listGraphDocuments>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListGraphDocumentsQueryOptions(id, graphId, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Full-text search against a knowledge graph
+ */
+export const getQueryKnowledgeGraphUrl = (id: number, graphId: number) => {
+  return `/api/tenants/${id}/graphs/${graphId}/query`;
+};
+
+export const queryKnowledgeGraph = async (
+  id: number,
+  graphId: number,
+  graphQueryBody: GraphQueryBody,
+  options?: RequestInit,
+): Promise<GraphQueryResult> => {
+  return customFetch<GraphQueryResult>(getQueryKnowledgeGraphUrl(id, graphId), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(graphQueryBody),
+  });
+};
+
+export const getQueryKnowledgeGraphMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof queryKnowledgeGraph>>,
+    TError,
+    { id: number; graphId: number; data: BodyType<GraphQueryBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof queryKnowledgeGraph>>,
+  TError,
+  { id: number; graphId: number; data: BodyType<GraphQueryBody> },
+  TContext
+> => {
+  const mutationKey = ["queryKnowledgeGraph"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof queryKnowledgeGraph>>,
+    { id: number; graphId: number; data: BodyType<GraphQueryBody> }
+  > = (props) => {
+    const { id, graphId, data } = props ?? {};
+
+    return queryKnowledgeGraph(id, graphId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type QueryKnowledgeGraphMutationResult = NonNullable<
+  Awaited<ReturnType<typeof queryKnowledgeGraph>>
+>;
+export type QueryKnowledgeGraphMutationBody = BodyType<GraphQueryBody>;
+export type QueryKnowledgeGraphMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Full-text search against a knowledge graph
+ */
+export const useQueryKnowledgeGraph = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof queryKnowledgeGraph>>,
+    TError,
+    { id: number; graphId: number; data: BodyType<GraphQueryBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof queryKnowledgeGraph>>,
+  TError,
+  { id: number; graphId: number; data: BodyType<GraphQueryBody> },
+  TContext
+> => {
+  return useMutation(getQueryKnowledgeGraphMutationOptions(options));
+};
 
 /**
  * @summary Browse skill catalog

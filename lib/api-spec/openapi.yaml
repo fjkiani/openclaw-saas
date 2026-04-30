@@ -18,6 +18,10 @@ tags:
     description: Dashboard summaries and activity
   - name: billing
     description: Billing and plan management
+  - name: connectors
+    description: Connector registry and per-tenant connector management
+  - name: graphs
+    description: Knowledge graph management and document ingestion
 paths:
   /healthz:
     get:
@@ -293,6 +297,205 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/ActivityEntry"
+
+  /connectors:
+    get:
+      operationId: listConnectorRegistry
+      tags: [connectors]
+      summary: List all available connector types
+      responses:
+        "200":
+          description: Available connectors
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ConnectorDef"
+
+  /tenants/{id}/connectors:
+    get:
+      operationId: listTenantConnectors
+      tags: [connectors]
+      summary: List connectors installed on a tenant
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Installed connectors
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TenantConnector"
+    post:
+      operationId: installConnectorOnTenant
+      tags: [connectors]
+      summary: Install a connector and store encrypted credential
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InstallConnectorBody"
+      responses:
+        "201":
+          description: Connector installed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantConnector"
+
+  /tenants/{id}/connectors/{connectorId}:
+    delete:
+      operationId: removeConnectorFromTenant
+      tags: [connectors]
+      summary: Remove a connector from a tenant
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: connectorId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Removed
+
+  /tenants/{id}/graphs:
+    get:
+      operationId: listKnowledgeGraphs
+      tags: [graphs]
+      summary: List knowledge graphs for a tenant
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Knowledge graphs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/KnowledgeGraph"
+    post:
+      operationId: createKnowledgeGraph
+      tags: [graphs]
+      summary: Create a new knowledge graph
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateKnowledgeGraphBody"
+      responses:
+        "201":
+          description: Graph created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KnowledgeGraph"
+
+  /tenants/{id}/graphs/{graphId}:
+    delete:
+      operationId: deleteKnowledgeGraph
+      tags: [graphs]
+      summary: Delete a knowledge graph and all its documents
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: graphId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /tenants/{id}/graphs/{graphId}/documents:
+    get:
+      operationId: listGraphDocuments
+      tags: [graphs]
+      summary: List documents in a knowledge graph
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: graphId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Documents
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/GraphDocument"
+
+  /tenants/{id}/graphs/{graphId}/query:
+    post:
+      operationId: queryKnowledgeGraph
+      tags: [graphs]
+      summary: Full-text search against a knowledge graph
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: graphId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GraphQueryBody"
+      responses:
+        "200":
+          description: Search results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GraphQueryResult"
 
   /skills:
     get:
@@ -604,3 +807,146 @@ components:
         error:
           type: string
       required: [error]
+
+    ConnectorDef:
+      type: object
+      properties:
+        id:
+          type: integer
+        slug:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        authType:
+          type: string
+          enum: [api_key, oauth2]
+        credentialLabel:
+          type: string
+        category:
+          type: string
+        createdAt:
+          type: string
+      required: [id, slug, name, description, authType, credentialLabel, category, createdAt]
+
+    TenantConnector:
+      type: object
+      properties:
+        id:
+          type: integer
+        tenantId:
+          type: integer
+        connectorId:
+          type: integer
+        connectorSlug:
+          type: string
+        connectorName:
+          type: string
+        verified:
+          type: boolean
+        createdAt:
+          type: string
+      required: [id, tenantId, connectorId, connectorSlug, connectorName, verified, createdAt]
+
+    InstallConnectorBody:
+      type: object
+      properties:
+        connectorId:
+          type: integer
+        credential:
+          type: string
+      required: [connectorId, credential]
+
+    KnowledgeGraph:
+      type: object
+      properties:
+        id:
+          type: integer
+        tenantId:
+          type: integer
+        name:
+          type: string
+        description:
+          type: ["string", "null"]
+        graphType:
+          type: string
+        documentCount:
+          type: integer
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+      required: [id, tenantId, name, graphType, documentCount, createdAt, updatedAt]
+
+    CreateKnowledgeGraphBody:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: ["string", "null"]
+        graphType:
+          type: string
+      required: [name]
+
+    GraphDocument:
+      type: object
+      properties:
+        id:
+          type: integer
+        graphId:
+          type: integer
+        filename:
+          type: string
+        mimeType:
+          type: string
+        sizeBytes:
+          type: integer
+        status:
+          type: string
+          enum: [processing, ready, error]
+        chunkCount:
+          type: integer
+        errorMessage:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+      required: [id, graphId, filename, mimeType, sizeBytes, status, chunkCount, createdAt, updatedAt]
+
+    GraphQueryBody:
+      type: object
+      properties:
+        query:
+          type: string
+        limit:
+          type: integer
+      required: [query]
+
+    GraphQueryResult:
+      type: object
+      properties:
+        chunks:
+          type: array
+          items:
+            $ref: "#/components/schemas/GraphChunk"
+        totalFound:
+          type: integer
+      required: [chunks, totalFound]
+
+    GraphChunk:
+      type: object
+      properties:
+        id:
+          type: integer
+        documentId:
+          type: integer
+        chunkIndex:
+          type: integer
+        content:
+          type: string
+        rank:
+          type: number
+      required: [id, documentId, chunkIndex, content, rank]
