@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Layout, PageHeader } from "@/components/Layout";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -6,9 +6,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Zap, AlertTriangle, CheckCircle, Clock } from "lucide-react";
+import { Loader2, Zap, AlertTriangle, CheckCircle, Clock, Hammer, PenLine } from "lucide-react";
 import * as zoaClient from "@/lib/zoaClient";
-import type { ZoaEvent } from "@/lib/zoaClient";
+import type { ZoaEvent, FactoryRun, WritingRun, WritingTone, WritingPlatform } from "@/lib/zoaClient";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -955,6 +955,643 @@ function EventFeed({ events }: { events: ZoaEvent[] }) {
 // Need Activity icon
 import { Activity } from "lucide-react";
 
+// ─── Skill Factory Tab ────────────────────────────────────────────────────────
+
+const FORGE_STAGE_LABELS: Record<string, string> = {
+  pending: "Queued",
+  generating: "Generating skill code…",
+  validating: "L0 TypeScript validation…",
+  fixing: "Auto-fixing errors…",
+  benchmarking: "Running L1–L4 benchmarks…",
+  cataloging: "Cataloging to OpenClaw…",
+  completed: "Skill certified",
+  failed: "Pipeline failed",
+};
+
+function ForgeStatusBar({ run }: { run: FactoryRun }) {
+  const stages: FactoryRun["status"][] = [
+    "generating",
+    "validating",
+    "benchmarking",
+    "cataloging",
+    "completed",
+  ];
+  const idx = stages.indexOf(run.status);
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between text-[10px] font-mono">
+        <span className="text-zinc-400">{FORGE_STAGE_LABELS[run.stage] ?? run.stage}</span>
+        {run.benchmarkResult && (
+          <GradeBadge grade={run.benchmarkResult.grade as BenchmarkGrade} />
+        )}
+      </div>
+      <div className="flex gap-1">
+        {stages.map((s, i) => (
+          <div
+            key={s}
+            className={`h-1 flex-1 rounded-full transition-all duration-500 ${
+              run.status === "failed"
+                ? i <= idx
+                  ? "bg-red-500"
+                  : "bg-zinc-800"
+                : i < idx
+                ? "bg-emerald-500"
+                : i === idx
+                ? "bg-primary animate-pulse"
+                : "bg-zinc-800"
+            }`}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SkillFactoryTab() {
+  const [description, setDescription] = useState("");
+  const [runs, setRuns] = useState<FactoryRun[]>([]);
+  const [activeRunId, setActiveRunId] = useState<string | null>(null);
+  const [forging, setForging] = useState(false);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const { toast } = useToast();
+
+  // Load recent runs on mount
+  useEffect(() => {
+    zoaClient.listForgeRuns().then(setRuns).catch(() => {});
+  }, []);
+
+  // Poll active run
+  useEffect(() => {
+    if (!activeRunId) return;
+    pollRef.current = setInterval(async () => {
+      try {
+        const run = await zoaClient.getForgeStatus(activeRunId);
+        setRuns((prev) => {
+          const idx = prev.findIndex((r) => r.runId === run.runId);
+          if (idx === -1) return [run, ...prev];
+          const next = [...prev];
+          next[idx] = run;
+          return next;
+        });
+        if (run.status === "completed" || run.status === "failed") {
+          clearInterval(pollRef.current!);
+          setActiveRunId(null);
+          setForging(false);
+          toast({
+            title: run.status === "completed" ? "Skill forged!" : "Forge failed",
+            description:
+              run.status === "completed"
+                ? `${run.skill?.name ?? "Skill"} — ${run.benchmarkResult?.grade ?? "benchmarked"}`
+                : run.error ?? "Pipeline error",
+            variant: run.status === "completed" ? "default" : "destructive",
+          });
+        }
+      } catch {
+        // backend may be starting up
+      }
+    }, 2000);
+    return () => clearInterval(pollRef.current!);
+  }, [activeRunId, toast]);
+
+  const handleForge = async () => {
+    if (!description.trim()) return;
+    setForging(true);
+    try {
+      const { runId } = await zoaClient.forgeSkill(description.trim());
+      setActiveRunId(runId);
+      setRuns((prev) => [
+        {
+          runId,
+          description: description.trim(),
+          status: "pending",
+          stage: "pending",
+          retryCount: 0,
+          createdAt: Date.now(),
+        },
+        ...prev,
+      ]);
+      setDescription("");
+      toast({ title: "Forge started", description: `Run ${runId.slice(0, 8)}…` });
+    } catch (err) {
+      setForging(false);
+      toast({
+        title: "Failed to start forge",
+        description: err instanceof Error ? err.message : String(err),
+        variant: "destructive",
+      });
+    }
+  };
+
+  const activeRun = runs.find((r) => r.runId === activeRunId) ?? runs[0] ?? null;
+
+  return (
+    <div className="space-y-5">
+      <div>
+        <h3 className="text-sm font-semibold text-foreground mb-1 flex items-center gap-2">
+          <Hammer className="w-4 h-4 text-primary" />
+          Zeta Skill Forge
+        </h3>
+        <p className="text-[11px] text-muted-foreground mb-3">
+          Describe a skill in plain English. The pipeline generates TypeScript, runs L0 syntax
+          validation, benchmarks L1–L4, and catalogs certified skills automatically.
+        </p>
+        <div className="flex gap-2">
+          <Textarea
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="e.g. A skill that extracts invoice line items from unstructured text and returns structured JSON with amount, description, and tax fields"
+            className="font-mono text-xs min-h-[80px] resize-none"
+            disabled={forging}
+          />
+        </div>
+        <Button
+          onClick={handleForge}
+          disabled={forging || !description.trim()}
+          className="mt-2 text-xs font-mono"
+          size="sm"
+        >
+          {forging ? (
+            <>
+              <Loader2 className="w-3 h-3 mr-1.5 animate-spin" />
+              Forging…
+            </>
+          ) : (
+            <>
+              <Zap className="w-3 h-3 mr-1.5" />
+              Forge Skill
+            </>
+          )}
+        </Button>
+      </div>
+
+      {activeRun && (
+        <div className="border border-border rounded-lg p-4 space-y-3 bg-card/50">
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <p className="text-[11px] font-mono text-muted-foreground">
+                Run {activeRun.runId.slice(0, 8)}
+              </p>
+              <p className="text-xs text-foreground mt-0.5 line-clamp-2">
+                {activeRun.description}
+              </p>
+            </div>
+            <span
+              className={`text-[9px] font-mono px-1.5 py-0.5 rounded border ${
+                activeRun.status === "completed"
+                  ? "text-emerald-400 border-emerald-500/30 bg-emerald-500/10"
+                  : activeRun.status === "failed"
+                  ? "text-red-400 border-red-500/30 bg-red-500/10"
+                  : "text-primary border-primary/30 bg-primary/10"
+              }`}
+            >
+              {activeRun.status.toUpperCase()}
+            </span>
+          </div>
+          <ForgeStatusBar run={activeRun} />
+          {activeRun.skill && (
+            <div className="bg-zinc-900/60 rounded p-3 space-y-1">
+              <p className="text-[10px] font-mono text-primary font-bold">
+                {activeRun.skill.name}
+              </p>
+              <p className="text-[10px] text-muted-foreground">{activeRun.skill.description}</p>
+              <p className="text-[9px] font-mono text-zinc-500">
+                Category: {activeRun.skill.category}
+              </p>
+            </div>
+          )}
+          {activeRun.l0Result && !activeRun.l0Result.l0_pass && (
+            <div className="text-[10px] font-mono text-amber-400 bg-amber-500/5 border border-amber-500/20 rounded p-2">
+              L0 error: {activeRun.l0Result.error}
+            </div>
+          )}
+          {activeRun.error && (
+            <div className="text-[10px] font-mono text-red-400 bg-red-500/5 border border-red-500/20 rounded p-2">
+              {activeRun.error}
+            </div>
+          )}
+        </div>
+      )}
+
+      {runs.length > 1 && (
+        <div>
+          <p className="text-[10px] font-mono text-muted-foreground mb-2">Recent runs</p>
+          <div className="space-y-1.5">
+            {runs.slice(1, 6).map((run) => (
+              <div
+                key={run.runId}
+                className="flex items-center justify-between text-[10px] font-mono border border-border/50 rounded px-3 py-1.5 bg-card/30"
+              >
+                <span className="text-zinc-400 truncate max-w-[60%]">
+                  {run.description.slice(0, 60)}…
+                </span>
+                <div className="flex items-center gap-2 shrink-0">
+                  {run.benchmarkResult && (
+                    <GradeBadge grade={run.benchmarkResult.grade as BenchmarkGrade} />
+                  )}
+                  <span
+                    className={`${
+                      run.status === "completed"
+                        ? "text-emerald-400"
+                        : run.status === "failed"
+                        ? "text-red-400"
+                        : "text-primary"
+                    }`}
+                  >
+                    {run.status}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── ZOA-W Writing Tab ────────────────────────────────────────────────────────
+
+const WRITING_STAGE_LABELS: Record<string, string> = {
+  pending: "Queued",
+  running: "Pipeline running…",
+  outline: "Outlining…",
+  draft: "Drafting…",
+  critique: "Critiquing…",
+  refine: "Refining…",
+  publish: "Publishing…",
+  completed: "Published",
+  failed: "Pipeline failed",
+};
+
+const TONE_OPTIONS: { value: WritingTone; label: string; desc: string }[] = [
+  { value: "zeta_warlord", label: "Zeta Warlord", desc: "Aggressive, commanding, zero fluff" },
+  { value: "professional", label: "Professional", desc: "Polished, authoritative" },
+  { value: "technical", label: "Technical", desc: "Precise, data-driven" },
+  { value: "satirical", label: "Satirical", desc: "Sharp wit, industry critique" },
+];
+
+const PLATFORM_OPTIONS: { value: WritingPlatform; label: string }[] = [
+  { value: "medium", label: "Medium" },
+  { value: "linkedin", label: "LinkedIn" },
+  { value: "blog", label: "Blog" },
+  { value: "cold_email", label: "Cold Email" },
+];
+
+function WritingScoreBar({ score }: { score: number }) {
+  const pct = Math.round((score / 10) * 100);
+  const color =
+    score >= 8 ? "bg-emerald-500" : score >= 6 ? "bg-amber-500" : "bg-red-500";
+  return (
+    <div className="flex items-center gap-2">
+      <div className="flex-1 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+        <div
+          className={`h-full rounded-full transition-all duration-700 ${color}`}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      <span className="text-[10px] font-mono text-zinc-400 w-8 text-right">{score}/10</span>
+    </div>
+  );
+}
+
+function WritingTab() {
+  const [topic, setTopic] = useState("");
+  const [tone, setTone] = useState<WritingTone>("zeta_warlord");
+  const [platform, setPlatform] = useState<WritingPlatform>("linkedin");
+  const [maxLoops, setMaxLoops] = useState(3);
+  const [run, setRun] = useState<WritingRun | null>(null);
+  const [running, setRunning] = useState(false);
+  const [activeTab, setActiveTab] = useState<"pipeline" | "critique" | "output">("pipeline");
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const { toast } = useToast();
+
+  const stopPoll = () => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  };
+
+  const handleRun = async () => {
+    if (!topic.trim()) return;
+    setRunning(true);
+    setRun(null);
+    try {
+      const { run_id } = await zoaClient.runWritingPipeline(topic.trim(), tone, platform, maxLoops);
+      toast({ title: "Writing pipeline started", description: `Run ${run_id.slice(0, 8)}…` });
+      pollRef.current = setInterval(async () => {
+        try {
+          const updated = await zoaClient.getWritingStatus(run_id);
+          setRun(updated);
+          if (updated.status === "completed" || updated.status === "failed") {
+            stopPoll();
+            setRunning(false);
+            if (updated.status === "completed") {
+              setActiveTab("output");
+              toast({
+                title: "Writing complete!",
+                description: `Score: ${updated.final_score ?? "?"}/10 — ${updated.loops_taken ?? 0} refinement loop(s)`,
+              });
+            } else {
+              toast({ title: "Pipeline failed", description: updated.error, variant: "destructive" });
+            }
+          }
+        } catch {
+          // backend may be starting
+        }
+      }, 3000);
+    } catch (err) {
+      setRunning(false);
+      toast({
+        title: "Failed to start pipeline",
+        description: err instanceof Error ? err.message : String(err),
+        variant: "destructive",
+      });
+    }
+  };
+
+  useEffect(() => () => stopPoll(), []);
+
+  const stageOrder = ["outline", "draft", "critique", "refine", "publish"];
+  const currentStageIdx = run ? stageOrder.indexOf(run.stage) : -1;
+
+  return (
+    <div className="space-y-5">
+      <div>
+        <h3 className="text-sm font-semibold text-foreground mb-1 flex items-center gap-2">
+          <PenLine className="w-4 h-4 text-primary" />
+          ZOA-W Writing Overlord
+        </h3>
+        <p className="text-[11px] text-muted-foreground mb-3">
+          5-agent pipeline: Outline → Draft → Critique → Refine (loop until ≥8/10) → Publish.
+          Powered by Hermes 3 405B, Dolphin Venice, and Arcee Trinity.
+        </p>
+
+        <div className="space-y-3">
+          <div>
+            <label className="text-[10px] font-mono text-muted-foreground mb-1 block">Topic</label>
+            <Input
+              value={topic}
+              onChange={(e) => setTopic(e.target.value)}
+              placeholder="e.g. Why most AI agents fail in production"
+              className="font-mono text-xs"
+              disabled={running}
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-[10px] font-mono text-muted-foreground mb-1 block">Tone</label>
+              <div className="grid grid-cols-2 gap-1">
+                {TONE_OPTIONS.map((t) => (
+                  <button
+                    key={t.value}
+                    onClick={() => setTone(t.value)}
+                    disabled={running}
+                    className={`text-left px-2 py-1.5 rounded border text-[10px] font-mono transition-colors ${
+                      tone === t.value
+                        ? "border-primary/50 bg-primary/10 text-primary"
+                        : "border-border text-muted-foreground hover:border-border/80"
+                    }`}
+                  >
+                    <div className="font-semibold">{t.label}</div>
+                    <div className="text-[9px] opacity-70 mt-0.5">{t.desc}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <label className="text-[10px] font-mono text-muted-foreground mb-1 block">Platform</label>
+              <div className="grid grid-cols-2 gap-1">
+                {PLATFORM_OPTIONS.map((p) => (
+                  <button
+                    key={p.value}
+                    onClick={() => setPlatform(p.value)}
+                    disabled={running}
+                    className={`px-2 py-1.5 rounded border text-[10px] font-mono transition-colors ${
+                      platform === p.value
+                        ? "border-primary/50 bg-primary/10 text-primary"
+                        : "border-border text-muted-foreground hover:border-border/80"
+                    }`}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+              <div className="mt-2">
+                <label className="text-[10px] font-mono text-muted-foreground mb-1 block">
+                  Max refinement loops: {maxLoops}
+                </label>
+                <input
+                  type="range"
+                  min={1}
+                  max={5}
+                  value={maxLoops}
+                  onChange={(e) => setMaxLoops(Number(e.target.value))}
+                  disabled={running}
+                  className="w-full accent-primary"
+                />
+              </div>
+            </div>
+          </div>
+
+          <Button
+            onClick={handleRun}
+            disabled={running || !topic.trim()}
+            className="text-xs font-mono"
+            size="sm"
+          >
+            {running ? (
+              <>
+                <Loader2 className="w-3 h-3 mr-1.5 animate-spin" />
+                Writing…
+              </>
+            ) : (
+              <>
+                <PenLine className="w-3 h-3 mr-1.5" />
+                Run Pipeline
+              </>
+            )}
+          </Button>
+        </div>
+      </div>
+
+      {run && (
+        <div className="border border-border rounded-lg overflow-hidden">
+          {/* Stage progress bar */}
+          <div className="p-3 border-b border-border bg-card/50 space-y-2">
+            <div className="flex items-center justify-between text-[10px] font-mono">
+              <span className="text-zinc-400">
+                {WRITING_STAGE_LABELS[run.stage] ?? run.stage}
+              </span>
+              {run.final_score != null && (
+                <span className="text-emerald-400">Final: {run.final_score}/10</span>
+              )}
+            </div>
+            <div className="flex gap-1">
+              {stageOrder.map((s, i) => (
+                <div
+                  key={s}
+                  className={`h-1 flex-1 rounded-full transition-all duration-500 ${
+                    run.status === "failed" && i === currentStageIdx
+                      ? "bg-red-500"
+                      : i < currentStageIdx
+                      ? "bg-emerald-500"
+                      : i === currentStageIdx
+                      ? "bg-primary animate-pulse"
+                      : "bg-zinc-800"
+                  }`}
+                />
+              ))}
+            </div>
+          </div>
+
+          {/* Sub-tabs */}
+          <div className="flex border-b border-border">
+            {(["pipeline", "critique", "output"] as const).map((t) => (
+              <button
+                key={t}
+                onClick={() => setActiveTab(t)}
+                className={`px-4 py-2 text-[10px] font-mono capitalize transition-colors ${
+                  activeTab === t
+                    ? "text-primary border-b-2 border-primary bg-primary/5"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+
+          <div className="p-4">
+            {activeTab === "pipeline" && (
+              <div className="space-y-2">
+                {stageOrder.map((s, i) => {
+                  const done = i < currentStageIdx || run.status === "completed";
+                  const active = i === currentStageIdx && run.status === "running";
+                  return (
+                    <div
+                      key={s}
+                      className={`flex items-center gap-2 text-[10px] font-mono ${
+                        done
+                          ? "text-emerald-400"
+                          : active
+                          ? "text-primary"
+                          : "text-zinc-600"
+                      }`}
+                    >
+                      {done ? (
+                        <CheckCircle className="w-3 h-3" />
+                      ) : active ? (
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                      ) : (
+                        <Clock className="w-3 h-3" />
+                      )}
+                      <span className="capitalize">{s}</span>
+                      {s === "critique" && run.critique_score != null && (
+                        <span className="ml-auto">{run.critique_score}/10</span>
+                      )}
+                      {s === "refine" && run.loops_taken != null && (
+                        <span className="ml-auto">{run.loops_taken} loop(s)</span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {activeTab === "critique" && run.critique && (
+              <div className="space-y-3">
+                <div>
+                  <p className="text-[10px] font-mono text-muted-foreground mb-1">Score</p>
+                  <WritingScoreBar score={run.critique.score} />
+                </div>
+                <div>
+                  <p className="text-[10px] font-mono text-emerald-400 mb-1">Strengths</p>
+                  <ul className="space-y-0.5">
+                    {run.critique.strengths.map((s, i) => (
+                      <li key={i} className="text-[10px] text-zinc-300 flex gap-1.5">
+                        <span className="text-emerald-500 shrink-0">+</span>
+                        {s}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                <div>
+                  <p className="text-[10px] font-mono text-amber-400 mb-1">Fixes applied</p>
+                  <ul className="space-y-0.5">
+                    {run.critique.specific_fixes.map((f, i) => (
+                      <li key={i} className="text-[10px] text-zinc-300 flex gap-1.5">
+                        <span className="text-amber-500 shrink-0">→</span>
+                        {f}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                <div className="text-[10px] font-mono text-zinc-400 border border-border/50 rounded p-2">
+                  Verdict: {run.critique.verdict}
+                </div>
+              </div>
+            )}
+
+            {activeTab === "output" && run.published && (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between text-[10px] font-mono text-muted-foreground">
+                  <span>
+                    {run.published.word_count} words · {run.published.char_count} chars
+                  </span>
+                  <span className="capitalize">{run.published.platform}</span>
+                </div>
+                {run.published.subject_line && (
+                  <div className="text-[11px] font-semibold text-foreground border-b border-border pb-2">
+                    {run.published.subject_line}
+                  </div>
+                )}
+                <pre className="text-[10px] font-mono text-zinc-300 whitespace-pre-wrap leading-relaxed max-h-64 overflow-y-auto bg-zinc-900/50 rounded p-3">
+                  {run.published.formatted_content}
+                </pre>
+                {run.published.hashtags.length > 0 && (
+                  <div className="flex flex-wrap gap-1">
+                    {run.published.hashtags.map((h) => (
+                      <span
+                        key={h}
+                        className="text-[9px] font-mono text-primary bg-primary/10 border border-primary/20 px-1.5 py-0.5 rounded"
+                      >
+                        {h}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <div className="text-[10px] font-mono text-zinc-500 border border-border/50 rounded p-2">
+                  CTA: {run.published.cta}
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="text-[10px] font-mono"
+                  onClick={() => {
+                    navigator.clipboard.writeText(run.published!.formatted_content);
+                    toast({ title: "Copied to clipboard" });
+                  }}
+                >
+                  Copy Content
+                </Button>
+              </div>
+            )}
+
+            {activeTab === "output" && !run.published && run.status !== "completed" && (
+              <p className="text-[10px] font-mono text-muted-foreground">
+                Output will appear here once the pipeline completes.
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function ZoaPage() {
@@ -1016,7 +1653,7 @@ export default function ZoaPage() {
         action={
           <div className="flex items-center gap-1.5 px-2.5 py-1 bg-primary/10 border border-primary/20 rounded">
             <Zap className="w-3 h-3 text-primary" />
-            <span className="text-[10px] font-mono text-primary font-bold">ZOA v1</span>
+            <span className="text-[10px] font-mono text-primary font-bold">ZOA v2</span>
           </div>
         }
       />
@@ -1025,7 +1662,7 @@ export default function ZoaPage() {
 
       <div className="p-6">
         <Tabs defaultValue="billing">
-          <TabsList className="bg-card border border-border mb-6 h-auto p-1 gap-0.5">
+          <TabsList className="bg-card border border-border mb-6 h-auto p-1 gap-0.5 flex-wrap">
             {[
               { value: "billing", label: "Billing" },
               { value: "scheduling", label: "Scheduling" },
@@ -1033,6 +1670,8 @@ export default function ZoaPage() {
               { value: "hr", label: "HR" },
               { value: "procurement", label: "Procurement" },
               { value: "compliance", label: "Compliance" },
+              { value: "skill-factory", label: "⚡ Skill Forge" },
+              { value: "writing", label: "✍ ZOA-W" },
             ].map(({ value, label }) => (
               <TabsTrigger
                 key={value}
@@ -1062,6 +1701,12 @@ export default function ZoaPage() {
             </TabsContent>
             <TabsContent value="compliance" className="mt-0">
               <ComplianceTab />
+            </TabsContent>
+            <TabsContent value="skill-factory" className="mt-0">
+              <SkillFactoryTab />
+            </TabsContent>
+            <TabsContent value="writing" className="mt-0">
+              <WritingTab />
             </TabsContent>
           </div>
         </Tabs>

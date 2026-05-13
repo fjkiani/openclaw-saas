@@ -19,6 +19,11 @@ export const skillsTable = pgTable("skills", {
   installs: integer("installs").notNull().default(0),
   featured: boolean("featured").notNull().default(false),
   tags: text("tags").array().notNull().default([]),
+  // Archon skill factory fields
+  source: text("source").notNull().default("manual"), // 'archon' | 'manual' | 'github'
+  currentVersion: integer("current_version").notNull().default(1),
+  archonRunId: text("archon_run_id"),
+  implementation: text("implementation"),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),

@@ -1,0 +1,30 @@
+# Archon configuration for OpenClaw Zeta deployment
+# https://archon.diy/docs/getting-started/configuration
+
+assistants:
+  claude:
+    # Path to Claude Code binary
+    # Render.com: installed via docker-entrypoint or build command
+    # Local dev: set CLAUDE_BIN_PATH env var or install via: curl -fsSL https://claude.ai/install.sh | bash
+    claudeBinaryPath: "${CLAUDE_BIN_PATH}"
+
+# Default provider for AI nodes in workflows
+provider: claude
+
+# Workflow discovery paths
+# Archon will look for .yaml workflow files in these directories
+workflowPaths:
+  - .archon/workflows
+
+# Command discovery paths
+commandPaths:
+  - .archon/commands
+
+# Database: SQLite by default (zero config)
+# For production: set DATABASE_URL=postgresql://... in environment
+# database:
+#   url: "${DATABASE_URL}"
+
+# Logging
+log:
+  level: info

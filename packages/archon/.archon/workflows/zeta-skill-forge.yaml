@@ -1,0 +1,240 @@
+name: zeta-skill-forge
+description: |
+  Generate, validate, benchmark, and catalog an OpenClaw skill from a plain-English prompt.
+
+  Use when: User wants to create a new skill from a description.
+  Input: Plain-English description of what the skill should do.
+  Does: Calls archon-factory to generate TypeScript skill → L0 validate → L1-L4 benchmark → catalog if CERTIFIED/CONDITIONAL.
+  Self-heals: If L0 validation fails, loops back to fix the TypeScript error (max 2 retries).
+
+  Pipeline:
+    1. generate  — POST /internal/generate → Qwen3 Coder 480B via OpenRouter
+    2. validate  — POST /internal/validate → tsc syntax check + export verification
+    3. fix-loop  — if L0 fails, POST /internal/fix → retry (max 2 times)
+    4. benchmark — POST /api/v1/benchmark/run-sync → L1-L4 via OpenRouter
+    5. catalog   — if CERTIFIED/CONDITIONAL, POST /api/skills → OpenClaw catalog
+
+worktree:
+  enabled: false
+mutates_checkout: false
+
+nodes:
+  # ─── Stage 1: Generate skill via OpenRouter (Qwen3 Coder 480B) ───────────────
+  - id: generate
+    bash: |
+      set -euo pipefail
+      FACTORY_URL="${ARCHON_FACTORY_URL:-http://localhost:3002}"
+      PROMPT="$ARGUMENTS"
+      RUN_ID="${ARCHON_RUN_ID:-$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid)}"
+
+      echo "[zeta-skill-forge] Stage 1: Generating skill..."
+      echo "[zeta-skill-forge] Prompt: $PROMPT"
+      echo "[zeta-skill-forge] Run ID: $RUN_ID"
+
+      mkdir -p "${ARTIFACTS_DIR:-/tmp/archon-artifacts}"
+
+      curl -sf \
+        -X POST "${FACTORY_URL}/internal/generate" \
+        -H "Content-Type: application/json" \
+        -d "{\"prompt\": $(echo "$PROMPT" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read().strip()))')}" \
+        -o "${ARTIFACTS_DIR:-/tmp/archon-artifacts}/skill_raw.json" \
+        --max-time 60
+
+      echo "[zeta-skill-forge] Skill generated:"
+      cat "${ARTIFACTS_DIR:-/tmp/archon-artifacts}/skill_raw.json" | python3 -c "
+      import json,sys
+      d=json.load(sys.stdin)
+      print('  Name:', d.get('name','?'))
+      print('  Category:', d.get('category','?'))
+      print('  Impl lines:', len(d.get('implementation','').split('\n')))
+      "
+
+  # ─── Stage 2: L0 Validate ────────────────────────────────────────────────────
+  - id: validate
+    depends_on: [generate]
+    bash: |
+      set -euo pipefail
+      FACTORY_URL="${ARCHON_FACTORY_URL:-http://localhost:3002}"
+      ARTIFACTS="${ARTIFACTS_DIR:-/tmp/archon-artifacts}"
+
+      echo "[zeta-skill-forge] Stage 2: L0 validation..."
+
+      curl -sf \
+        -X POST "${FACTORY_URL}/internal/validate" \
+        -H "Content-Type: application/json" \
+        -d @"${ARTIFACTS}/skill_raw.json" \
+        -o "${ARTIFACTS}/l0_result.json" \
+        --max-time 30
+
+      L0_PASS=$(cat "${ARTIFACTS}/l0_result.json" | python3 -c "import json,sys; print(json.load(sys.stdin).get('l0_pass', False))")
+      echo "[zeta-skill-forge] L0 pass: $L0_PASS"
+
+      if [ "$L0_PASS" = "True" ]; then
+        echo "[zeta-skill-forge] L0 PASSED — proceeding to benchmark"
+        echo "L0_PASS=true" > "${ARTIFACTS}/l0_status.env"
+      else
+        L0_ERROR=$(cat "${ARTIFACTS}/l0_result.json" | python3 -c "import json,sys; print(json.load(sys.stdin).get('error','unknown error'))")
+        echo "[zeta-skill-forge] L0 FAILED: $L0_ERROR"
+        echo "L0_PASS=false" > "${ARTIFACTS}/l0_status.env"
+        echo "L0_ERROR=$L0_ERROR" >> "${ARTIFACTS}/l0_status.env"
+      fi
+
+  # ─── Stage 3: Fix loop (max 2 retries if L0 failed) ─────────────────────────
+  - id: fix-loop
+    depends_on: [validate]
+    bash: |
+      set -euo pipefail
+      FACTORY_URL="${ARCHON_FACTORY_URL:-http://localhost:3002}"
+      ARTIFACTS="${ARTIFACTS_DIR:-/tmp/archon-artifacts}"
+      MAX_RETRIES=2
+      RETRY=0
+
+      source "${ARTIFACTS}/l0_status.env" 2>/dev/null || L0_PASS=false
+
+      while [ "$L0_PASS" != "true" ] && [ "$RETRY" -lt "$MAX_RETRIES" ]; do
+        RETRY=$((RETRY + 1))
+        echo "[zeta-skill-forge] Stage 3: Fix attempt $RETRY/$MAX_RETRIES..."
+
+        L0_ERROR=$(cat "${ARTIFACTS}/l0_result.json" | python3 -c "import json,sys; print(json.load(sys.stdin).get('error','unknown error'))" 2>/dev/null || echo "unknown error")
+
+        # Call /internal/fix with the error and original skill
+        FIX_PAYLOAD=$(python3 -c "
+      import json, sys
+      with open('${ARTIFACTS}/skill_raw.json') as f:
+          skill = json.load(f)
+      payload = {'skill': skill, 'error': '''$L0_ERROR'''}
+      print(json.dumps(payload))
+      ")
+
+        curl -sf \
+          -X POST "${FACTORY_URL}/internal/fix" \
+          -H "Content-Type: application/json" \
+          -d "$FIX_PAYLOAD" \
+          -o "${ARTIFACTS}/skill_raw.json" \
+          --max-time 60
+
+        echo "[zeta-skill-forge] Re-validating after fix..."
+        curl -sf \
+          -X POST "${FACTORY_URL}/internal/validate" \
+          -H "Content-Type: application/json" \
+          -d @"${ARTIFACTS}/skill_raw.json" \
+          -o "${ARTIFACTS}/l0_result.json" \
+          --max-time 30
+
+        L0_PASS=$(cat "${ARTIFACTS}/l0_result.json" | python3 -c "import json,sys; print(json.load(sys.stdin).get('l0_pass', False))")
+        [ "$L0_PASS" = "True" ] && L0_PASS=true || L0_PASS=false
+        echo "[zeta-skill-forge] L0 pass after fix $RETRY: $L0_PASS"
+      done
+
+      if [ "$L0_PASS" != "true" ]; then
+        echo "[zeta-skill-forge] L0 FAILED after $MAX_RETRIES fix attempts — aborting"
+        exit 1
+      fi
+
+      echo "[zeta-skill-forge] L0 PASSED after $RETRY fix attempts"
+
+  # ─── Stage 4: L1-L4 Benchmark ────────────────────────────────────────────────
+  - id: benchmark
+    depends_on: [fix-loop]
+    bash: |
+      set -euo pipefail
+      BENCHMARK_URL="${BENCHMARK_SERVICE_URL:-http://localhost:8001}"
+      ARTIFACTS="${ARTIFACTS_DIR:-/tmp/archon-artifacts}"
+
+      echo "[zeta-skill-forge] Stage 4: Running L1-L4 benchmark..."
+
+      # Build benchmark request from skill JSON
+      BENCH_PAYLOAD=$(python3 -c "
+      import json, sys, uuid
+      with open('${ARTIFACTS}/skill_raw.json') as f:
+          skill = json.load(f)
+      payload = {
+          'skill_id': 'archon-' + str(uuid.uuid4())[:8],
+          'skill_name': skill.get('name', 'unknown'),
+          'skill_description': skill.get('description', ''),
+          'skill_category': skill.get('category', 'GENERAL'),
+          'skill_inputs': skill.get('inputSchema', {}),
+          'skill_outputs': skill.get('outputSchema', {}),
+          'test_suite': 'standard',
+      }
+      print(json.dumps(payload))
+      ")
+
+      curl -sf \
+        -X POST "${BENCHMARK_URL}/api/v1/benchmark/run-sync" \
+        -H "Content-Type: application/json" \
+        -d "$BENCH_PAYLOAD" \
+        -o "${ARTIFACTS}/benchmark_result.json" \
+        --max-time 120
+
+      GRADE=$(cat "${ARTIFACTS}/benchmark_result.json" | python3 -c "import json,sys; print(json.load(sys.stdin).get('grade','INCONCLUSIVE'))")
+      SCORE=$(cat "${ARTIFACTS}/benchmark_result.json" | python3 -c "import json,sys; print(json.load(sys.stdin).get('overall_score','N/A'))")
+      echo "[zeta-skill-forge] Benchmark grade: $GRADE (score: $SCORE)"
+
+  # ─── Stage 5: Catalog insert ──────────────────────────────────────────────────
+  - id: catalog
+    depends_on: [benchmark]
+    bash: |
+      set -euo pipefail
+      OPENCLAW_URL="${OPENCLAW_API_URL:-http://localhost:3001}"
+      ARTIFACTS="${ARTIFACTS_DIR:-/tmp/archon-artifacts}"
+
+      GRADE=$(cat "${ARTIFACTS}/benchmark_result.json" | python3 -c "import json,sys; print(json.load(sys.stdin).get('grade','INCONCLUSIVE'))" 2>/dev/null || echo "INCONCLUSIVE")
+
+      echo "[zeta-skill-forge] Stage 5: Grade=$GRADE"
+
+      if [ "$GRADE" = "CERTIFIED" ] || [ "$GRADE" = "CONDITIONAL" ]; then
+        echo "[zeta-skill-forge] Inserting into OpenClaw catalog..."
+
+        CATALOG_PAYLOAD=$(python3 -c "
+      import json, sys
+      with open('${ARTIFACTS}/skill_raw.json') as f:
+          skill = json.load(f)
+      with open('${ARTIFACTS}/benchmark_result.json') as f:
+          bench = json.load(f)
+      slug = skill.get('name','skill').lower().replace(' ','-')
+      import re
+      slug = re.sub(r'[^a-z0-9-]', '', slug)
+      payload = {
+          'name': skill.get('name', 'Archon Skill'),
+          'slug': slug,
+          'description': skill.get('description', ''),
+          'category': skill.get('category', 'General'),
+          'featured': False,
+          'tags': ['archon', 'generated'],
+          'source': 'archon',
+          'implementation': skill.get('implementation', ''),
+          'benchmarkGrade': bench.get('grade'),
+          'benchmarkScore': bench.get('overall_score'),
+      }
+      print(json.dumps(payload))
+      ")
+
+        curl -sf \
+          -X POST "${OPENCLAW_URL}/api/skills" \
+          -H "Content-Type: application/json" \
+          -H "Authorization: Bearer ${OPENCLAW_SERVICE_TOKEN:-}" \
+          -d "$CATALOG_PAYLOAD" \
+          -o "${ARTIFACTS}/catalog_result.json" \
+          --max-time 30 || echo '{"error":"catalog insert failed (soft-fail)"}' > "${ARTIFACTS}/catalog_result.json"
+
+        echo "[zeta-skill-forge] Catalog result:"
+        cat "${ARTIFACTS}/catalog_result.json"
+      else
+        echo "[zeta-skill-forge] Grade $GRADE — skill NOT added to catalog (requires CERTIFIED or CONDITIONAL)"
+        echo '{"cataloged":false,"reason":"grade below threshold"}' > "${ARTIFACTS}/catalog_result.json"
+      fi
+
+      echo ""
+      echo "═══════════════════════════════════════════════════"
+      echo "  ZETA SKILL FORGE — COMPLETE"
+      echo "═══════════════════════════════════════════════════"
+      python3 -c "
+      import json
+      with open('${ARTIFACTS}/benchmark_result.json') as f:
+          bench = json.load(f)
+      print('  Grade:    ', bench.get('grade','?'))
+      print('  Score:    ', bench.get('overall_score','?'))
+      print('  Status:   ', bench.get('status','?'))
+      "
+      echo "═══════════════════════════════════════════════════"

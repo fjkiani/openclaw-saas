@@ -1,4 +1,5 @@
 const ZOA_BASE = import.meta.env.VITE_ZOA_SERVICE_URL || "http://localhost:8001/api/v1/zoa";
+const FACTORY_BASE = import.meta.env.VITE_ARCHON_FACTORY_URL || "http://localhost:3002";
 
 // ─── Interfaces ──────────────────────────────────────────────────────────────
 
@@ -27,6 +28,84 @@ export interface InventoryItem {
   unit: string;
 }
 
+// ─── Skill Factory types ──────────────────────────────────────────────────────
+
+export type ForgeStatus =
+  | "pending"
+  | "generating"
+  | "validating"
+  | "fixing"
+  | "benchmarking"
+  | "cataloging"
+  | "completed"
+  | "failed";
+
+export interface FactoryRun {
+  runId: string;
+  description: string;
+  status: ForgeStatus;
+  stage: string;
+  skill?: {
+    name: string;
+    description: string;
+    category: string;
+    inputSchema: Record<string, unknown>;
+    outputSchema: Record<string, unknown>;
+    implementation: string;
+  };
+  l0Result?: { l0_pass: boolean; error?: string };
+  benchmarkResult?: {
+    grade: string;
+    overall_score: number | null;
+    level_scores?: Record<string, unknown>;
+  };
+  cataloged?: boolean;
+  skillId?: number;
+  retryCount: number;
+  error?: string;
+  createdAt: number;
+  completedAt?: number;
+}
+
+// ─── Writing Pipeline types ───────────────────────────────────────────────────
+
+export type WritingTone = "zeta_warlord" | "professional" | "technical" | "satirical";
+export type WritingPlatform = "medium" | "linkedin" | "blog" | "cold_email";
+
+export interface WritingRun {
+  run_id: string;
+  topic: string;
+  tone: WritingTone;
+  platform: WritingPlatform;
+  status: "pending" | "running" | "completed" | "failed";
+  stage: string;
+  outline?: Record<string, unknown>;
+  draft?: Record<string, unknown>;
+  critique?: {
+    score: number;
+    strengths: string[];
+    weaknesses: string[];
+    specific_fixes: string[];
+    verdict: string;
+  };
+  critique_score?: number;
+  refined_draft?: Record<string, unknown>;
+  published?: {
+    formatted_content: string;
+    platform: string;
+    char_count: number;
+    word_count: number;
+    hashtags: string[];
+    subject_line?: string;
+    cta: string;
+  };
+  loops_taken?: number;
+  final_score?: number;
+  error?: string;
+  created_at?: number;
+  completed_at?: number;
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 async function post(path: string, body: unknown): Promise<ZoaResult> {
@@ -47,6 +126,44 @@ async function get<T>(path: string): Promise<T> {
     method: "GET",
     headers: { "Content-Type": "application/json" },
   });
+  return res.json();
+}
+
+async function factoryPost<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(`${FACTORY_BASE}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Factory ${res.status}: ${err}`);
+  }
+  return res.json();
+}
+
+async function factoryGet<T>(path: string): Promise<T> {
+  const res = await fetch(`${FACTORY_BASE}${path}`);
+  if (!res.ok) throw new Error(`Factory ${res.status}`);
+  return res.json();
+}
+
+async function writingPost<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(`${ZOA_BASE.replace("/zoa", "/writing")}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Writing ${res.status}: ${err}`);
+  }
+  return res.json();
+}
+
+async function writingGet<T>(path: string): Promise<T> {
+  const res = await fetch(`${ZOA_BASE.replace("/zoa", "/writing")}${path}`);
+  if (!res.ok) throw new Error(`Writing ${res.status}`);
   return res.json();
 }
 
@@ -246,6 +363,98 @@ export async function getZoaHealth(): Promise<{ status: string; agents: string[]
   try {
     return await get<{ status: string; agents: string[] }>("/health");
   } catch (_err) {
+    return { status: "offline", agents: [] };
+  }
+}
+
+// ─── Skill Factory (archon-factory service) ───────────────────────────────────
+
+/**
+ * Start a skill forge pipeline. Returns immediately with a runId.
+ * Poll getForgeStatus(runId) every 2s to track progress.
+ */
+export async function forgeSkill(description: string): Promise<{ runId: string; status: string }> {
+  return factoryPost<{ runId: string; status: string }>("/archon/generate", { description });
+}
+
+/**
+ * Poll the status of a skill forge run.
+ */
+export async function getForgeStatus(runId: string): Promise<FactoryRun> {
+  return factoryGet<FactoryRun>(`/archon/run/${runId}`);
+}
+
+/**
+ * List recent skill forge runs.
+ */
+export async function listForgeRuns(): Promise<FactoryRun[]> {
+  return factoryGet<FactoryRun[]>("/archon/runs");
+}
+
+// ─── ZOA-W Writing Pipeline ───────────────────────────────────────────────────
+
+/**
+ * Start the full 5-agent writing pipeline (Outline → Draft → Critique → Refine → Publish).
+ * Returns immediately with a run_id. Poll getWritingStatus(runId) every 3s.
+ */
+export async function runWritingPipeline(
+  topic: string,
+  tone: WritingTone,
+  platform: WritingPlatform,
+  maxLoops = 3
+): Promise<{ run_id: string; status: string }> {
+  return writingPost<{ run_id: string; status: string }>("/pipeline/run", {
+    topic,
+    tone,
+    platform,
+    max_loops: maxLoops,
+  });
+}
+
+/**
+ * Poll the status of a writing pipeline run.
+ */
+export async function getWritingStatus(runId: string): Promise<WritingRun> {
+  return writingGet<WritingRun>(`/pipeline/${runId}`);
+}
+
+/**
+ * Critique a draft directly (single-agent call, no pipeline).
+ */
+export async function critiqueText(
+  draft: string,
+  tone: WritingTone = "professional"
+): Promise<{ score: number; strengths: string[]; weaknesses: string[]; specific_fixes: string[]; verdict: string }> {
+  return writingPost("/critique", { draft, tone });
+}
+
+/**
+ * Generate an outline only.
+ */
+export async function generateOutline(
+  topic: string,
+  tone: WritingTone
+): Promise<ZoaResult> {
+  return writingPost("/outline", { topic, tone });
+}
+
+/**
+ * Format content for a specific platform.
+ */
+export async function publishContent(
+  content: string,
+  platform: WritingPlatform
+): Promise<ZoaResult> {
+  return writingPost("/publish", { content, platform });
+}
+
+/**
+ * Writing service health check.
+ */
+export async function getWritingHealth(): Promise<{ status: string; agents: string[] }> {
+  try {
+    return await writingGet<{ status: string; agents: string[] }>("/health");
+  } catch {
     return { status: "offline", agents: [] };
   }
 }
