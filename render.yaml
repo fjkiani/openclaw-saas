@@ -33,6 +33,9 @@ services:
     region: oregon
     buildCommand: pnpm install --frozen-lockfile && pnpm --filter @workspace/openclaw-saas run build
     staticPublishPath: artifacts/openclaw-saas/dist
+    envVars:
+      - key: VITE_ZOA_SERVICE_URL
+        value: https://openclaw-benchmark.onrender.com/api/v1/zoa
     headers:
       - path: /*
         name: Cache-Control

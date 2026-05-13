@@ -14,6 +14,7 @@ const navItems = [
   { href: "/dashboard", icon: LayoutDashboard, label: "Dashboard" },
   { href: "/agents", icon: Bot, label: "Agents" },
   { href: "/skills", icon: Zap, label: "Skills" },
+  { href: "/zoa", icon: Zap, label: "ZOA" },
   { href: "/billing", icon: CreditCard, label: "Billing" },
 ];
 

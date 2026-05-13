@@ -13,6 +13,7 @@ import AgentsPage from "@/pages/agents/index";
 import AgentDetailPage from "@/pages/agents/[id]";
 import SkillsPage from "@/pages/skills";
 import BillingPage from "@/pages/billing";
+import ZoaPage from "@/pages/zoa";
 
 const queryClient = new QueryClient();
 
@@ -181,6 +182,7 @@ function ClerkProviderWithRoutes() {
           <Route path="/agents/:id"><ProtectedRoute component={AgentDetailPage} /></Route>
           <Route path="/skills"><ProtectedRoute component={SkillsPage} /></Route>
           <Route path="/billing"><ProtectedRoute component={BillingPage} /></Route>
+          <Route path="/zoa"><ProtectedRoute component={ZoaPage} /></Route>
           <Route component={NotFound} />
         </Switch>
       </QueryClientProvider>
