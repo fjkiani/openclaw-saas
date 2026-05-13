@@ -6,9 +6,14 @@ import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Zap, AlertTriangle, CheckCircle, Clock, Hammer, PenLine } from "lucide-react";
+import { Loader2, Zap, AlertTriangle, CheckCircle, Clock, Hammer, PenLine, Cpu, ShieldAlert, Wrench, RefreshCw } from "lucide-react";
 import * as zoaClient from "@/lib/zoaClient";
-import type { ZoaEvent, FactoryRun, WritingRun, WritingTone, WritingPlatform } from "@/lib/zoaClient";
+import type { ZoaEvent, FactoryRun, WritingRun, WritingTone, WritingPlatform, KairosPhase, KairosEvent, KairosRunStatus } from "@/lib/zoaClient";
+import {
+  runKairos, getKairosRun, streamKairosRun, listKairosRuns,
+  getTenants, getTenantSkills, getSkillBenchmarkResult,
+  TenantRecord, TenantSkillRecord, BenchmarkResult,
+} from "@/lib/zoaClient";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1209,6 +1214,554 @@ function SkillFactoryTab() {
   );
 }
 
+// ─── Kairos Execution Tab ─────────────────────────────────────────────────────
+
+const KAIROS_PHASES: KairosPhase[] = ["planning", "acting", "observing", "refining", "done"];
+
+const PHASE_COLOR: Record<KairosPhase, string> = {
+  idle:      "text-muted-foreground",
+  planning:  "text-blue-400",
+  acting:    "text-yellow-400",
+  observing: "text-purple-400",
+  refining:  "text-orange-400",
+  done:      "text-green-400",
+  failed:    "text-red-400",
+};
+
+const PHASE_BG: Record<KairosPhase, string> = {
+  idle:      "bg-muted",
+  planning:  "bg-blue-500",
+  acting:    "bg-yellow-500",
+  observing: "bg-purple-500",
+  refining:  "bg-orange-500",
+  done:      "bg-green-500",
+  failed:    "bg-red-500",
+};
+
+function KairosPhaseBar({ phase }: { phase: KairosPhase }) {
+  const activeIdx = KAIROS_PHASES.indexOf(phase === "failed" ? "done" : phase);
+  return (
+    <div className="flex items-center gap-1">
+      {KAIROS_PHASES.map((p, i) => (
+        <div key={p} className="flex items-center gap-1">
+          <div className={`h-2 w-8 rounded-full transition-all duration-300 ${
+            phase === "failed" && p === "done" ? "bg-red-500" :
+            i <= activeIdx ? PHASE_BG[phase] : "bg-muted"
+          }`} />
+          <span className={`text-[9px] font-mono uppercase ${i <= activeIdx ? PHASE_COLOR[phase] : "text-muted-foreground/40"}`}>
+            {p}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function BenchmarkExplainer({ result }: { result: BenchmarkResult }) {
+  const grade = result.grade;
+  const levelScores = result.levelScores as Record<string, number> | null;
+
+  const explanations: Record<string, string> = {
+    CERTIFIED: "Passed all L1–L4 benchmark tests. Cleared for production execution.",
+    CONDITIONAL: "Passed with caveats. Review L3/L4 scores before running in production.",
+    FAILED: "Failed benchmark testing. Execution is blocked. Reforge via Archon to re-certify.",
+    INCONCLUSIVE: "Benchmark completed but results were inconclusive. Re-run recommended.",
+  };
+
+  if (!grade) {
+    return <p className="text-[9px] font-mono text-muted-foreground">Not yet benchmarked. Install on a tenant to trigger a benchmark run.</p>;
+  }
+
+  return (
+    <div className="space-y-0.5">
+      <p className="text-[9px] font-mono text-muted-foreground">{explanations[grade] ?? grade}</p>
+      {levelScores && (
+        <div className="flex gap-3 flex-wrap">
+          {Object.entries(levelScores).map(([k, v]) => (
+            <span key={k} className="text-[8px] font-mono text-muted-foreground">
+              {k.toUpperCase()}: <span className={Number(v) >= 60 ? "text-green-400" : "text-red-400"}>{v}</span>
+            </span>
+          ))}
+        </div>
+      )}
+      {result.overallScore !== null && result.overallScore !== undefined && (
+        <p className="text-[8px] font-mono text-muted-foreground">Overall: {result.overallScore}</p>
+      )}
+    </div>
+  );
+}
+
+function useBenchmarkGrade(skillId: number | null): { grade: string | null; loading: boolean } {
+  const [grade, setGrade] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  useEffect(() => {
+    if (!skillId) { setGrade(null); return; }
+    setLoading(true);
+    getSkillBenchmarkResult(skillId)
+      .then(r => setGrade(r.grade))
+      .catch(() => setGrade(null))
+      .finally(() => setLoading(false));
+  }, [skillId]);
+  return { grade, loading };
+}
+
+function KairosRunHistory({ tenantId, skillSlug }: { tenantId: number | null; skillSlug: string }) {
+  const [runs, setRuns] = useState<KairosRunStatus[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [inspecting, setInspecting] = useState<KairosRunStatus | null>(null);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const fetchRuns = async () => {
+    if (!tenantId) return;
+    try {
+      const data = await listKairosRuns(skillSlug || undefined, String(tenantId));
+      setRuns((data.runs ?? []) as unknown as KairosRunStatus[]);
+    } catch { /* silent */ }
+  };
+
+  useEffect(() => {
+    if (!tenantId) { setRuns([]); return; }
+    setLoading(true);
+    fetchRuns().finally(() => setLoading(false));
+    intervalRef.current = setInterval(fetchRuns, 10000);
+    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
+  }, [tenantId, skillSlug]);
+
+  if (!tenantId) return null;
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <p className="text-[10px] font-mono text-muted-foreground uppercase">Run History</p>
+        {loading && <Loader2 className="w-3 h-3 animate-spin text-muted-foreground" />}
+      </div>
+
+      {inspecting && (
+        <div className="rounded border border-border bg-black/20 p-2 space-y-1">
+          <div className="flex items-center justify-between">
+            <p className="text-[9px] font-mono text-muted-foreground uppercase">Run Detail</p>
+            <button className="text-[9px] font-mono text-muted-foreground hover:text-foreground" onClick={() => setInspecting(null)}>✕ close</button>
+          </div>
+          <p className="text-[9px] font-mono"><span className="text-muted-foreground">run_id:</span> {inspecting.run_id}</p>
+          <p className="text-[9px] font-mono"><span className="text-muted-foreground">phase:</span> {inspecting.phase}</p>
+          <p className="text-[9px] font-mono"><span className="text-muted-foreground">degraded:</span> {String(inspecting.degraded)}</p>
+          <p className="text-[9px] font-mono"><span className="text-muted-foreground">violations:</span> {inspecting.violations?.length ?? 0}</p>
+          {inspecting.result && (
+            <p className="text-[9px] font-mono text-green-400/80 whitespace-pre-wrap">{String(inspecting.result).slice(0, 300)}</p>
+          )}
+          {inspecting.error && (
+            <p className="text-[9px] font-mono text-red-400/80">{inspecting.error}</p>
+          )}
+        </div>
+      )}
+
+      {runs.length === 0 ? (
+        <p className="text-[9px] font-mono text-muted-foreground">No runs yet for this workspace.</p>
+      ) : (
+        <div className="rounded border border-border overflow-hidden">
+          <table className="w-full text-[9px] font-mono">
+            <thead>
+              <tr className="border-b border-border bg-muted/30">
+                <th className="text-left px-2 py-1 text-muted-foreground">Run ID</th>
+                <th className="text-left px-2 py-1 text-muted-foreground">Phase</th>
+                <th className="text-left px-2 py-1 text-muted-foreground">Degraded</th>
+                <th className="text-left px-2 py-1 text-muted-foreground">Started</th>
+                <th className="px-2 py-1"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {runs.map((r: any) => (
+                <tr key={r.run_id} className="border-b border-border/50 hover:bg-muted/10">
+                  <td className="px-2 py-1 text-muted-foreground">{r.run_id?.slice(0, 8)}…</td>
+                  <td className="px-2 py-1">
+                    <span className={r.phase === "done" ? "text-green-400" : r.phase === "failed" ? "text-red-400" : "text-yellow-400"}>
+                      {r.phase ?? r.status}
+                    </span>
+                  </td>
+                  <td className="px-2 py-1">
+                    {r.degraded ? <span className="text-orange-400">DEGRADED</span> : <span className="text-muted-foreground">—</span>}
+                  </td>
+                  <td className="px-2 py-1 text-muted-foreground">
+                    {r.started_at ? new Date(r.started_at).toLocaleTimeString() : "—"}
+                  </td>
+                  <td className="px-2 py-1">
+                    <button className="text-[8px] text-primary hover:underline" onClick={() => setInspecting(r)}>Inspect</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function KairosTab() {
+  const { toast } = useToast();
+
+  // ── Tenant + skill selection (control plane) ──────────────────────────────
+  const [tenants, setTenants] = useState<TenantRecord[]>([]);
+  const [selectedTenantId, setSelectedTenantId] = useState<number | null>(null);
+  const [tenantSkills, setTenantSkills] = useState<TenantSkillRecord[]>([]);
+  const [selectedSkillId, setSelectedSkillId] = useState<number | null>(null);
+  const [benchmarkResult, setBenchmarkResult] = useState<BenchmarkResult | null>(null);
+  const [loadingTenants, setLoadingTenants] = useState(false);
+  const [loadingSkills, setLoadingSkills] = useState(false);
+  const [loadingBenchmark, setLoadingBenchmark] = useState(false);
+
+  // ── Run state ─────────────────────────────────────────────────────────────
+  const [goal, setGoal] = useState("");
+  const [running, setRunning] = useState(false);
+  const [phase, setPhase] = useState<KairosPhase>("idle");
+  const [events, setEvents] = useState<KairosEvent[]>([]);
+  const [violations, setViolations] = useState<Array<{ tool_name: string; reason: string; benchmark_score: number }>>([]);
+  const [toolCalls, setToolCalls] = useState<Array<{ name: string; result: string; permitted: boolean }>>([]);
+  const [finalText, setFinalText] = useState("");
+  const [runStatus, setRunStatus] = useState<KairosRunStatus | null>(null);
+  const [activeSubTab, setActiveSubTab] = useState<"events" | "tools" | "violations">("events");
+  const cleanupRef = useRef<(() => void) | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const streamEndRef = useRef<HTMLDivElement>(null);
+
+  // ── Load tenants on mount ─────────────────────────────────────────────────
+  useEffect(() => {
+    setLoadingTenants(true);
+    getTenants()
+      .then(setTenants)
+      .catch(err => toast({ title: "Could not load tenants", description: String(err), variant: "destructive" }))
+      .finally(() => setLoadingTenants(false));
+  }, []);
+
+  // ── Load skills when tenant changes ──────────────────────────────────────
+  useEffect(() => {
+    if (selectedTenantId === null) { setTenantSkills([]); setSelectedSkillId(null); return; }
+    setLoadingSkills(true);
+    setSelectedSkillId(null);
+    setBenchmarkResult(null);
+    getTenantSkills(selectedTenantId)
+      .then(setTenantSkills)
+      .catch(err => toast({ title: "Could not load skills", description: String(err), variant: "destructive" }))
+      .finally(() => setLoadingSkills(false));
+  }, [selectedTenantId]);
+
+  // ── Load benchmark when skill changes ────────────────────────────────────
+  useEffect(() => {
+    if (selectedSkillId === null) { setBenchmarkResult(null); return; }
+    setLoadingBenchmark(true);
+    getSkillBenchmarkResult(selectedSkillId)
+      .then(setBenchmarkResult)
+      .catch(() => setBenchmarkResult({ grade: null, overallScore: null, levelScores: null, status: "not_tested" }))
+      .finally(() => setLoadingBenchmark(false));
+  }, [selectedSkillId]);
+
+  const reset = () => {
+    setPhase("idle"); setEvents([]); setViolations([]); setToolCalls([]);
+    setFinalText(""); setRunStatus(null);
+  };
+
+  const startPolling = (runId: string) => {
+    pollRef.current = setInterval(async () => {
+      try {
+        const s = await getKairosRun(runId);
+        setPhase(s.phase);
+        if (s.status === "done" || s.status === "failed") {
+          setRunStatus(s);
+          setFinalText(s.result || "");
+          setRunning(false);
+          clearInterval(pollRef.current!);
+          toast({ title: s.status === "done" ? "Run complete" : "Run failed", description: s.error || undefined, variant: s.status === "failed" ? "destructive" : undefined });
+        }
+      } catch { /* ignore poll errors */ }
+    }, 1000);
+  };
+
+  // Derive execution eligibility from stored benchmark — never from user input
+  const selectedSkillRecord = tenantSkills.find(ts => ts.skillId === selectedSkillId);
+  const selectedSkillSlug = selectedSkillRecord?.skill?.slug ?? (selectedSkillId ? String(selectedSkillId) : "");
+  const grade = benchmarkResult?.grade ?? null;
+  const isFailed = grade === "FAILED";
+  const isNotTested = !grade || grade === null;
+  const isEligible = selectedTenantId !== null && selectedSkillId !== null && !isFailed;
+
+  // Resolve scores from stored benchmark for the run request
+  const resolvedScores = {
+    l4_score: benchmarkResult?.levelScores?.l4 ?? benchmarkResult?.levelScores?.L4 ?? (grade === "CERTIFIED" ? 8.0 : grade === "CONDITIONAL" ? 6.5 : grade === "FAILED" ? 3.0 : 0.0),
+    l2_score: benchmarkResult?.levelScores?.l2 ?? benchmarkResult?.levelScores?.L2 ?? (grade === "CERTIFIED" ? 85 : grade === "CONDITIONAL" ? 65 : 0),
+    l3_score: benchmarkResult?.levelScores?.l3 ?? benchmarkResult?.levelScores?.L3 ?? (grade === "CERTIFIED" ? 85 : grade === "CONDITIONAL" ? 65 : 0),
+  };
+
+  const handleRun = async () => {
+    if (!goal.trim() || !selectedTenantId || !selectedSkillId) return;
+    reset();
+    setRunning(true);
+    try {
+      const started = await runKairos({
+        skill_id: selectedSkillSlug,
+        goal: goal.trim(),
+        tenant_id: String(selectedTenantId),
+        l4_score: resolvedScores.l4_score,
+        l2_score: resolvedScores.l2_score,
+        l3_score: resolvedScores.l3_score,
+        max_turns: 10,
+      });
+      toast({ title: "Kairos run started", description: `run_id: ${started.run_id.slice(0, 8)}…` });
+
+      let sseWorking = false;
+      cleanupRef.current = streamKairosRun(
+        started.run_id,
+        (ev) => {
+          sseWorking = true;
+          setEvents(prev => [...prev, ev]);
+          if (ev.type === "phase_change") setPhase((ev.payload as { phase: KairosPhase }).phase);
+          if (ev.type === "text_chunk") setFinalText(prev => prev + ((ev.payload as { text: string }).text || ""));
+          if (ev.type === "tool_end") {
+            const d = ev.payload as { name: string; result: string; permitted: boolean };
+            setToolCalls(prev => [...prev, { name: d.name, result: d.result, permitted: d.permitted }]);
+          }
+          if (ev.type === "permission_violation") {
+            const d = ev.payload as { tool_name: string; reason: string; benchmark_score: number };
+            setViolations(prev => [...prev, d]);
+          }
+          setTimeout(() => streamEndRef.current?.scrollIntoView({ behavior: "smooth" }), 30);
+        },
+        (finalStatus) => {
+          setRunning(false);
+          if (finalStatus) {
+            setRunStatus(finalStatus as unknown as KairosRunStatus);
+            setPhase((finalStatus as unknown as KairosRunStatus).phase || "done");
+          }
+        },
+        () => { if (!sseWorking) startPolling(started.run_id); }
+      );
+    } catch (err) {
+      setRunning(false);
+      setPhase("failed");
+      toast({ title: "Failed to start run", description: String(err), variant: "destructive" });
+    }
+  };
+
+  const handleStop = () => {
+    cleanupRef.current?.();
+    if (pollRef.current) clearInterval(pollRef.current);
+    setRunning(false);
+    setPhase("failed");
+  };
+
+  // ── Benchmark grade badge ─────────────────────────────────────────────────
+  const gradeColor: Record<string, string> = {
+    CERTIFIED: "border-green-500/50 text-green-400",
+    CONDITIONAL: "border-yellow-500/50 text-yellow-400",
+    FAILED: "border-red-500/50 text-red-400",
+    INCONCLUSIVE: "border-gray-500/50 text-gray-400",
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-xs font-mono font-bold flex items-center gap-2">
+            <Cpu className="w-4 h-4 text-yellow-400" />
+            Kairos Execution Engine
+          </h3>
+          <p className="text-[10px] text-muted-foreground mt-0.5">Plan → Act → Observe → Refine</p>
+        </div>
+        <div className={`text-[10px] font-mono font-bold uppercase tracking-widest ${PHASE_COLOR[phase]}`}>
+          {phase}
+        </div>
+      </div>
+
+      {/* Phase bar */}
+      <KairosPhaseBar phase={phase} />
+
+      {/* Tenant selector */}
+      <div className="space-y-1">
+        <label className="text-[10px] font-mono text-muted-foreground uppercase">Workspace (Tenant)</label>
+        <select
+          className="w-full h-7 text-xs font-mono bg-background border border-input rounded px-2 disabled:opacity-50"
+          value={selectedTenantId ?? ""}
+          onChange={e => setSelectedTenantId(e.target.value ? Number(e.target.value) : null)}
+          disabled={running || loadingTenants}
+        >
+          <option value="">{loadingTenants ? "Loading…" : "Select workspace…"}</option>
+          {tenants.map(t => (
+            <option key={t.id} value={t.id}>{t.name} ({t.status})</option>
+          ))}
+        </select>
+      </div>
+
+      {/* Skill selector */}
+      <div className="space-y-1">
+        <label className="text-[10px] font-mono text-muted-foreground uppercase">Installed Skill</label>
+        <select
+          className="w-full h-7 text-xs font-mono bg-background border border-input rounded px-2 disabled:opacity-50"
+          value={selectedSkillId ?? ""}
+          onChange={e => setSelectedSkillId(e.target.value ? Number(e.target.value) : null)}
+          disabled={running || loadingSkills || selectedTenantId === null}
+        >
+          <option value="">
+            {selectedTenantId === null ? "Select workspace first" : loadingSkills ? "Loading…" : tenantSkills.length === 0 ? "No skills installed" : "Select skill…"}
+          </option>
+          {tenantSkills.map(ts => (
+            <option key={ts.skillId} value={ts.skillId}>
+              {ts.skill?.name ?? `Skill #${ts.skillId}`} — {ts.skill?.category ?? ""}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {/* Benchmark grade — server-side, read-only */}
+      {selectedSkillId !== null && (
+        <div className="rounded border border-border p-2 space-y-1">
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-mono text-muted-foreground uppercase">Benchmark Status</span>
+            {loadingBenchmark ? (
+              <Loader2 className="w-3 h-3 animate-spin text-muted-foreground" />
+            ) : (
+              <Badge variant="outline" className={`text-[9px] ${gradeColor[grade ?? ""] ?? "border-gray-500/50 text-gray-400"}`}>
+                {grade ?? "NOT TESTED"}
+              </Badge>
+            )}
+          </div>
+          {benchmarkResult && (
+            <BenchmarkExplainer result={benchmarkResult} />
+          )}
+          {isFailed && (
+            <p className="text-[9px] text-red-400 font-mono">Execution blocked — skill failed benchmark. Reforge via Archon to re-certify.</p>
+          )}
+        </div>
+      )}
+
+      {/* Goal input */}
+      <div className="space-y-1">
+        <label className="text-[10px] font-mono text-muted-foreground uppercase">Goal</label>
+        <Textarea value={goal} onChange={e => setGoal(e.target.value)}
+          placeholder="Describe what Kairos should accomplish…"
+          className="text-xs font-mono min-h-[64px] resize-none" disabled={running} />
+      </div>
+
+      {/* Run button */}
+      <div className="flex gap-2 items-center">
+        <Button size="sm" className="h-7 text-xs font-mono"
+          onClick={handleRun}
+          disabled={running || !goal.trim() || !isEligible}>
+          {running ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Zap className="w-3 h-3 mr-1" />}
+          {running ? "Running…" : "Run Kairos"}
+        </Button>
+        {running && (
+          <Button size="sm" variant="outline" className="h-7 text-xs font-mono" onClick={handleStop}>Stop</Button>
+        )}
+        {!selectedTenantId && <span className="text-[10px] text-muted-foreground font-mono">Select a workspace</span>}
+        {selectedTenantId && !selectedSkillId && <span className="text-[10px] text-muted-foreground font-mono">Select a skill</span>}
+        {isFailed && <span className="text-[10px] text-red-400 font-mono">FAILED benchmark — execution blocked</span>}
+      </div>
+
+      {/* Result summary */}
+      {runStatus && (
+        <div className={`rounded border p-3 text-xs font-mono space-y-1 ${
+          runStatus.status === "done" ? "border-green-500/30 bg-green-500/5" : "border-red-500/30 bg-red-500/5"
+        }`}>
+          <div className="flex items-center gap-2">
+            {runStatus.status === "done"
+              ? <CheckCircle className="w-3 h-3 text-green-400" />
+              : <AlertTriangle className="w-3 h-3 text-red-400" />}
+            <span className="font-bold">{runStatus.status === "done" ? "Completed" : "Failed"}</span>
+            {runStatus.degraded && (
+              <Badge variant="outline" className="text-[9px] border-orange-500/50 text-orange-400">DEGRADED</Badge>
+            )}
+          </div>
+          <div className="text-[10px] text-muted-foreground">
+            Turns: {runStatus.turn_count} · Tools: {runStatus.tool_calls_made} · Violations: {runStatus.violations.length}
+          </div>
+          {runStatus.error && <div className="text-[10px] text-red-400">{runStatus.error}</div>}
+          {runStatus.archon_reforge_ready && (
+            <Button size="sm" variant="outline"
+              className="h-6 text-[10px] font-mono border-orange-500/50 text-orange-400 hover:bg-orange-500/10 mt-1"
+              onClick={() => {
+                const ctx = runStatus.archon_context;
+                toast({ title: "Archon Reforge", description: `Reforge payload ready for skill ${ctx?.skill_id}. Connect Archon endpoint to execute.` });
+              }}>
+              <RefreshCw className="w-3 h-3 mr-1" />
+              Reforge via Archon
+            </Button>
+          )}
+        </div>
+      )}
+
+      {/* Sub-tabs: events / tools / violations */}
+      {events.length > 0 && (
+        <div className="space-y-2">
+          <div className="flex gap-1">
+            {(["events", "tools", "violations"] as const).map(tab => (
+              <button key={tab}
+                className={`text-[9px] font-mono uppercase px-2 py-0.5 rounded border transition-colors ${
+                  activeSubTab === tab ? "border-primary text-primary" : "border-border text-muted-foreground hover:border-primary/50"
+                }`}
+                onClick={() => setActiveSubTab(tab)}>
+                {tab} {tab === "violations" && violations.length > 0 ? `(${violations.length})` : ""}
+              </button>
+            ))}
+          </div>
+
+          {activeSubTab === "events" && (
+            <div className="rounded border border-border bg-black/20 p-2 max-h-48 overflow-y-auto space-y-0.5">
+              {events.map((ev, i) => (
+                <div key={i} className="text-[9px] font-mono text-muted-foreground">
+                  <span className="text-yellow-400/70">[{ev.type}]</span>{" "}
+                  {JSON.stringify(ev.payload).slice(0, 120)}
+                </div>
+              ))}
+              <div ref={streamEndRef} />
+            </div>
+          )}
+
+          {activeSubTab === "tools" && (
+            <div className="rounded border border-border bg-black/20 p-2 max-h-48 overflow-y-auto space-y-1">
+              {toolCalls.length === 0
+                ? <p className="text-[9px] text-muted-foreground font-mono">No tool calls yet</p>
+                : toolCalls.map((tc, i) => (
+                  <div key={i} className={`text-[9px] font-mono flex gap-2 ${tc.permitted ? "text-green-400/80" : "text-red-400/80"}`}>
+                    <span>{tc.permitted ? "✓" : "✗"}</span>
+                    <span className="font-bold">{tc.name}</span>
+                    <span className="text-muted-foreground truncate">{String(tc.result).slice(0, 80)}</span>
+                  </div>
+                ))
+              }
+            </div>
+          )}
+
+          {activeSubTab === "violations" && (
+            <div className="rounded border border-border bg-black/20 p-2 max-h-48 overflow-y-auto space-y-1">
+              {violations.length === 0
+                ? <p className="text-[9px] text-muted-foreground font-mono">No violations</p>
+                : violations.map((v, i) => (
+                  <div key={i} className="text-[9px] font-mono text-red-400/80 space-y-0.5">
+                    <div className="font-bold">{v.tool_name}</div>
+                    <div className="text-muted-foreground">{v.reason}</div>
+                    <div>score: {v.benchmark_score}</div>
+                  </div>
+                ))
+              }
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Final text output */}
+      {finalText && (
+        <div className="rounded border border-border bg-black/20 p-2">
+          <p className="text-[9px] font-mono text-muted-foreground uppercase mb-1">Result</p>
+          <p className="text-xs font-mono whitespace-pre-wrap">{finalText}</p>
+        </div>
+      )}
+
+      {/* Run history */}
+      <KairosRunHistory tenantId={selectedTenantId} skillSlug={selectedSkillSlug} />
+    </div>
+  );
+}
+
 // ─── ZOA-W Writing Tab ────────────────────────────────────────────────────────
 
 const WRITING_STAGE_LABELS: Record<string, string> = {
@@ -1672,6 +2225,7 @@ export default function ZoaPage() {
               { value: "compliance", label: "Compliance" },
               { value: "skill-factory", label: "⚡ Skill Forge" },
               { value: "writing", label: "✍ ZOA-W" },
+              { value: "kairos", label: "⚙ Kairos" },
             ].map(({ value, label }) => (
               <TabsTrigger
                 key={value}
@@ -1707,6 +2261,9 @@ export default function ZoaPage() {
             </TabsContent>
             <TabsContent value="writing" className="mt-0">
               <WritingTab />
+            </TabsContent>
+            <TabsContent value="kairos" className="mt-0">
+              <KairosTab />
             </TabsContent>
           </div>
         </Tabs>

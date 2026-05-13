@@ -458,3 +458,171 @@ export async function getWritingHealth(): Promise<{ status: string; agents: stri
     return { status: "offline", agents: [] };
   }
 }
+
+
+// ─── Kairos Execution Engine ──────────────────────────────────────────────────
+
+const KAIROS_BASE = `${ZOA_BASE.replace("/zoa", "")}/zoa/kairos`;
+
+export type KairosPhase = "idle" | "planning" | "acting" | "observing" | "refining" | "done" | "failed";
+
+export interface KairosRunRequest {
+  skill_id: string;
+  goal: string;
+  tenant_id?: string;
+  l1_score?: number;
+  l2_score?: number;
+  l3_score?: number;
+  l4_score?: number;
+  permitted_tools?: string[];
+  max_turns?: number;
+}
+
+export interface KairosRunStatus {
+  run_id: string;
+  skill_id: string;
+  phase: KairosPhase;
+  status: "running" | "done" | "failed";
+  turn_count: number;
+  tool_calls_made: number;
+  violations: Array<{ tool_name: string; reason: string; benchmark_score: number }>;
+  degraded: boolean;
+  result: string | null;
+  error: string | null;
+  started_at: string;
+  updated_at: string;
+  archon_reforge_ready: boolean;
+  archon_context: {
+    skill_id: string;
+    run_id: string;
+    goal: string;
+    violations: unknown[];
+    error_summary: string;
+  } | null;
+}
+
+export interface KairosEvent {
+  type: string;
+  run_id: string;
+  timestamp: string;
+  payload: Record<string, unknown>;
+}
+
+// ── Control-plane helpers ─────────────────────────────────────────────────
+
+export interface TenantRecord {
+  id: number;
+  name: string;
+  status: string;
+  skillPack: string | null;
+}
+
+export interface TenantSkillRecord {
+  id: number;
+  tenantId: number;
+  skillId: number;
+  installedAt: string;
+  skill?: {
+    id: number;
+    name: string;
+    slug: string;
+    category: string;
+  };
+}
+
+export interface BenchmarkResult {
+  id?: number;
+  skillId?: number;
+  grade: string | null;
+  overallScore: number | null;
+  levelScores: Record<string, number> | null;
+  llmResults?: unknown;
+  ranAt?: string;
+  status?: string;
+  message?: string;
+}
+
+const API_BASE = "/api";
+
+export async function getTenants(): Promise<TenantRecord[]> {
+  const res = await fetch(`${API_BASE}/tenants`, { credentials: "include" });
+  if (!res.ok) throw new Error(`getTenants: ${res.status}`);
+  const data = await res.json();
+  // api-server returns array directly
+  return Array.isArray(data) ? data : (data.tenants ?? []);
+}
+
+export async function getTenantSkills(tenantId: number): Promise<TenantSkillRecord[]> {
+  const res = await fetch(`${API_BASE}/tenants/${tenantId}/skills`, { credentials: "include" });
+  if (!res.ok) throw new Error(`getTenantSkills: ${res.status}`);
+  const data = await res.json();
+  return Array.isArray(data) ? data : (data.skills ?? []);
+}
+
+export async function getSkillBenchmarkResult(skillId: number): Promise<BenchmarkResult> {
+  const res = await fetch(`${API_BASE}/skills/${skillId}/benchmark-result`);
+  if (!res.ok) return { grade: null, overallScore: null, levelScores: null, status: "not_tested" };
+  return res.json();
+}
+
+export async function runKairos(req: KairosRunRequest): Promise<{ run_id: string; skill_id: string; phase: string; status: string; started_at: string }> {
+  const res = await fetch(`${KAIROS_BASE}/run`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  });
+  if (!res.ok) throw new Error(`Kairos start failed: ${res.status} ${await res.text()}`);
+  return res.json();
+}
+
+export async function getKairosRun(runId: string): Promise<KairosRunStatus> {
+  const res = await fetch(`${KAIROS_BASE}/run/${runId}`);
+  if (!res.ok) throw new Error(`Kairos poll failed: ${res.status}`);
+  return res.json();
+}
+
+export async function listKairosRuns(skillId?: string, tenantId?: string): Promise<{ runs: KairosRunStatus[]; total: number }> {
+  const params = new URLSearchParams();
+  if (skillId) params.set("skill_id", skillId);
+  if (tenantId) params.set("tenant_id", tenantId);
+  const qs = params.toString();
+  const url = qs ? `${KAIROS_BASE}/runs?${qs}` : `${KAIROS_BASE}/runs`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Kairos list failed: ${res.status}`);
+  return res.json();
+}
+
+export function streamKairosRun(
+  runId: string,
+  onEvent: (event: KairosEvent) => void,
+  onDone: (status: KairosRunStatus | null) => void,
+  onError?: (err: Event) => void
+): () => void {
+  const es = new EventSource(`${KAIROS_BASE}/run/${runId}/stream`);
+
+  const handleMsg = (e: MessageEvent) => {
+    try {
+      const parsed: KairosEvent = JSON.parse(e.data);
+      onEvent(parsed);
+      if (parsed.type === "run_complete") {
+        onDone(parsed.payload as unknown as KairosRunStatus);
+        es.close();
+      }
+    } catch {
+      // ignore malformed
+    }
+  };
+
+  es.onmessage = handleMsg;
+  const types = ["phase_change","text_chunk","thinking_chunk","tool_start","tool_end",
+                  "turn_done","permission_violation","permission_request","run_complete","error"];
+  for (const t of types) es.addEventListener(t, handleMsg as EventListener);
+
+  es.onerror = (e) => {
+    onError?.(e);
+    onDone(null);
+    es.close();
+  };
+
+  return () => es.close();
+}
