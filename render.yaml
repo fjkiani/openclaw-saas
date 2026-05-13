@@ -22,6 +22,10 @@ services:
         sync: false
       - key: RENDER_OWNER_ID
         sync: false
+      - key: BENCHMARK_SERVICE_URL
+        value: https://openclaw-benchmark.onrender.com
+      - key: BENCHMARK_GATE_ENABLED
+        value: "true"
 
   - type: web
     name: openclaw-saas

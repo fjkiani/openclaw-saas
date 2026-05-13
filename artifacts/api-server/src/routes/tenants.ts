@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { eq, and, desc } from "drizzle-orm";
 import { getAuth } from "@clerk/express";
-import { db, tenantsTable, skillsTable, tenantSkillsTable, activityEntriesTable } from "@workspace/db";
+import { db, tenantsTable, skillsTable, tenantSkillsTable, activityEntriesTable, skillBenchmarksTable } from "@workspace/db";
 import {
   CreateTenantBody,
   UpdateTenantBody,
@@ -26,6 +26,7 @@ import {
   stopTenant,
   destroyTenant,
 } from "@workspace/gateway-provisioner";
+import { checkBenchmarkGate } from "../lib/benchmarkClient";
 
 const router: IRouter = Router();
 
@@ -349,6 +350,44 @@ router.post("/tenants/:id/skills", requireAuth, async (req: any, res): Promise<v
   if (!skill) {
     res.status(404).json({ error: "Skill not found" });
     return;
+  }
+
+  // Benchmark gate — check if skill passes before installing
+  const BENCHMARK_GATE_ENABLED = process.env.BENCHMARK_GATE_ENABLED !== "false";
+  if (BENCHMARK_GATE_ENABLED) {
+    const [skillToCheck] = await db.select().from(skillsTable).where(eq(skillsTable.id, body.data.skillId)).limit(1);
+    if (skillToCheck) {
+      const gate = await checkBenchmarkGate(
+        skillToCheck.id,
+        skillToCheck.name,
+        skillToCheck.description,
+        skillToCheck.category,
+      );
+      if (!gate.passes) {
+        res.status(422).json({
+          error: "Skill failed benchmark — cannot install in production",
+          grade: gate.result?.grade,
+          overall_score: gate.result?.overall_score,
+          level_scores: gate.result?.level_scores,
+          reason: gate.reason,
+        });
+        return;
+      }
+      // Store benchmark result
+      if (gate.result) {
+        await db.insert(skillBenchmarksTable).values({
+          skillId: skillToCheck.id,
+          benchmarkId: gate.result.benchmark_id,
+          grade: gate.result.grade,
+          overallScore: gate.result.overall_score,
+          levelScores: gate.result.level_scores as any,
+          llmResults: gate.result.llm_results as any,
+          testSuite: "quick",
+          durationMs: gate.result.duration_ms,
+          error: gate.result.error,
+        }).onConflictDoNothing();
+      }
+    }
   }
 
   const [tenantSkill] = await db

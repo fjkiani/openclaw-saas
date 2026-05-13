@@ -1,12 +1,13 @@
 import { Router, type IRouter } from "express";
 import { eq, ilike, or, sql } from "drizzle-orm";
-import { db, skillsTable } from "@workspace/db";
+import { db, skillsTable, skillBenchmarksTable } from "@workspace/db";
 import {
   ListSkillsQueryParams,
   ListSkillsResponse,
   ListFeaturedSkillsResponse,
   ListSkillCategoriesResponse,
 } from "@workspace/api-zod";
+import { runBenchmark, getBenchmarkResult } from "../lib/benchmarkClient";
 
 const SKILLS_SOURCE =
   "https://raw.githubusercontent.com/VoltAgent/awesome-openclaw-skills/main/README.md";
@@ -202,6 +203,61 @@ router.post("/skills/refresh", async (_req, res): Promise<void> => {
     .select({ count: sql<number>`count(*)::int` })
     .from(skillsTable);
   res.json({ ok: true, skillsLoaded: count });
+});
+
+router.post("/skills/:id/benchmark", async (req, res): Promise<void> => {
+  const skillId = parseInt(req.params.id);
+  if (isNaN(skillId)) {
+    res.status(400).json({ error: "Invalid skill id" });
+    return;
+  }
+  const [skill] = await db.select().from(skillsTable).where(eq(skillsTable.id, skillId)).limit(1);
+  if (!skill) {
+    res.status(404).json({ error: "Skill not found" });
+    return;
+  }
+  try {
+    const run = await runBenchmark({
+      skill_id: skill.id,
+      skill_name: skill.name,
+      skill_description: skill.description,
+      skill_category: skill.category,
+      test_suite: (req.query.suite as any) || "standard",
+    });
+    res.json({ benchmark_id: run.benchmark_id, status: run.status, skill_id: skillId });
+  } catch (err: any) {
+    res.status(503).json({ error: "Benchmark service unavailable", details: err?.message });
+  }
+});
+
+router.get("/skills/:id/benchmark-result", async (req, res): Promise<void> => {
+  const skillId = parseInt(req.params.id);
+  if (isNaN(skillId)) {
+    res.status(400).json({ error: "Invalid skill id" });
+    return;
+  }
+  // Get latest benchmark from DB
+  const results = await db
+    .select()
+    .from(skillBenchmarksTable)
+    .where(eq(skillBenchmarksTable.skillId, skillId))
+    .orderBy(skillBenchmarksTable.ranAt)
+    .limit(1);
+
+  if (!results.length) {
+    res.json({ grade: null, overall_score: null, status: "not_tested", message: "No benchmark run yet" });
+    return;
+  }
+  res.json(results[0]);
+});
+
+router.get("/benchmark/:benchmarkId", async (req, res): Promise<void> => {
+  try {
+    const result = await getBenchmarkResult(req.params.benchmarkId);
+    res.json(result);
+  } catch (err: any) {
+    res.status(503).json({ error: "Benchmark service unavailable", details: err?.message });
+  }
 });
 
 export default router;

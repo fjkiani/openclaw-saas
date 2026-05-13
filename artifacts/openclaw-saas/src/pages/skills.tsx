@@ -10,12 +10,15 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { Layout, PageHeader, EmptyState } from "@/components/Layout";
 import { useToast } from "@/hooks/use-toast";
-import { Zap, Star, Download, Search, Filter } from "lucide-react";
+import { Zap, Star, Download, Search, Filter, FlaskConical } from "lucide-react";
+import { BenchmarkPanel, BenchmarkGradeBadge, type BenchmarkResult, type BenchmarkGrade } from "@/components/BenchmarkPanel";
 
 export default function SkillsPage() {
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("");
   const [selectedTenantId, setSelectedTenantId] = useState<number | null>(null);
+  const [benchmarkResults, setBenchmarkResults] = useState<Record<number, BenchmarkResult>>({});
+  const [runningBenchmarks, setRunningBenchmarks] = useState<Set<number>>(new Set());
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
@@ -39,12 +42,60 @@ export default function SkillsPage() {
     },
   });
 
-  const handleInstall = (skillId: number) => {
+  const handleRunBenchmark = async (skill: { id: number; name: string; description: string; category: string }) => {
+    setRunningBenchmarks(prev => new Set(prev).add(skill.id));
+    try {
+      // Trigger async benchmark run
+      const runRes = await fetch(`/api/skills/${skill.id}/benchmark?suite=standard`, { method: "POST" });
+      if (!runRes.ok) throw new Error("Failed to start benchmark");
+      const { benchmark_id } = await runRes.json();
+
+      // Poll for result (max 90s)
+      let attempts = 0;
+      const poll = async () => {
+        if (attempts++ > 30) {
+          setBenchmarkResults(prev => ({
+            ...prev,
+            [skill.id]: { grade: "INCONCLUSIVE", overall_score: null, status: "timeout" }
+          }));
+          setRunningBenchmarks(prev => { const s = new Set(prev); s.delete(skill.id); return s; });
+          return;
+        }
+        try {
+          const res = await fetch(`/api/benchmark/${benchmark_id}`);
+          if (res.ok) {
+            const result = await res.json();
+            if (result.status === "completed" || result.status === "failed") {
+              setBenchmarkResults(prev => ({ ...prev, [skill.id]: result }));
+              setRunningBenchmarks(prev => { const s = new Set(prev); s.delete(skill.id); return s; });
+              return;
+            }
+          }
+        } catch {}
+        setTimeout(poll, 3000);
+      };
+      setTimeout(poll, 2000);
+    } catch (err) {
+      setRunningBenchmarks(prev => { const s = new Set(prev); s.delete(skill.id); return s; });
+      toast({ title: "Benchmark failed to start", description: "Check that the benchmark service is running", variant: "destructive" });
+    }
+  };
+
+  const handleInstall = (skill: { id: number; name: string; description: string; category: string }) => {
+    const benchResult = benchmarkResults[skill.id];
+    if (benchResult?.grade === "FAILED") {
+      toast({
+        title: "Cannot install — benchmark failed",
+        description: `Skill scored ${benchResult.overall_score}/100. Run benchmark again or choose a different skill.`,
+        variant: "destructive"
+      });
+      return;
+    }
     if (!selectedTenantId) {
       toast({ title: "Select an agent first", description: "Choose which agent to install this skill on" });
       return;
     }
-    installSkill.mutate({ id: selectedTenantId, data: { skillId } });
+    installSkill.mutate({ id: selectedTenantId, data: { skillId: skill.id } });
   };
 
   return (
@@ -53,6 +104,26 @@ export default function SkillsPage() {
         title="Skill Catalog"
         subtitle="5,400+ skills from ClawHub — install on any agent"
       />
+
+      {/* Benchmark stats bar */}
+      <div className="px-6 py-2 border-b border-border bg-card/50 flex items-center gap-4 text-[10px] font-mono text-muted-foreground">
+        <span className="flex items-center gap-1">
+          <FlaskConical className="w-3 h-3" />
+          Benchmark Gate Active
+        </span>
+        <span className="text-zinc-600">|</span>
+        <span>
+          {Object.values(benchmarkResults).filter(r => r.grade === "CERTIFIED").length} certified
+        </span>
+        <span className="text-zinc-600">·</span>
+        <span>
+          {Object.values(benchmarkResults).filter(r => r.grade === "CONDITIONAL").length} conditional
+        </span>
+        <span className="text-zinc-600">·</span>
+        <span className="text-red-400">
+          {Object.values(benchmarkResults).filter(r => r.grade === "FAILED").length} failed
+        </span>
+      </div>
 
       <div className="p-6 space-y-5">
         {/* Controls */}
@@ -109,8 +180,11 @@ export default function SkillsPage() {
                 <SkillCard
                   key={skill.id}
                   skill={skill}
-                  onInstall={handleInstall}
+                  onInstall={(id) => handleInstall(skill)}
                   installing={installSkill.isPending}
+                  benchmarkResult={benchmarkResults[skill.id] || null}
+                  isRunningBenchmark={runningBenchmarks.has(skill.id)}
+                  onRunBenchmark={() => handleRunBenchmark(skill)}
                   featured
                 />
               ))}
@@ -148,8 +222,11 @@ export default function SkillsPage() {
                 <SkillCard
                   key={skill.id}
                   skill={skill}
-                  onInstall={handleInstall}
+                  onInstall={(id) => handleInstall(skill)}
                   installing={installSkill.isPending}
+                  benchmarkResult={benchmarkResults[skill.id] || null}
+                  isRunningBenchmark={runningBenchmarks.has(skill.id)}
+                  onRunBenchmark={() => handleRunBenchmark(skill)}
                 />
               ))}
             </div>
@@ -165,11 +242,17 @@ function SkillCard({
   onInstall,
   installing,
   featured,
+  benchmarkResult,
+  isRunningBenchmark,
+  onRunBenchmark,
 }: {
   skill: { id: number; name: string; slug: string; description: string; category: string; stars: number; installs: number; featured: boolean; tags: string[] };
   onInstall: (id: number) => void;
   installing: boolean;
   featured?: boolean;
+  benchmarkResult?: BenchmarkResult | null;
+  isRunningBenchmark?: boolean;
+  onRunBenchmark?: () => void;
 }) {
   return (
     <div
@@ -190,6 +273,14 @@ function SkillCard({
       <p className="text-[10px] font-mono text-muted-foreground mb-2 line-clamp-2 leading-relaxed">
         {skill.description}
       </p>
+      {/* Benchmark status */}
+      <div className="mb-2">
+        <BenchmarkPanel
+          result={benchmarkResult || null}
+          isRunning={isRunningBenchmark}
+          onRunBenchmark={onRunBenchmark}
+        />
+      </div>
       <div className="flex items-center gap-3 mb-3">
         <span className="flex items-center gap-1 text-[10px] font-mono text-muted-foreground">
           <Star className="w-3 h-3" />
@@ -203,11 +294,12 @@ function SkillCard({
       </div>
       <button
         onClick={() => onInstall(skill.id)}
-        disabled={installing}
-        className="w-full py-1.5 bg-primary/10 text-primary border border-primary/20 rounded text-[10px] font-mono hover:bg-primary/20 transition-colors disabled:opacity-50"
+        disabled={installing || benchmarkResult?.grade === "FAILED"}
+        title={benchmarkResult?.grade === "FAILED" ? "Skill must pass benchmark before installing" : undefined}
+        className="w-full py-1.5 bg-primary/10 text-primary border border-primary/20 rounded text-[10px] font-mono hover:bg-primary/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         data-testid={`button-install-${skill.id}`}
       >
-        Install on agent
+        {benchmarkResult?.grade === "FAILED" ? "Benchmark Failed — Cannot Install" : "Install on agent"}
       </button>
     </div>
   );

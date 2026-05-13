@@ -8,3 +8,4 @@ export * from "./tenantConnectors";
 export * from "./knowledgeGraphs";
 export * from "./graphDocuments";
 export * from "./graphChunks";
+export * from "./skillBenchmarks";
