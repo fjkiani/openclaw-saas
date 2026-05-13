@@ -10,6 +10,8 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      - key: PORT
+        value: "3001"
       - key: DATABASE_URL
         fromDatabase:
           name: openclaw-db
@@ -32,8 +34,12 @@ services:
     runtime: static
     region: oregon
     buildCommand: pnpm install --frozen-lockfile && pnpm --filter @workspace/openclaw-saas run build
-    staticPublishPath: artifacts/openclaw-saas/dist
+    staticPublishPath: artifacts/openclaw-saas/dist/public
     envVars:
+      - key: VITE_CLERK_PUBLISHABLE_KEY
+        sync: false
+      - key: VITE_API_URL
+        value: https://openclaw-api.onrender.com
       - key: VITE_ZOA_SERVICE_URL
         value: https://openclaw-benchmark.onrender.com/api/v1/zoa
       - key: VITE_ARCHON_FACTORY_URL
@@ -55,7 +61,7 @@ services:
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
-    rootDir: .
+    rootDir: backend
     envVars:
       - key: OPENROUTER_API_KEY
         sync: false
