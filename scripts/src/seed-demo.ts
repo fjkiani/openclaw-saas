@@ -4,13 +4,24 @@
  * Idempotent demo seed for OpenClaw SaaS.
  * Run after `pnpm --filter @workspace/db run push`:
  *
- *   DATABASE_URL=<url> pnpm --filter @workspace/scripts tsx src/seed-demo.ts
+ *   DATABASE_URL=<url> pnpm --filter @workspace/scripts run seed-demo
  *
  * What it does:
  *   1. Upserts the 6 ZOA skills (slug-keyed, safe to re-run)
- *   2. Creates a demo tenant owned by DEMO_USER_ID (env var or fallback)
- *   3. Installs all 6 ZOA skills on that tenant
- *   4. Inserts CERTIFIED benchmark records for 3 skills, CONDITIONAL for 2, FAILED for 1
+ *   2. Inserts benchmark records for all 6 skills
+ *      (3 CERTIFIED / 2 CONDITIONAL / 1 FAILED)
+ *   3. Creates a demo tenant owned by DEMO_USER_ID (env var or fallback)
+ *   4. Installs all 6 ZOA skills on that tenant
+ *
+ * Score scales (IMPORTANT — must match permission_gate.py thresholds):
+ *   l4: 0.0–10.0  gate threshold: l4 >= 6.0 to execute
+ *   l2: 0–100     gate threshold: l2 >= 60 for write tools
+ *   l3: 0–100     gate threshold: l3 >= 80 for aggressive chaining
+ *   l1: 0–100     informational only
+ *
+ * BenchmarkExplainer renders levelScores values directly as numbers,
+ * so the stored shape must be { l1: number, l2: number, l3: number, l4: number }
+ * with the correct scale per level.
  *
  * The demo tenant userId must match the Clerk userId of the account you log in with.
  * Set DEMO_USER_ID env var to your Clerk userId (found in Clerk dashboard → Users).
@@ -94,72 +105,56 @@ const ZOA_SKILLS = [
   },
 ];
 
-// ── 2. Benchmark fixtures (keyed by skill slug) ───────────────────────────────
+// ── 2. Benchmark fixtures ─────────────────────────────────────────────────────
+//
+// Score scales:
+//   l4: 0.0–10.0  (permission gate: l4 >= 6.0 → certified)
+//   l2: 0–100     (permission gate: l2 >= 60 → write tools allowed)
+//   l3: 0–100     (permission gate: l3 >= 80 → aggressive chaining)
+//   l1: 0–100     (informational)
+//
+// These are stored as-is in levelScores jsonb and read directly by:
+//   - BenchmarkExplainer: renders each value as a number
+//   - KairosTab resolvedScores: passes l4/l2/l3 directly to POST /kairos/run
+//   - permission_gate.py: compares against thresholds above
 
 const BENCHMARK_FIXTURES: Record<string, {
   grade: string;
   overallScore: number;
-  levelScores: Record<string, unknown>;
+  levelScores: { l1: number; l2: number; l3: number; l4: number };
 }> = {
+  // CERTIFIED: l4 >= 6.0, l2 >= 60, l3 >= 80
   "zoa-billing-agent": {
     grade: "CERTIFIED",
     overallScore: 91,
-    levelScores: {
-      l1: { score: 95, passed: 19, total: 20, weight: 0.25 },
-      l2: { score: 88, passed: 22, total: 25, weight: 0.25 },
-      l3: { score: 90, passed: 18, total: 20, weight: 0.25 },
-      l4: { score: 91, passed: 9,  total: 10, weight: 0.25 },
-    },
+    levelScores: { l1: 95, l2: 88, l3: 90, l4: 9.1 },
   },
   "zoa-scheduling-agent": {
     grade: "CERTIFIED",
     overallScore: 87,
-    levelScores: {
-      l1: { score: 92, passed: 18, total: 20, weight: 0.25 },
-      l2: { score: 84, passed: 21, total: 25, weight: 0.25 },
-      l3: { score: 85, passed: 17, total: 20, weight: 0.25 },
-      l4: { score: 87, passed: 9,  total: 10, weight: 0.25 },
-    },
+    levelScores: { l1: 92, l2: 84, l3: 85, l4: 8.7 },
   },
   "zoa-payroll-agent": {
     grade: "CERTIFIED",
     overallScore: 83,
-    levelScores: {
-      l1: { score: 90, passed: 18, total: 20, weight: 0.25 },
-      l2: { score: 80, passed: 20, total: 25, weight: 0.25 },
-      l3: { score: 82, passed: 16, total: 20, weight: 0.25 },
-      l4: { score: 80, passed: 8,  total: 10, weight: 0.25 },
-    },
+    levelScores: { l1: 90, l2: 80, l3: 82, l4: 8.0 },
   },
+  // CONDITIONAL: l4 >= 6.0 (can execute) but l2 < 60 or l3 < 80 (restricted)
   "zoa-hr-agent": {
     grade: "CONDITIONAL",
     overallScore: 71,
-    levelScores: {
-      l1: { score: 85, passed: 17, total: 20, weight: 0.25 },
-      l2: { score: 72, passed: 18, total: 25, weight: 0.25 },
-      l3: { score: 65, passed: 13, total: 20, weight: 0.25 },
-      l4: { score: 62, passed: 6,  total: 10, weight: 0.25 },
-    },
+    levelScores: { l1: 85, l2: 55, l3: 65, l4: 6.2 },
   },
   "zoa-procurement-agent": {
     grade: "CONDITIONAL",
     overallScore: 68,
-    levelScores: {
-      l1: { score: 80, passed: 16, total: 20, weight: 0.25 },
-      l2: { score: 70, passed: 17, total: 25, weight: 0.25 },
-      l3: { score: 62, passed: 12, total: 20, weight: 0.25 },
-      l4: { score: 60, passed: 6,  total: 10, weight: 0.25 },
-    },
+    levelScores: { l1: 80, l2: 52, l3: 62, l4: 6.0 },
   },
+  // FAILED: l4 < 6.0 → all tools blocked
   "zoa-compliance-agent": {
     grade: "FAILED",
     overallScore: 44,
-    levelScores: {
-      l1: { score: 70, passed: 14, total: 20, weight: 0.25 },
-      l2: { score: 48, passed: 12, total: 25, weight: 0.25 },
-      l3: { score: 30, passed: 6,  total: 20, weight: 0.25 },
-      l4: { score: 28, passed: 3,  total: 10, weight: 0.25 },
-    },
+    levelScores: { l1: 70, l2: 48, l3: 30, l4: 2.8 },
   },
 };
 
@@ -200,7 +195,7 @@ async function main() {
     console.log(`  OK  ${skill.slug} → id=${row.id}`);
   }
 
-  // ── Step 2: Upsert benchmark records ──────────────────────────────────────
+  // ── Step 2: Insert benchmark records ──────────────────────────────────────
   console.log("\n[2/4] Inserting benchmark records...");
   for (const [slug, fixture] of Object.entries(BENCHMARK_FIXTURES)) {
     const skillId = skillIds[slug];
@@ -216,7 +211,10 @@ async function main() {
       testSuite: "standard",
       durationMs: Math.floor(Math.random() * 8000) + 4000,
     });
-    console.log(`  OK  ${slug} → grade=${fixture.grade} score=${fixture.overallScore}`);
+    console.log(
+      `  OK  ${slug} → grade=${fixture.grade} overall=${fixture.overallScore} ` +
+      `l4=${fixture.levelScores.l4} l2=${fixture.levelScores.l2} l3=${fixture.levelScores.l3}`
+    );
   }
 
   // ── Step 3: Create demo tenant (skip if already exists for this user) ──────
@@ -270,7 +268,15 @@ async function main() {
   console.log(`  Tenant id : ${tenantId}`);
   console.log(`  User id   : ${DEMO_USER_ID}`);
   console.log(`  Skills    : ${Object.keys(skillIds).length} installed`);
-  console.log(`  Benchmarks: 3 CERTIFIED, 2 CONDITIONAL, 1 FAILED\n`);
+  console.log(`\nPermission gate preview:`);
+  for (const [slug, f] of Object.entries(BENCHMARK_FIXTURES)) {
+    const l4ok = f.levelScores.l4 >= 6.0;
+    const l2ok = f.levelScores.l2 >= 60;
+    const l3ok = f.levelScores.l3 >= 80;
+    const exec = l4ok ? (l2ok ? "WRITE+READ" : "READ-ONLY") : "BLOCKED";
+    console.log(`  ${exec.padEnd(10)} ${slug}  l4=${f.levelScores.l4} l2=${f.levelScores.l2} l3=${f.levelScores.l3}`);
+  }
+  console.log("");
 
   process.exit(0);
 }

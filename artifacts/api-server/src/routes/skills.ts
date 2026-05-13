@@ -245,7 +245,7 @@ router.get("/skills/:id/benchmark-result", async (req, res): Promise<void> => {
     .limit(1);
 
   if (!results.length) {
-    res.json({ grade: null, overall_score: null, status: "not_tested", message: "No benchmark run yet" });
+    res.json({ grade: null, overallScore: null, levelScores: null, status: "not_tested", message: "No benchmark run yet" });
     return;
   }
   res.json(results[0]);
