@@ -116,8 +116,8 @@ export async function runSeed(): Promise<void> {
 
     // Version snapshot v1
     const vRes = await client.query(`
-      INSERT INTO dataset_versions (tenant_id, dataset_id, version, document_count, status)
-      VALUES ($1, $2, 1, 2, 'ready')
+      INSERT INTO dataset_versions (tenant_id, dataset_id, version, document_count)
+      VALUES ($1, $2, 1, 2)
       ON CONFLICT DO NOTHING
       RETURNING id
     `, [tenantId, datasetId]);
