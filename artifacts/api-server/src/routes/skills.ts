@@ -99,11 +99,23 @@ async function refreshSkillsFromGitHub(): Promise<void> {
       throw new Error("README parsed 0 skills — skipping update");
     }
 
-    await db.delete(skillsTable);
-
+    // Use upsert (ON CONFLICT slug DO UPDATE) instead of DELETE + INSERT
+    // This preserves benchmark data for seeded ZOA skills and avoids FK violations.
     for (let i = 0; i < parsed.length; i += 100) {
       const chunk = parsed.slice(i, i + 100);
-      await db.insert(skillsTable).values(chunk);
+      await db
+        .insert(skillsTable)
+        .values(chunk)
+        .onConflictDoUpdate({
+          target: skillsTable.slug,
+          set: {
+            name: sql`EXCLUDED.name`,
+            description: sql`EXCLUDED.description`,
+            category: sql`EXCLUDED.category`,
+            featured: sql`EXCLUDED.featured`,
+            tags: sql`EXCLUDED.tags`,
+          },
+        });
     }
 
     lastFetchedAt = new Date();
@@ -113,6 +125,7 @@ async function refreshSkillsFromGitHub(): Promise<void> {
 }
 
 async function ensureSkillsLoaded(): Promise<void> {
+  // If we already fetched this process lifetime and it's fresh, skip.
   if (lastFetchedAt && Date.now() - lastFetchedAt.getTime() < SKILLS_TTL_MS) {
     return;
   }
@@ -121,8 +134,18 @@ async function ensureSkillsLoaded(): Promise<void> {
     .select({ count: sql<number>`count(*)::int` })
     .from(skillsTable);
 
-  if (count === 0 || !lastFetchedAt) {
+  if (count === 0) {
+    // DB is empty — fetch from GitHub now.
     await refreshSkillsFromGitHub();
+    return;
+  }
+
+  if (!lastFetchedAt) {
+    // DB has rows (seeded on startup) but this process hasn't fetched yet.
+    // Mark as "loaded" so we don't wipe seed data on first request.
+    lastFetchedAt = new Date();
+    // Kick off a background refresh so GitHub skills get merged in.
+    refreshSkillsFromGitHub().catch(() => {});
     return;
   }
 

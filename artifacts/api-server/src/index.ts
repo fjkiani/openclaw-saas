@@ -57,7 +57,7 @@ async function runMigrations(): Promise<void> {
     await client.query(`
       CREATE TABLE IF NOT EXISTS "skill_benchmarks" (
         "id" serial PRIMARY KEY NOT NULL,
-        "skill_id" integer NOT NULL REFERENCES "skills"("id"),
+        "skill_id" integer NOT NULL REFERENCES "skills"("id") ON DELETE CASCADE,
         "benchmark_id" text NOT NULL,
         "status" text DEFAULT 'pending' NOT NULL,
         "overall_score" real,
@@ -67,6 +67,16 @@ async function runMigrations(): Promise<void> {
         "created_at" timestamp with time zone DEFAULT now() NOT NULL,
         "updated_at" timestamp with time zone DEFAULT now() NOT NULL
       )
+    `);
+
+    // Add columns required by Drizzle ORM schema (idempotent via ADD COLUMN IF NOT EXISTS)
+    await client.query(`
+      ALTER TABLE "skill_benchmarks"
+        ADD COLUMN IF NOT EXISTS "ran_at" timestamp with time zone DEFAULT now() NOT NULL,
+        ADD COLUMN IF NOT EXISTS "test_suite" text NOT NULL DEFAULT 'standard',
+        ADD COLUMN IF NOT EXISTS "llm_results" jsonb,
+        ADD COLUMN IF NOT EXISTS "duration_ms" integer,
+        ADD COLUMN IF NOT EXISTS "error" text
     `);
 
     await client.query(`
