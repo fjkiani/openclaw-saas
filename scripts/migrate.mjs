@@ -1,10 +1,9 @@
 #!/usr/bin/env node
 /**
- * migrate.mjs — Create all OpenClaw DB tables using drizzle-orm push.
+ * migrate.mjs — Create all OpenClaw DB tables using raw SQL.
  * Run before starting the API server.
  * Uses DATABASE_URL env var (internal Render URL works here).
  */
-import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
 
 const { Pool } = pg;
@@ -22,7 +21,6 @@ try {
   const client = await pool.connect();
   console.log("[migrate] Connected. Creating tables...");
   
-  // Create all tables in dependency order
   await client.query(`
     CREATE TABLE IF NOT EXISTS "tenants" (
       "id" text PRIMARY KEY NOT NULL,
@@ -32,8 +30,9 @@ try {
       "stripe_customer_id" text,
       "stripe_subscription_id" text,
       "created_at" timestamp with time zone DEFAULT now() NOT NULL
-    );
+    )
   `);
+  console.log("[migrate] tenants ✓");
   
   await client.query(`
     CREATE TABLE IF NOT EXISTS "skills" (
@@ -51,8 +50,9 @@ try {
       "archon_run_id" text,
       "implementation" text,
       "created_at" timestamp with time zone DEFAULT now() NOT NULL
-    );
+    )
   `);
+  console.log("[migrate] skills ✓");
   
   await client.query(`
     CREATE TABLE IF NOT EXISTS "skill_benchmarks" (
@@ -66,8 +66,9 @@ try {
       "result_json" jsonb,
       "created_at" timestamp with time zone DEFAULT now() NOT NULL,
       "updated_at" timestamp with time zone DEFAULT now() NOT NULL
-    );
+    )
   `);
+  console.log("[migrate] skill_benchmarks ✓");
   
   await client.query(`
     CREATE TABLE IF NOT EXISTS "tenant_skills" (
@@ -76,8 +77,9 @@ try {
       "skill_id" integer NOT NULL REFERENCES "skills"("id"),
       "installed_at" timestamp with time zone DEFAULT now() NOT NULL,
       "enabled" boolean DEFAULT true NOT NULL
-    );
+    )
   `);
+  console.log("[migrate] tenant_skills ✓");
   
   await client.query(`
     CREATE TABLE IF NOT EXISTS "activity_entries" (
@@ -87,8 +89,9 @@ try {
       "event_type" text NOT NULL,
       "payload" jsonb,
       "created_at" timestamp with time zone DEFAULT now() NOT NULL
-    );
+    )
   `);
+  console.log("[migrate] activity_entries ✓");
   
   await client.query(`
     CREATE TABLE IF NOT EXISTS "chat_messages" (
@@ -97,8 +100,9 @@ try {
       "role" text NOT NULL,
       "content" text NOT NULL,
       "created_at" timestamp with time zone DEFAULT now() NOT NULL
-    );
+    )
   `);
+  console.log("[migrate] chat_messages ✓");
   
   await client.query(`
     CREATE TABLE IF NOT EXISTS "connectors" (
@@ -108,8 +112,9 @@ try {
       "description" text NOT NULL,
       "icon_url" text,
       "created_at" timestamp with time zone DEFAULT now() NOT NULL
-    );
+    )
   `);
+  console.log("[migrate] connectors ✓");
   
   await client.query(`
     CREATE TABLE IF NOT EXISTS "tenant_connectors" (
@@ -119,8 +124,9 @@ try {
       "encrypted_credential" text,
       "verified" boolean DEFAULT false NOT NULL,
       "created_at" timestamp with time zone DEFAULT now() NOT NULL
-    );
+    )
   `);
+  console.log("[migrate] tenant_connectors ✓");
   
   await client.query(`
     CREATE TABLE IF NOT EXISTS "knowledge_graphs" (
@@ -129,8 +135,9 @@ try {
       "name" text NOT NULL,
       "description" text,
       "created_at" timestamp with time zone DEFAULT now() NOT NULL
-    );
+    )
   `);
+  console.log("[migrate] knowledge_graphs ✓");
   
   await client.query(`
     CREATE TABLE IF NOT EXISTS "graph_documents" (
@@ -140,8 +147,9 @@ try {
       "content" text NOT NULL,
       "source_url" text,
       "created_at" timestamp with time zone DEFAULT now() NOT NULL
-    );
+    )
   `);
+  console.log("[migrate] graph_documents ✓");
   
   await client.query(`
     CREATE TABLE IF NOT EXISTS "graph_chunks" (
@@ -151,8 +159,9 @@ try {
       "embedding" real[],
       "metadata" jsonb,
       "created_at" timestamp with time zone DEFAULT now() NOT NULL
-    );
+    )
   `);
+  console.log("[migrate] graph_chunks ✓");
   
   await client.query(`
     CREATE TABLE IF NOT EXISTS "skill_versions" (
@@ -162,8 +171,9 @@ try {
       "implementation" text NOT NULL,
       "archon_run_id" text,
       "created_at" timestamp with time zone DEFAULT now() NOT NULL
-    );
+    )
   `);
+  console.log("[migrate] skill_versions ✓");
   
   client.release();
   console.log("[migrate] All tables created successfully.");
