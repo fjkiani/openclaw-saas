@@ -8,6 +8,7 @@ import {
   LogOut,
   ChevronRight,
   Activity,
+  FlaskConical,
 } from "lucide-react";
 
 const navItems = [
@@ -15,6 +16,7 @@ const navItems = [
   { href: "/agents", icon: Bot, label: "Agents" },
   { href: "/skills", icon: Zap, label: "Skills" },
   { href: "/zoa", icon: Zap, label: "ZOA" },
+  { href: "/forge", icon: FlaskConical, label: "Model Forge" },
   { href: "/billing", icon: CreditCard, label: "Billing" },
 ];
 

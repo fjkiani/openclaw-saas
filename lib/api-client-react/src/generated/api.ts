@@ -23,9 +23,17 @@ import type {
   BillingUsage,
   ChatMessage,
   ConnectorDef,
+  CreateForgeDatasetBody,
+  CreateForgeWorkspaceBody,
   CreateKnowledgeGraphBody,
   CreateTenantBody,
+  CreateTrainingJobBody,
   DashboardSummary,
+  DatasetDocument,
+  DatasetVersion,
+  ForgeDataset,
+  ForgeWorkspace,
+  GetForgeDataset200,
   GraphDocument,
   GraphQueryBody,
   GraphQueryResult,
@@ -33,13 +41,18 @@ import type {
   InstallConnectorBody,
   InstallSkillBody,
   KnowledgeGraph,
+  ListModelRegistry200Item,
   ListSkillsParams,
+  ModelDeployment,
+  ModelPolicy,
+  RegisterDocumentBody,
   SendChatMessageBody,
   Skill,
   SkillCategory,
   Tenant,
   TenantConnector,
   TenantSkill,
+  TrainingJob,
   UpdateTenantBody,
 } from "./api.schemas";
 
@@ -2470,6 +2483,1550 @@ export function useGetBillingUsage<
   request?: SecondParameter<typeof customFetch>;
 }): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
   const queryOptions = getGetBillingUsageQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary List model workspaces for current tenant
+ */
+export const getListForgeWorkspacesUrl = () => {
+  return `/api/forge/workspaces`;
+};
+
+export const listForgeWorkspaces = async (
+  options?: RequestInit,
+): Promise<ForgeWorkspace[]> => {
+  return customFetch<ForgeWorkspace[]>(getListForgeWorkspacesUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListForgeWorkspacesQueryKey = () => {
+  return [`/api/forge/workspaces`] as const;
+};
+
+export const getListForgeWorkspacesQueryOptions = <
+  TData = Awaited<ReturnType<typeof listForgeWorkspaces>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listForgeWorkspaces>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListForgeWorkspacesQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listForgeWorkspaces>>
+  > = ({ signal }) => listForgeWorkspaces({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listForgeWorkspaces>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListForgeWorkspacesQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listForgeWorkspaces>>
+>;
+export type ListForgeWorkspacesQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List model workspaces for current tenant
+ */
+
+export function useListForgeWorkspaces<
+  TData = Awaited<ReturnType<typeof listForgeWorkspaces>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listForgeWorkspaces>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListForgeWorkspacesQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Create a new model workspace
+ */
+export const getCreateForgeWorkspaceUrl = () => {
+  return `/api/forge/workspaces`;
+};
+
+export const createForgeWorkspace = async (
+  createForgeWorkspaceBody: CreateForgeWorkspaceBody,
+  options?: RequestInit,
+): Promise<ForgeWorkspace> => {
+  return customFetch<ForgeWorkspace>(getCreateForgeWorkspaceUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(createForgeWorkspaceBody),
+  });
+};
+
+export const getCreateForgeWorkspaceMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createForgeWorkspace>>,
+    TError,
+    { data: BodyType<CreateForgeWorkspaceBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createForgeWorkspace>>,
+  TError,
+  { data: BodyType<CreateForgeWorkspaceBody> },
+  TContext
+> => {
+  const mutationKey = ["createForgeWorkspace"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createForgeWorkspace>>,
+    { data: BodyType<CreateForgeWorkspaceBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return createForgeWorkspace(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateForgeWorkspaceMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createForgeWorkspace>>
+>;
+export type CreateForgeWorkspaceMutationBody =
+  BodyType<CreateForgeWorkspaceBody>;
+export type CreateForgeWorkspaceMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Create a new model workspace
+ */
+export const useCreateForgeWorkspace = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createForgeWorkspace>>,
+    TError,
+    { data: BodyType<CreateForgeWorkspaceBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createForgeWorkspace>>,
+  TError,
+  { data: BodyType<CreateForgeWorkspaceBody> },
+  TContext
+> => {
+  return useMutation(getCreateForgeWorkspaceMutationOptions(options));
+};
+
+/**
+ * @summary Get a workspace by ID
+ */
+export const getGetForgeWorkspaceUrl = (wid: number) => {
+  return `/api/forge/workspaces/${wid}`;
+};
+
+export const getForgeWorkspace = async (
+  wid: number,
+  options?: RequestInit,
+): Promise<ForgeWorkspace> => {
+  return customFetch<ForgeWorkspace>(getGetForgeWorkspaceUrl(wid), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetForgeWorkspaceQueryKey = (wid: number) => {
+  return [`/api/forge/workspaces/${wid}`] as const;
+};
+
+export const getGetForgeWorkspaceQueryOptions = <
+  TData = Awaited<ReturnType<typeof getForgeWorkspace>>,
+  TError = ErrorType<unknown>,
+>(
+  wid: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getForgeWorkspace>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetForgeWorkspaceQueryKey(wid);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getForgeWorkspace>>
+  > = ({ signal }) => getForgeWorkspace(wid, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!wid,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getForgeWorkspace>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetForgeWorkspaceQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getForgeWorkspace>>
+>;
+export type GetForgeWorkspaceQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Get a workspace by ID
+ */
+
+export function useGetForgeWorkspace<
+  TData = Awaited<ReturnType<typeof getForgeWorkspace>>,
+  TError = ErrorType<unknown>,
+>(
+  wid: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getForgeWorkspace>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetForgeWorkspaceQueryOptions(wid, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+export const getListForgeDatasetsUrl = (wid: number) => {
+  return `/api/forge/workspaces/${wid}/datasets`;
+};
+
+export const listForgeDatasets = async (
+  wid: number,
+  options?: RequestInit,
+): Promise<ForgeDataset[]> => {
+  return customFetch<ForgeDataset[]>(getListForgeDatasetsUrl(wid), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListForgeDatasetsQueryKey = (wid: number) => {
+  return [`/api/forge/workspaces/${wid}/datasets`] as const;
+};
+
+export const getListForgeDatasetsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listForgeDatasets>>,
+  TError = ErrorType<unknown>,
+>(
+  wid: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listForgeDatasets>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListForgeDatasetsQueryKey(wid);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listForgeDatasets>>
+  > = ({ signal }) => listForgeDatasets(wid, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!wid,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof listForgeDatasets>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListForgeDatasetsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listForgeDatasets>>
+>;
+export type ListForgeDatasetsQueryError = ErrorType<unknown>;
+
+export function useListForgeDatasets<
+  TData = Awaited<ReturnType<typeof listForgeDatasets>>,
+  TError = ErrorType<unknown>,
+>(
+  wid: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listForgeDatasets>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListForgeDatasetsQueryOptions(wid, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+export const getCreateForgeDatasetUrl = (wid: number) => {
+  return `/api/forge/workspaces/${wid}/datasets`;
+};
+
+export const createForgeDataset = async (
+  wid: number,
+  createForgeDatasetBody: CreateForgeDatasetBody,
+  options?: RequestInit,
+): Promise<ForgeDataset> => {
+  return customFetch<ForgeDataset>(getCreateForgeDatasetUrl(wid), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(createForgeDatasetBody),
+  });
+};
+
+export const getCreateForgeDatasetMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createForgeDataset>>,
+    TError,
+    { wid: number; data: BodyType<CreateForgeDatasetBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createForgeDataset>>,
+  TError,
+  { wid: number; data: BodyType<CreateForgeDatasetBody> },
+  TContext
+> => {
+  const mutationKey = ["createForgeDataset"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createForgeDataset>>,
+    { wid: number; data: BodyType<CreateForgeDatasetBody> }
+  > = (props) => {
+    const { wid, data } = props ?? {};
+
+    return createForgeDataset(wid, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateForgeDatasetMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createForgeDataset>>
+>;
+export type CreateForgeDatasetMutationBody = BodyType<CreateForgeDatasetBody>;
+export type CreateForgeDatasetMutationError = ErrorType<unknown>;
+
+export const useCreateForgeDataset = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createForgeDataset>>,
+    TError,
+    { wid: number; data: BodyType<CreateForgeDatasetBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createForgeDataset>>,
+  TError,
+  { wid: number; data: BodyType<CreateForgeDatasetBody> },
+  TContext
+> => {
+  return useMutation(getCreateForgeDatasetMutationOptions(options));
+};
+
+export const getGetForgeDatasetUrl = (wid: number, did: number) => {
+  return `/api/forge/workspaces/${wid}/datasets/${did}`;
+};
+
+export const getForgeDataset = async (
+  wid: number,
+  did: number,
+  options?: RequestInit,
+): Promise<GetForgeDataset200> => {
+  return customFetch<GetForgeDataset200>(getGetForgeDatasetUrl(wid, did), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetForgeDatasetQueryKey = (wid: number, did: number) => {
+  return [`/api/forge/workspaces/${wid}/datasets/${did}`] as const;
+};
+
+export const getGetForgeDatasetQueryOptions = <
+  TData = Awaited<ReturnType<typeof getForgeDataset>>,
+  TError = ErrorType<unknown>,
+>(
+  wid: number,
+  did: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getForgeDataset>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetForgeDatasetQueryKey(wid, did);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getForgeDataset>>> = ({
+    signal,
+  }) => getForgeDataset(wid, did, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!(wid && did),
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getForgeDataset>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetForgeDatasetQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getForgeDataset>>
+>;
+export type GetForgeDatasetQueryError = ErrorType<unknown>;
+
+export function useGetForgeDataset<
+  TData = Awaited<ReturnType<typeof getForgeDataset>>,
+  TError = ErrorType<unknown>,
+>(
+  wid: number,
+  did: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getForgeDataset>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetForgeDatasetQueryOptions(wid, did, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+export const getRegisterDatasetDocumentUrl = (wid: number, did: number) => {
+  return `/api/forge/workspaces/${wid}/datasets/${did}/documents`;
+};
+
+export const registerDatasetDocument = async (
+  wid: number,
+  did: number,
+  registerDocumentBody: RegisterDocumentBody,
+  options?: RequestInit,
+): Promise<DatasetDocument> => {
+  return customFetch<DatasetDocument>(getRegisterDatasetDocumentUrl(wid, did), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(registerDocumentBody),
+  });
+};
+
+export const getRegisterDatasetDocumentMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof registerDatasetDocument>>,
+    TError,
+    { wid: number; did: number; data: BodyType<RegisterDocumentBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof registerDatasetDocument>>,
+  TError,
+  { wid: number; did: number; data: BodyType<RegisterDocumentBody> },
+  TContext
+> => {
+  const mutationKey = ["registerDatasetDocument"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof registerDatasetDocument>>,
+    { wid: number; did: number; data: BodyType<RegisterDocumentBody> }
+  > = (props) => {
+    const { wid, did, data } = props ?? {};
+
+    return registerDatasetDocument(wid, did, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RegisterDatasetDocumentMutationResult = NonNullable<
+  Awaited<ReturnType<typeof registerDatasetDocument>>
+>;
+export type RegisterDatasetDocumentMutationBody =
+  BodyType<RegisterDocumentBody>;
+export type RegisterDatasetDocumentMutationError = ErrorType<unknown>;
+
+export const useRegisterDatasetDocument = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof registerDatasetDocument>>,
+    TError,
+    { wid: number; did: number; data: BodyType<RegisterDocumentBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof registerDatasetDocument>>,
+  TError,
+  { wid: number; did: number; data: BodyType<RegisterDocumentBody> },
+  TContext
+> => {
+  return useMutation(getRegisterDatasetDocumentMutationOptions(options));
+};
+
+export const getDeleteDatasetDocumentUrl = (
+  wid: number,
+  did: number,
+  docId: number,
+) => {
+  return `/api/forge/workspaces/${wid}/datasets/${did}/documents/${docId}`;
+};
+
+export const deleteDatasetDocument = async (
+  wid: number,
+  did: number,
+  docId: number,
+  options?: RequestInit,
+): Promise<void> => {
+  return customFetch<void>(getDeleteDatasetDocumentUrl(wid, did, docId), {
+    ...options,
+    method: "DELETE",
+  });
+};
+
+export const getDeleteDatasetDocumentMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteDatasetDocument>>,
+    TError,
+    { wid: number; did: number; docId: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof deleteDatasetDocument>>,
+  TError,
+  { wid: number; did: number; docId: number },
+  TContext
+> => {
+  const mutationKey = ["deleteDatasetDocument"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof deleteDatasetDocument>>,
+    { wid: number; did: number; docId: number }
+  > = (props) => {
+    const { wid, did, docId } = props ?? {};
+
+    return deleteDatasetDocument(wid, did, docId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DeleteDatasetDocumentMutationResult = NonNullable<
+  Awaited<ReturnType<typeof deleteDatasetDocument>>
+>;
+
+export type DeleteDatasetDocumentMutationError = ErrorType<unknown>;
+
+export const useDeleteDatasetDocument = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteDatasetDocument>>,
+    TError,
+    { wid: number; did: number; docId: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof deleteDatasetDocument>>,
+  TError,
+  { wid: number; did: number; docId: number },
+  TContext
+> => {
+  return useMutation(getDeleteDatasetDocumentMutationOptions(options));
+};
+
+export const getSnapshotDatasetVersionUrl = (wid: number, did: number) => {
+  return `/api/forge/workspaces/${wid}/datasets/${did}/version`;
+};
+
+export const snapshotDatasetVersion = async (
+  wid: number,
+  did: number,
+  options?: RequestInit,
+): Promise<DatasetVersion> => {
+  return customFetch<DatasetVersion>(getSnapshotDatasetVersionUrl(wid, did), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getSnapshotDatasetVersionMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof snapshotDatasetVersion>>,
+    TError,
+    { wid: number; did: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof snapshotDatasetVersion>>,
+  TError,
+  { wid: number; did: number },
+  TContext
+> => {
+  const mutationKey = ["snapshotDatasetVersion"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof snapshotDatasetVersion>>,
+    { wid: number; did: number }
+  > = (props) => {
+    const { wid, did } = props ?? {};
+
+    return snapshotDatasetVersion(wid, did, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type SnapshotDatasetVersionMutationResult = NonNullable<
+  Awaited<ReturnType<typeof snapshotDatasetVersion>>
+>;
+
+export type SnapshotDatasetVersionMutationError = ErrorType<unknown>;
+
+export const useSnapshotDatasetVersion = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof snapshotDatasetVersion>>,
+    TError,
+    { wid: number; did: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof snapshotDatasetVersion>>,
+  TError,
+  { wid: number; did: number },
+  TContext
+> => {
+  return useMutation(getSnapshotDatasetVersionMutationOptions(options));
+};
+
+export const getListTrainingJobsUrl = (wid: number) => {
+  return `/api/forge/workspaces/${wid}/jobs`;
+};
+
+export const listTrainingJobs = async (
+  wid: number,
+  options?: RequestInit,
+): Promise<TrainingJob[]> => {
+  return customFetch<TrainingJob[]>(getListTrainingJobsUrl(wid), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListTrainingJobsQueryKey = (wid: number) => {
+  return [`/api/forge/workspaces/${wid}/jobs`] as const;
+};
+
+export const getListTrainingJobsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listTrainingJobs>>,
+  TError = ErrorType<unknown>,
+>(
+  wid: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listTrainingJobs>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListTrainingJobsQueryKey(wid);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listTrainingJobs>>
+  > = ({ signal }) => listTrainingJobs(wid, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!wid,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof listTrainingJobs>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListTrainingJobsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listTrainingJobs>>
+>;
+export type ListTrainingJobsQueryError = ErrorType<unknown>;
+
+export function useListTrainingJobs<
+  TData = Awaited<ReturnType<typeof listTrainingJobs>>,
+  TError = ErrorType<unknown>,
+>(
+  wid: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listTrainingJobs>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListTrainingJobsQueryOptions(wid, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+export const getCreateTrainingJobUrl = (wid: number) => {
+  return `/api/forge/workspaces/${wid}/jobs`;
+};
+
+export const createTrainingJob = async (
+  wid: number,
+  createTrainingJobBody: CreateTrainingJobBody,
+  options?: RequestInit,
+): Promise<TrainingJob> => {
+  return customFetch<TrainingJob>(getCreateTrainingJobUrl(wid), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(createTrainingJobBody),
+  });
+};
+
+export const getCreateTrainingJobMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createTrainingJob>>,
+    TError,
+    { wid: number; data: BodyType<CreateTrainingJobBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createTrainingJob>>,
+  TError,
+  { wid: number; data: BodyType<CreateTrainingJobBody> },
+  TContext
+> => {
+  const mutationKey = ["createTrainingJob"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createTrainingJob>>,
+    { wid: number; data: BodyType<CreateTrainingJobBody> }
+  > = (props) => {
+    const { wid, data } = props ?? {};
+
+    return createTrainingJob(wid, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateTrainingJobMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createTrainingJob>>
+>;
+export type CreateTrainingJobMutationBody = BodyType<CreateTrainingJobBody>;
+export type CreateTrainingJobMutationError = ErrorType<unknown>;
+
+export const useCreateTrainingJob = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createTrainingJob>>,
+    TError,
+    { wid: number; data: BodyType<CreateTrainingJobBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createTrainingJob>>,
+  TError,
+  { wid: number; data: BodyType<CreateTrainingJobBody> },
+  TContext
+> => {
+  return useMutation(getCreateTrainingJobMutationOptions(options));
+};
+
+export const getGetTrainingJobUrl = (wid: number, jid: number) => {
+  return `/api/forge/workspaces/${wid}/jobs/${jid}`;
+};
+
+export const getTrainingJob = async (
+  wid: number,
+  jid: number,
+  options?: RequestInit,
+): Promise<TrainingJob> => {
+  return customFetch<TrainingJob>(getGetTrainingJobUrl(wid, jid), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetTrainingJobQueryKey = (wid: number, jid: number) => {
+  return [`/api/forge/workspaces/${wid}/jobs/${jid}`] as const;
+};
+
+export const getGetTrainingJobQueryOptions = <
+  TData = Awaited<ReturnType<typeof getTrainingJob>>,
+  TError = ErrorType<unknown>,
+>(
+  wid: number,
+  jid: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getTrainingJob>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetTrainingJobQueryKey(wid, jid);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getTrainingJob>>> = ({
+    signal,
+  }) => getTrainingJob(wid, jid, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!(wid && jid),
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getTrainingJob>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetTrainingJobQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getTrainingJob>>
+>;
+export type GetTrainingJobQueryError = ErrorType<unknown>;
+
+export function useGetTrainingJob<
+  TData = Awaited<ReturnType<typeof getTrainingJob>>,
+  TError = ErrorType<unknown>,
+>(
+  wid: number,
+  jid: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getTrainingJob>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetTrainingJobQueryOptions(wid, jid, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+export const getSubmitTrainingJobUrl = (wid: number, jid: number) => {
+  return `/api/forge/workspaces/${wid}/jobs/${jid}/submit`;
+};
+
+export const submitTrainingJob = async (
+  wid: number,
+  jid: number,
+  options?: RequestInit,
+): Promise<TrainingJob> => {
+  return customFetch<TrainingJob>(getSubmitTrainingJobUrl(wid, jid), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getSubmitTrainingJobMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof submitTrainingJob>>,
+    TError,
+    { wid: number; jid: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof submitTrainingJob>>,
+  TError,
+  { wid: number; jid: number },
+  TContext
+> => {
+  const mutationKey = ["submitTrainingJob"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof submitTrainingJob>>,
+    { wid: number; jid: number }
+  > = (props) => {
+    const { wid, jid } = props ?? {};
+
+    return submitTrainingJob(wid, jid, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type SubmitTrainingJobMutationResult = NonNullable<
+  Awaited<ReturnType<typeof submitTrainingJob>>
+>;
+
+export type SubmitTrainingJobMutationError = ErrorType<void>;
+
+export const useSubmitTrainingJob = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof submitTrainingJob>>,
+    TError,
+    { wid: number; jid: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof submitTrainingJob>>,
+  TError,
+  { wid: number; jid: number },
+  TContext
+> => {
+  return useMutation(getSubmitTrainingJobMutationOptions(options));
+};
+
+export const getDispatchTrainingJobUrl = (wid: number, jid: number) => {
+  return `/api/forge/workspaces/${wid}/jobs/${jid}/dispatch`;
+};
+
+export const dispatchTrainingJob = async (
+  wid: number,
+  jid: number,
+  options?: RequestInit,
+): Promise<TrainingJob> => {
+  return customFetch<TrainingJob>(getDispatchTrainingJobUrl(wid, jid), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getDispatchTrainingJobMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof dispatchTrainingJob>>,
+    TError,
+    { wid: number; jid: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof dispatchTrainingJob>>,
+  TError,
+  { wid: number; jid: number },
+  TContext
+> => {
+  const mutationKey = ["dispatchTrainingJob"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof dispatchTrainingJob>>,
+    { wid: number; jid: number }
+  > = (props) => {
+    const { wid, jid } = props ?? {};
+
+    return dispatchTrainingJob(wid, jid, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DispatchTrainingJobMutationResult = NonNullable<
+  Awaited<ReturnType<typeof dispatchTrainingJob>>
+>;
+
+export type DispatchTrainingJobMutationError = ErrorType<void>;
+
+export const useDispatchTrainingJob = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof dispatchTrainingJob>>,
+    TError,
+    { wid: number; jid: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof dispatchTrainingJob>>,
+  TError,
+  { wid: number; jid: number },
+  TContext
+> => {
+  return useMutation(getDispatchTrainingJobMutationOptions(options));
+};
+
+export const getCancelTrainingJobUrl = (wid: number, jid: number) => {
+  return `/api/forge/workspaces/${wid}/jobs/${jid}/cancel`;
+};
+
+export const cancelTrainingJob = async (
+  wid: number,
+  jid: number,
+  options?: RequestInit,
+): Promise<TrainingJob> => {
+  return customFetch<TrainingJob>(getCancelTrainingJobUrl(wid, jid), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getCancelTrainingJobMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof cancelTrainingJob>>,
+    TError,
+    { wid: number; jid: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof cancelTrainingJob>>,
+  TError,
+  { wid: number; jid: number },
+  TContext
+> => {
+  const mutationKey = ["cancelTrainingJob"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof cancelTrainingJob>>,
+    { wid: number; jid: number }
+  > = (props) => {
+    const { wid, jid } = props ?? {};
+
+    return cancelTrainingJob(wid, jid, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CancelTrainingJobMutationResult = NonNullable<
+  Awaited<ReturnType<typeof cancelTrainingJob>>
+>;
+
+export type CancelTrainingJobMutationError = ErrorType<unknown>;
+
+export const useCancelTrainingJob = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof cancelTrainingJob>>,
+    TError,
+    { wid: number; jid: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof cancelTrainingJob>>,
+  TError,
+  { wid: number; jid: number },
+  TContext
+> => {
+  return useMutation(getCancelTrainingJobMutationOptions(options));
+};
+
+export const getGetForgePolicyUrl = (wid: number) => {
+  return `/api/forge/workspaces/${wid}/policies`;
+};
+
+export const getForgePolicy = async (
+  wid: number,
+  options?: RequestInit,
+): Promise<ModelPolicy> => {
+  return customFetch<ModelPolicy>(getGetForgePolicyUrl(wid), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetForgePolicyQueryKey = (wid: number) => {
+  return [`/api/forge/workspaces/${wid}/policies`] as const;
+};
+
+export const getGetForgePolicyQueryOptions = <
+  TData = Awaited<ReturnType<typeof getForgePolicy>>,
+  TError = ErrorType<unknown>,
+>(
+  wid: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getForgePolicy>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetForgePolicyQueryKey(wid);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getForgePolicy>>> = ({
+    signal,
+  }) => getForgePolicy(wid, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!wid,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getForgePolicy>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetForgePolicyQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getForgePolicy>>
+>;
+export type GetForgePolicyQueryError = ErrorType<unknown>;
+
+export function useGetForgePolicy<
+  TData = Awaited<ReturnType<typeof getForgePolicy>>,
+  TError = ErrorType<unknown>,
+>(
+  wid: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getForgePolicy>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetForgePolicyQueryOptions(wid, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+export const getUpdateForgePolicyUrl = (wid: number) => {
+  return `/api/forge/workspaces/${wid}/policies`;
+};
+
+export const updateForgePolicy = async (
+  wid: number,
+  modelPolicy: ModelPolicy,
+  options?: RequestInit,
+): Promise<ModelPolicy> => {
+  return customFetch<ModelPolicy>(getUpdateForgePolicyUrl(wid), {
+    ...options,
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(modelPolicy),
+  });
+};
+
+export const getUpdateForgePolicyMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateForgePolicy>>,
+    TError,
+    { wid: number; data: BodyType<ModelPolicy> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateForgePolicy>>,
+  TError,
+  { wid: number; data: BodyType<ModelPolicy> },
+  TContext
+> => {
+  const mutationKey = ["updateForgePolicy"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateForgePolicy>>,
+    { wid: number; data: BodyType<ModelPolicy> }
+  > = (props) => {
+    const { wid, data } = props ?? {};
+
+    return updateForgePolicy(wid, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateForgePolicyMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateForgePolicy>>
+>;
+export type UpdateForgePolicyMutationBody = BodyType<ModelPolicy>;
+export type UpdateForgePolicyMutationError = ErrorType<unknown>;
+
+export const useUpdateForgePolicy = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateForgePolicy>>,
+    TError,
+    { wid: number; data: BodyType<ModelPolicy> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateForgePolicy>>,
+  TError,
+  { wid: number; data: BodyType<ModelPolicy> },
+  TContext
+> => {
+  return useMutation(getUpdateForgePolicyMutationOptions(options));
+};
+
+export const getListModelRegistryUrl = (wid: number) => {
+  return `/api/forge/workspaces/${wid}/registry`;
+};
+
+export const listModelRegistry = async (
+  wid: number,
+  options?: RequestInit,
+): Promise<ListModelRegistry200Item[]> => {
+  return customFetch<ListModelRegistry200Item[]>(getListModelRegistryUrl(wid), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListModelRegistryQueryKey = (wid: number) => {
+  return [`/api/forge/workspaces/${wid}/registry`] as const;
+};
+
+export const getListModelRegistryQueryOptions = <
+  TData = Awaited<ReturnType<typeof listModelRegistry>>,
+  TError = ErrorType<unknown>,
+>(
+  wid: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listModelRegistry>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListModelRegistryQueryKey(wid);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listModelRegistry>>
+  > = ({ signal }) => listModelRegistry(wid, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!wid,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof listModelRegistry>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListModelRegistryQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listModelRegistry>>
+>;
+export type ListModelRegistryQueryError = ErrorType<unknown>;
+
+export function useListModelRegistry<
+  TData = Awaited<ReturnType<typeof listModelRegistry>>,
+  TError = ErrorType<unknown>,
+>(
+  wid: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listModelRegistry>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListModelRegistryQueryOptions(wid, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+export const getListModelDeploymentsUrl = (wid: number) => {
+  return `/api/forge/workspaces/${wid}/deployments`;
+};
+
+export const listModelDeployments = async (
+  wid: number,
+  options?: RequestInit,
+): Promise<ModelDeployment[]> => {
+  return customFetch<ModelDeployment[]>(getListModelDeploymentsUrl(wid), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListModelDeploymentsQueryKey = (wid: number) => {
+  return [`/api/forge/workspaces/${wid}/deployments`] as const;
+};
+
+export const getListModelDeploymentsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listModelDeployments>>,
+  TError = ErrorType<unknown>,
+>(
+  wid: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listModelDeployments>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListModelDeploymentsQueryKey(wid);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listModelDeployments>>
+  > = ({ signal }) => listModelDeployments(wid, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!wid,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof listModelDeployments>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListModelDeploymentsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listModelDeployments>>
+>;
+export type ListModelDeploymentsQueryError = ErrorType<unknown>;
+
+export function useListModelDeployments<
+  TData = Awaited<ReturnType<typeof listModelDeployments>>,
+  TError = ErrorType<unknown>,
+>(
+  wid: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listModelDeployments>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListModelDeploymentsQueryOptions(wid, options);
 
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
     queryKey: QueryKey;

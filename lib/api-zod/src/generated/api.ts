@@ -472,3 +472,429 @@ export const GetBillingUsageResponse = zod.object({
   periodStart: zod.string(),
   periodEnd: zod.string(),
 });
+
+/**
+ * @summary List model workspaces for current tenant
+ */
+export const ListForgeWorkspacesResponseItem = zod.object({
+  id: zod.number(),
+  tenant_id: zod.string(),
+  name: zod.string(),
+  domain: zod.string(),
+  description: zod.string().nullish(),
+  status: zod.enum(["active", "archived"]),
+  created_at: zod.coerce.date(),
+});
+export const ListForgeWorkspacesResponse = zod.array(
+  ListForgeWorkspacesResponseItem,
+);
+
+/**
+ * @summary Create a new model workspace
+ */
+export const CreateForgeWorkspaceBody = zod.object({
+  name: zod.string(),
+  domain: zod.string(),
+  description: zod.string().optional(),
+});
+
+/**
+ * @summary Get a workspace by ID
+ */
+export const GetForgeWorkspaceParams = zod.object({
+  wid: zod.coerce.number(),
+});
+
+export const GetForgeWorkspaceResponse = zod.object({
+  id: zod.number(),
+  tenant_id: zod.string(),
+  name: zod.string(),
+  domain: zod.string(),
+  description: zod.string().nullish(),
+  status: zod.enum(["active", "archived"]),
+  created_at: zod.coerce.date(),
+});
+
+export const ListForgeDatasetsParams = zod.object({
+  wid: zod.coerce.number(),
+});
+
+export const ListForgeDatasetsResponseItem = zod.object({
+  id: zod.number(),
+  tenant_id: zod.string(),
+  workspace_id: zod.number(),
+  name: zod.string(),
+  description: zod.string().nullish(),
+  source_type: zod.enum(["upload", "url", "connector"]),
+  sensitivity: zod.enum(["public", "internal", "confidential", "restricted"]),
+  status: zod.enum(["pending", "processing", "ready", "error"]),
+  document_count: zod.number(),
+  total_bytes: zod.number(),
+  created_at: zod.coerce.date(),
+  updated_at: zod.coerce.date().optional(),
+});
+export const ListForgeDatasetsResponse = zod.array(
+  ListForgeDatasetsResponseItem,
+);
+
+export const CreateForgeDatasetParams = zod.object({
+  wid: zod.coerce.number(),
+});
+
+export const CreateForgeDatasetBody = zod.object({
+  name: zod.string(),
+  description: zod.string().optional(),
+  source_type: zod.enum(["upload", "url", "connector"]),
+  sensitivity: zod
+    .enum(["public", "internal", "confidential", "restricted"])
+    .optional(),
+});
+
+export const GetForgeDatasetParams = zod.object({
+  wid: zod.coerce.number(),
+  did: zod.coerce.number(),
+});
+
+export const GetForgeDatasetResponse = zod
+  .object({
+    id: zod.number(),
+    tenant_id: zod.string(),
+    workspace_id: zod.number(),
+    name: zod.string(),
+    description: zod.string().nullish(),
+    source_type: zod.enum(["upload", "url", "connector"]),
+    sensitivity: zod.enum(["public", "internal", "confidential", "restricted"]),
+    status: zod.enum(["pending", "processing", "ready", "error"]),
+    document_count: zod.number(),
+    total_bytes: zod.number(),
+    created_at: zod.coerce.date(),
+    updated_at: zod.coerce.date().optional(),
+  })
+  .and(
+    zod.object({
+      documents: zod
+        .array(
+          zod.object({
+            id: zod.number(),
+            tenant_id: zod.string(),
+            dataset_id: zod.number(),
+            version_id: zod.number().nullish(),
+            filename: zod
+              .string()
+              .describe("Unverified — client-supplied metadata"),
+            source_url: zod
+              .string()
+              .nullish()
+              .describe("Unverified — client-supplied metadata"),
+            mime_type: zod
+              .string()
+              .nullish()
+              .describe("Unverified — client-supplied metadata"),
+            size_bytes: zod
+              .number()
+              .describe("Unverified — client-supplied metadata"),
+            checksum: zod.string().nullish(),
+            storage_key: zod
+              .string()
+              .nullish()
+              .describe("null = metadata-only; non-null = real file stored"),
+            status: zod.enum(["pending", "ingested", "error"]),
+            error: zod.string().nullish(),
+            created_at: zod.coerce.date(),
+          }),
+        )
+        .optional(),
+    }),
+  );
+
+export const RegisterDatasetDocumentParams = zod.object({
+  wid: zod.coerce.number(),
+  did: zod.coerce.number(),
+});
+
+export const RegisterDatasetDocumentBody = zod.object({
+  filename: zod.string(),
+  size_bytes: zod.number().optional(),
+  mime_type: zod.string().optional(),
+  source_url: zod.string().optional(),
+});
+
+export const DeleteDatasetDocumentParams = zod.object({
+  wid: zod.coerce.number(),
+  did: zod.coerce.number(),
+  docId: zod.coerce.number(),
+});
+
+export const SnapshotDatasetVersionParams = zod.object({
+  wid: zod.coerce.number(),
+  did: zod.coerce.number(),
+});
+
+export const ListTrainingJobsParams = zod.object({
+  wid: zod.coerce.number(),
+});
+
+export const ListTrainingJobsResponseItem = zod.object({
+  id: zod.number(),
+  tenant_id: zod.string(),
+  workspace_id: zod.number(),
+  dataset_id: zod.number(),
+  dataset_version_id: zod.number(),
+  name: zod.string(),
+  mode: zod.enum(["prompt_tuning", "rag_adaptation", "fine_tuning"]),
+  base_model: zod.string(),
+  hyperparams: zod.object({}).passthrough().optional(),
+  status: zod.enum([
+    "draft",
+    "validating",
+    "queued",
+    "running",
+    "evaluating",
+    "completed",
+    "failed",
+    "deployed",
+  ]),
+  kairos_run_id: zod.string().nullish(),
+  compute_backend: zod.string(),
+  reforge_suggested: zod.boolean().optional(),
+  error: zod.string().nullish(),
+  created_at: zod.coerce.date(),
+  updated_at: zod.coerce.date().optional(),
+});
+export const ListTrainingJobsResponse = zod.array(ListTrainingJobsResponseItem);
+
+export const CreateTrainingJobParams = zod.object({
+  wid: zod.coerce.number(),
+});
+
+export const CreateTrainingJobBody = zod.object({
+  name: zod.string(),
+  mode: zod.enum(["prompt_tuning", "rag_adaptation", "fine_tuning"]),
+  base_model: zod.string(),
+  dataset_id: zod.number(),
+  dataset_version_id: zod.number(),
+  hyperparams: zod.object({}).passthrough().optional(),
+});
+
+export const GetTrainingJobParams = zod.object({
+  wid: zod.coerce.number(),
+  jid: zod.coerce.number(),
+});
+
+export const GetTrainingJobResponse = zod.object({
+  id: zod.number(),
+  tenant_id: zod.string(),
+  workspace_id: zod.number(),
+  dataset_id: zod.number(),
+  dataset_version_id: zod.number(),
+  name: zod.string(),
+  mode: zod.enum(["prompt_tuning", "rag_adaptation", "fine_tuning"]),
+  base_model: zod.string(),
+  hyperparams: zod.object({}).passthrough().optional(),
+  status: zod.enum([
+    "draft",
+    "validating",
+    "queued",
+    "running",
+    "evaluating",
+    "completed",
+    "failed",
+    "deployed",
+  ]),
+  kairos_run_id: zod.string().nullish(),
+  compute_backend: zod.string(),
+  reforge_suggested: zod.boolean().optional(),
+  error: zod.string().nullish(),
+  created_at: zod.coerce.date(),
+  updated_at: zod.coerce.date().optional(),
+});
+
+export const SubmitTrainingJobParams = zod.object({
+  wid: zod.coerce.number(),
+  jid: zod.coerce.number(),
+});
+
+export const SubmitTrainingJobResponse = zod.object({
+  id: zod.number(),
+  tenant_id: zod.string(),
+  workspace_id: zod.number(),
+  dataset_id: zod.number(),
+  dataset_version_id: zod.number(),
+  name: zod.string(),
+  mode: zod.enum(["prompt_tuning", "rag_adaptation", "fine_tuning"]),
+  base_model: zod.string(),
+  hyperparams: zod.object({}).passthrough().optional(),
+  status: zod.enum([
+    "draft",
+    "validating",
+    "queued",
+    "running",
+    "evaluating",
+    "completed",
+    "failed",
+    "deployed",
+  ]),
+  kairos_run_id: zod.string().nullish(),
+  compute_backend: zod.string(),
+  reforge_suggested: zod.boolean().optional(),
+  error: zod.string().nullish(),
+  created_at: zod.coerce.date(),
+  updated_at: zod.coerce.date().optional(),
+});
+
+export const DispatchTrainingJobParams = zod.object({
+  wid: zod.coerce.number(),
+  jid: zod.coerce.number(),
+});
+
+export const DispatchTrainingJobResponse = zod.object({
+  id: zod.number(),
+  tenant_id: zod.string(),
+  workspace_id: zod.number(),
+  dataset_id: zod.number(),
+  dataset_version_id: zod.number(),
+  name: zod.string(),
+  mode: zod.enum(["prompt_tuning", "rag_adaptation", "fine_tuning"]),
+  base_model: zod.string(),
+  hyperparams: zod.object({}).passthrough().optional(),
+  status: zod.enum([
+    "draft",
+    "validating",
+    "queued",
+    "running",
+    "evaluating",
+    "completed",
+    "failed",
+    "deployed",
+  ]),
+  kairos_run_id: zod.string().nullish(),
+  compute_backend: zod.string(),
+  reforge_suggested: zod.boolean().optional(),
+  error: zod.string().nullish(),
+  created_at: zod.coerce.date(),
+  updated_at: zod.coerce.date().optional(),
+});
+
+export const CancelTrainingJobParams = zod.object({
+  wid: zod.coerce.number(),
+  jid: zod.coerce.number(),
+});
+
+export const CancelTrainingJobResponse = zod.object({
+  id: zod.number(),
+  tenant_id: zod.string(),
+  workspace_id: zod.number(),
+  dataset_id: zod.number(),
+  dataset_version_id: zod.number(),
+  name: zod.string(),
+  mode: zod.enum(["prompt_tuning", "rag_adaptation", "fine_tuning"]),
+  base_model: zod.string(),
+  hyperparams: zod.object({}).passthrough().optional(),
+  status: zod.enum([
+    "draft",
+    "validating",
+    "queued",
+    "running",
+    "evaluating",
+    "completed",
+    "failed",
+    "deployed",
+  ]),
+  kairos_run_id: zod.string().nullish(),
+  compute_backend: zod.string(),
+  reforge_suggested: zod.boolean().optional(),
+  error: zod.string().nullish(),
+  created_at: zod.coerce.date(),
+  updated_at: zod.coerce.date().optional(),
+});
+
+export const GetForgePolicyParams = zod.object({
+  wid: zod.coerce.number(),
+});
+
+export const GetForgePolicyResponse = zod.object({
+  tenant_id: zod.string().optional(),
+  allowed_base_models: zod.array(zod.string()).optional(),
+  max_dataset_bytes: zod.number().optional(),
+  max_concurrent_jobs: zod.number().optional(),
+  deployment_requires_approval: zod.boolean().optional(),
+  budget_limit_usd: zod.number().nullish(),
+});
+
+export const UpdateForgePolicyParams = zod.object({
+  wid: zod.coerce.number(),
+});
+
+export const UpdateForgePolicyBody = zod.object({
+  tenant_id: zod.string().optional(),
+  allowed_base_models: zod.array(zod.string()).optional(),
+  max_dataset_bytes: zod.number().optional(),
+  max_concurrent_jobs: zod.number().optional(),
+  deployment_requires_approval: zod.boolean().optional(),
+  budget_limit_usd: zod.number().nullish(),
+});
+
+export const UpdateForgePolicyResponse = zod.object({
+  tenant_id: zod.string().optional(),
+  allowed_base_models: zod.array(zod.string()).optional(),
+  max_dataset_bytes: zod.number().optional(),
+  max_concurrent_jobs: zod.number().optional(),
+  deployment_requires_approval: zod.boolean().optional(),
+  budget_limit_usd: zod.number().nullish(),
+});
+
+export const ListModelRegistryParams = zod.object({
+  wid: zod.coerce.number(),
+});
+
+export const ListModelRegistryResponseItem = zod.object({
+  registration: zod
+    .object({
+      id: zod.number().optional(),
+      tenant_id: zod.string().optional(),
+      workspace_id: zod.number().optional(),
+      job_id: zod.number().optional(),
+      name: zod.string().optional(),
+      created_at: zod.coerce.date().optional(),
+    })
+    .optional(),
+  versions: zod
+    .array(
+      zod.object({
+        id: zod.number().optional(),
+        tenant_id: zod.string().optional(),
+        registration_id: zod.number().optional(),
+        version: zod.number().optional(),
+        status: zod
+          .enum(["candidate", "approved", "rejected", "deprecated"])
+          .optional(),
+        approved_by: zod.string().nullish(),
+        approved_at: zod.coerce.date().nullish(),
+        notes: zod.string().nullish(),
+        artifact_key: zod.string().nullish(),
+        created_at: zod.coerce.date().optional(),
+      }),
+    )
+    .optional(),
+});
+export const ListModelRegistryResponse = zod.array(
+  ListModelRegistryResponseItem,
+);
+
+export const ListModelDeploymentsParams = zod.object({
+  wid: zod.coerce.number(),
+});
+
+export const ListModelDeploymentsResponseItem = zod.object({
+  id: zod.number().optional(),
+  tenant_id: zod.string().optional(),
+  version_id: zod.number().optional(),
+  endpoint_url: zod.string().nullish(),
+  status: zod.enum(["pending", "active", "inactive", "rolled_back"]).optional(),
+  compute_backend: zod.string().optional(),
+  deployed_at: zod.coerce.date().nullish(),
+  created_at: zod.coerce.date().optional(),
+});
+export const ListModelDeploymentsResponse = zod.array(
+  ListModelDeploymentsResponseItem,
+);

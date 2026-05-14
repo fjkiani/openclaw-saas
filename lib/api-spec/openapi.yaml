@@ -22,6 +22,8 @@ tags:
     description: Connector registry and per-tenant connector management
   - name: graphs
     description: Knowledge graph management and document ingestion
+  - name: forge
+    description: Model Forge — tenant-scoped model training and registry
 paths:
   /healthz:
     get:
@@ -592,6 +594,407 @@ paths:
               schema:
                 $ref: "#/components/schemas/BillingUsage"
 
+  /forge/workspaces:
+    get:
+      operationId: listForgeWorkspaces
+      tags: [forge]
+      summary: List model workspaces for current tenant
+      responses:
+        "200":
+          description: List of workspaces
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ForgeWorkspace"
+    post:
+      operationId: createForgeWorkspace
+      tags: [forge]
+      summary: Create a new model workspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateForgeWorkspaceBody"
+      responses:
+        "201":
+          description: Workspace created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ForgeWorkspace"
+
+  /forge/workspaces/{wid}:
+    get:
+      operationId: getForgeWorkspace
+      tags: [forge]
+      summary: Get a workspace by ID
+      parameters:
+        - name: wid
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Workspace detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ForgeWorkspace"
+
+  /forge/workspaces/{wid}/datasets:
+    get:
+      operationId: listForgeDatasets
+      tags: [forge]
+      parameters:
+        - name: wid
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: List of datasets
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ForgeDataset"
+    post:
+      operationId: createForgeDataset
+      tags: [forge]
+      parameters:
+        - name: wid
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateForgeDatasetBody"
+      responses:
+        "201":
+          description: Dataset created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ForgeDataset"
+
+  /forge/workspaces/{wid}/datasets/{did}:
+    get:
+      operationId: getForgeDataset
+      tags: [forge]
+      parameters:
+        - name: wid
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: did
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Dataset with documents
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ForgeDataset"
+                  - type: object
+                    properties:
+                      documents:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/DatasetDocument"
+
+  /forge/workspaces/{wid}/datasets/{did}/documents:
+    post:
+      operationId: registerDatasetDocument
+      tags: [forge]
+      parameters:
+        - name: wid
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: did
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterDocumentBody"
+      responses:
+        "201":
+          description: Document registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetDocument"
+
+  /forge/workspaces/{wid}/datasets/{did}/documents/{docId}:
+    delete:
+      operationId: deleteDatasetDocument
+      tags: [forge]
+      parameters:
+        - name: wid
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: did
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: docId
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "204":
+          description: Document deleted
+
+  /forge/workspaces/{wid}/datasets/{did}/version:
+    post:
+      operationId: snapshotDatasetVersion
+      tags: [forge]
+      parameters:
+        - name: wid
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: did
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "201":
+          description: Version snapshot created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetVersion"
+
+  /forge/workspaces/{wid}/jobs:
+    get:
+      operationId: listTrainingJobs
+      tags: [forge]
+      parameters:
+        - name: wid
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: List of training jobs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TrainingJob"
+    post:
+      operationId: createTrainingJob
+      tags: [forge]
+      parameters:
+        - name: wid
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTrainingJobBody"
+      responses:
+        "201":
+          description: Training job created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TrainingJob"
+
+  /forge/workspaces/{wid}/jobs/{jid}:
+    get:
+      operationId: getTrainingJob
+      tags: [forge]
+      parameters:
+        - name: wid
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: jid
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Training job detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TrainingJob"
+
+  /forge/workspaces/{wid}/jobs/{jid}/submit:
+    post:
+      operationId: submitTrainingJob
+      tags: [forge]
+      parameters:
+        - name: wid
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: jid
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Job submitted (or already queued)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TrainingJob"
+        "409":
+          description: Invalid state transition
+
+  /forge/workspaces/{wid}/jobs/{jid}/dispatch:
+    post:
+      operationId: dispatchTrainingJob
+      tags: [forge]
+      parameters:
+        - name: wid
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: jid
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Job dispatched to Kairos
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TrainingJob"
+        "409":
+          description: Invalid state transition
+        "503":
+          description: Kairos service unavailable
+
+  /forge/workspaces/{wid}/jobs/{jid}/cancel:
+    post:
+      operationId: cancelTrainingJob
+      tags: [forge]
+      parameters:
+        - name: wid
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: jid
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Job cancelled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TrainingJob"
+
+  /forge/workspaces/{wid}/policies:
+    get:
+      operationId: getForgePolicy
+      tags: [forge]
+      parameters:
+        - name: wid
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Tenant model policy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelPolicy"
+    put:
+      operationId: updateForgePolicy
+      tags: [forge]
+      parameters:
+        - name: wid
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ModelPolicy"
+      responses:
+        "200":
+          description: Policy updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelPolicy"
+
+  /forge/workspaces/{wid}/registry:
+    get:
+      operationId: listModelRegistry
+      tags: [forge]
+      parameters:
+        - name: wid
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Model registrations with versions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    registration:
+                      $ref: "#/components/schemas/ModelRegistration"
+                    versions:
+                      type: array
+                      items:
+                        $ref: "#/components/schemas/ModelVersion"
+
+  /forge/workspaces/{wid}/deployments:
+    get:
+      operationId: listModelDeployments
+      tags: [forge]
+      parameters:
+        - name: wid
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Model deployments
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ModelDeployment"
+
+
 components:
   schemas:
     HealthStatus:
@@ -950,3 +1353,168 @@ components:
         rank:
           type: number
       required: [id, documentId, chunkIndex, content, rank]
+
+    ForgeWorkspace:
+      type: object
+      required: [id, tenant_id, name, domain, status, created_at]
+      properties:
+        id: { type: integer }
+        tenant_id: { type: string }
+        name: { type: string }
+        domain: { type: string }
+        description: { type: string, nullable: true }
+        status: { type: string, enum: [active, archived] }
+        created_at: { type: string, format: date-time }
+
+    CreateForgeWorkspaceBody:
+      type: object
+      required: [name, domain]
+      properties:
+        name: { type: string }
+        domain: { type: string }
+        description: { type: string }
+
+    ForgeDataset:
+      type: object
+      required: [id, tenant_id, workspace_id, name, source_type, sensitivity, status, document_count, total_bytes, created_at]
+      properties:
+        id: { type: integer }
+        tenant_id: { type: string }
+        workspace_id: { type: integer }
+        name: { type: string }
+        description: { type: string, nullable: true }
+        source_type: { type: string, enum: [upload, url, connector] }
+        sensitivity: { type: string, enum: [public, internal, confidential, restricted] }
+        status: { type: string, enum: [pending, processing, ready, error] }
+        document_count: { type: integer }
+        total_bytes: { type: integer }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    CreateForgeDatasetBody:
+      type: object
+      required: [name, source_type]
+      properties:
+        name: { type: string }
+        description: { type: string }
+        source_type: { type: string, enum: [upload, url, connector] }
+        sensitivity: { type: string, enum: [public, internal, confidential, restricted] }
+
+    DatasetDocument:
+      type: object
+      required: [id, tenant_id, dataset_id, filename, size_bytes, status, created_at]
+      properties:
+        id: { type: integer }
+        tenant_id: { type: string }
+        dataset_id: { type: integer }
+        version_id: { type: integer, nullable: true }
+        filename: { type: string, description: "Unverified — client-supplied metadata" }
+        source_url: { type: string, nullable: true, description: "Unverified — client-supplied metadata" }
+        mime_type: { type: string, nullable: true, description: "Unverified — client-supplied metadata" }
+        size_bytes: { type: integer, description: "Unverified — client-supplied metadata" }
+        checksum: { type: string, nullable: true }
+        storage_key: { type: string, nullable: true, description: "null = metadata-only; non-null = real file stored" }
+        status: { type: string, enum: [pending, ingested, error] }
+        error: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+
+    RegisterDocumentBody:
+      type: object
+      required: [filename]
+      properties:
+        filename: { type: string }
+        size_bytes: { type: integer }
+        mime_type: { type: string }
+        source_url: { type: string }
+
+    DatasetVersion:
+      type: object
+      required: [id, tenant_id, dataset_id, version, document_count, total_bytes, created_at]
+      properties:
+        id: { type: integer }
+        tenant_id: { type: string }
+        dataset_id: { type: integer }
+        version: { type: integer }
+        checksum: { type: string, nullable: true }
+        document_count: { type: integer }
+        total_bytes: { type: integer }
+        notes: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+
+    TrainingJob:
+      type: object
+      required: [id, tenant_id, workspace_id, dataset_id, dataset_version_id, name, mode, base_model, status, compute_backend, created_at]
+      properties:
+        id: { type: integer }
+        tenant_id: { type: string }
+        workspace_id: { type: integer }
+        dataset_id: { type: integer }
+        dataset_version_id: { type: integer }
+        name: { type: string }
+        mode: { type: string, enum: [prompt_tuning, rag_adaptation, fine_tuning] }
+        base_model: { type: string }
+        hyperparams: { type: object }
+        status: { type: string, enum: [draft, validating, queued, running, evaluating, completed, failed, deployed] }
+        kairos_run_id: { type: string, nullable: true }
+        compute_backend: { type: string }
+        reforge_suggested: { type: boolean }
+        error: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    CreateTrainingJobBody:
+      type: object
+      required: [name, mode, base_model, dataset_id, dataset_version_id]
+      properties:
+        name: { type: string }
+        mode: { type: string, enum: [prompt_tuning, rag_adaptation, fine_tuning] }
+        base_model: { type: string }
+        dataset_id: { type: integer }
+        dataset_version_id: { type: integer }
+        hyperparams: { type: object }
+
+    ModelPolicy:
+      type: object
+      properties:
+        tenant_id: { type: string }
+        allowed_base_models: { type: array, items: { type: string } }
+        max_dataset_bytes: { type: integer }
+        max_concurrent_jobs: { type: integer }
+        deployment_requires_approval: { type: boolean }
+        budget_limit_usd: { type: number, nullable: true }
+
+    ModelRegistration:
+      type: object
+      properties:
+        id: { type: integer }
+        tenant_id: { type: string }
+        workspace_id: { type: integer }
+        job_id: { type: integer }
+        name: { type: string }
+        created_at: { type: string, format: date-time }
+
+    ModelVersion:
+      type: object
+      properties:
+        id: { type: integer }
+        tenant_id: { type: string }
+        registration_id: { type: integer }
+        version: { type: integer }
+        status: { type: string, enum: [candidate, approved, rejected, deprecated] }
+        approved_by: { type: string, nullable: true }
+        approved_at: { type: string, format: date-time, nullable: true }
+        notes: { type: string, nullable: true }
+        artifact_key: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+
+    ModelDeployment:
+      type: object
+      properties:
+        id: { type: integer }
+        tenant_id: { type: string }
+        version_id: { type: integer }
+        endpoint_url: { type: string, nullable: true }
+        status: { type: string, enum: [pending, active, inactive, rolled_back] }
+        compute_backend: { type: string }
+        deployed_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }

@@ -8,6 +8,7 @@ import skillsRouter from "./skills";
 import dashboardRouter from "./dashboard";
 import billingRouter from "./billing";
 import webhooksRouter from "./webhooks";
+import forgeRouter from "./forge";
 
 const router: IRouter = Router();
 
@@ -20,5 +21,6 @@ router.use(skillsRouter);
 router.use(dashboardRouter);
 router.use(billingRouter);
 router.use(webhooksRouter);
+router.use(forgeRouter);
 
 export default router;

@@ -28,6 +28,8 @@ services:
         value: https://openclaw-benchmark.onrender.com
       - key: BENCHMARK_GATE_ENABLED
         value: "true"
+      - key: KAIROS_SERVICE_URL
+        value: https://openclaw-benchmark.onrender.com
 
   - type: web
     name: openclaw-saas

@@ -256,7 +256,285 @@ export interface GraphQueryResult {
   totalFound: number;
 }
 
+export type ForgeWorkspaceStatus =
+  (typeof ForgeWorkspaceStatus)[keyof typeof ForgeWorkspaceStatus];
+
+export const ForgeWorkspaceStatus = {
+  active: "active",
+  archived: "archived",
+} as const;
+
+export interface ForgeWorkspace {
+  id: number;
+  tenant_id: string;
+  name: string;
+  domain: string;
+  description?: string | null;
+  status: ForgeWorkspaceStatus;
+  created_at: string;
+}
+
+export interface CreateForgeWorkspaceBody {
+  name: string;
+  domain: string;
+  description?: string;
+}
+
+export type ForgeDatasetSourceType =
+  (typeof ForgeDatasetSourceType)[keyof typeof ForgeDatasetSourceType];
+
+export const ForgeDatasetSourceType = {
+  upload: "upload",
+  url: "url",
+  connector: "connector",
+} as const;
+
+export type ForgeDatasetSensitivity =
+  (typeof ForgeDatasetSensitivity)[keyof typeof ForgeDatasetSensitivity];
+
+export const ForgeDatasetSensitivity = {
+  public: "public",
+  internal: "internal",
+  confidential: "confidential",
+  restricted: "restricted",
+} as const;
+
+export type ForgeDatasetStatus =
+  (typeof ForgeDatasetStatus)[keyof typeof ForgeDatasetStatus];
+
+export const ForgeDatasetStatus = {
+  pending: "pending",
+  processing: "processing",
+  ready: "ready",
+  error: "error",
+} as const;
+
+export interface ForgeDataset {
+  id: number;
+  tenant_id: string;
+  workspace_id: number;
+  name: string;
+  description?: string | null;
+  source_type: ForgeDatasetSourceType;
+  sensitivity: ForgeDatasetSensitivity;
+  status: ForgeDatasetStatus;
+  document_count: number;
+  total_bytes: number;
+  created_at: string;
+  updated_at?: string;
+}
+
+export type CreateForgeDatasetBodySourceType =
+  (typeof CreateForgeDatasetBodySourceType)[keyof typeof CreateForgeDatasetBodySourceType];
+
+export const CreateForgeDatasetBodySourceType = {
+  upload: "upload",
+  url: "url",
+  connector: "connector",
+} as const;
+
+export type CreateForgeDatasetBodySensitivity =
+  (typeof CreateForgeDatasetBodySensitivity)[keyof typeof CreateForgeDatasetBodySensitivity];
+
+export const CreateForgeDatasetBodySensitivity = {
+  public: "public",
+  internal: "internal",
+  confidential: "confidential",
+  restricted: "restricted",
+} as const;
+
+export interface CreateForgeDatasetBody {
+  name: string;
+  description?: string;
+  source_type: CreateForgeDatasetBodySourceType;
+  sensitivity?: CreateForgeDatasetBodySensitivity;
+}
+
+export type DatasetDocumentStatus =
+  (typeof DatasetDocumentStatus)[keyof typeof DatasetDocumentStatus];
+
+export const DatasetDocumentStatus = {
+  pending: "pending",
+  ingested: "ingested",
+  error: "error",
+} as const;
+
+export interface DatasetDocument {
+  id: number;
+  tenant_id: string;
+  dataset_id: number;
+  version_id?: number | null;
+  /** Unverified — client-supplied metadata */
+  filename: string;
+  /** Unverified — client-supplied metadata */
+  source_url?: string | null;
+  /** Unverified — client-supplied metadata */
+  mime_type?: string | null;
+  /** Unverified — client-supplied metadata */
+  size_bytes: number;
+  checksum?: string | null;
+  /** null = metadata-only; non-null = real file stored */
+  storage_key?: string | null;
+  status: DatasetDocumentStatus;
+  error?: string | null;
+  created_at: string;
+}
+
+export interface RegisterDocumentBody {
+  filename: string;
+  size_bytes?: number;
+  mime_type?: string;
+  source_url?: string;
+}
+
+export interface DatasetVersion {
+  id: number;
+  tenant_id: string;
+  dataset_id: number;
+  version: number;
+  checksum?: string | null;
+  document_count: number;
+  total_bytes: number;
+  notes?: string | null;
+  created_at: string;
+}
+
+export type TrainingJobMode =
+  (typeof TrainingJobMode)[keyof typeof TrainingJobMode];
+
+export const TrainingJobMode = {
+  prompt_tuning: "prompt_tuning",
+  rag_adaptation: "rag_adaptation",
+  fine_tuning: "fine_tuning",
+} as const;
+
+export type TrainingJobHyperparams = { [key: string]: unknown };
+
+export type TrainingJobStatus =
+  (typeof TrainingJobStatus)[keyof typeof TrainingJobStatus];
+
+export const TrainingJobStatus = {
+  draft: "draft",
+  validating: "validating",
+  queued: "queued",
+  running: "running",
+  evaluating: "evaluating",
+  completed: "completed",
+  failed: "failed",
+  deployed: "deployed",
+} as const;
+
+export interface TrainingJob {
+  id: number;
+  tenant_id: string;
+  workspace_id: number;
+  dataset_id: number;
+  dataset_version_id: number;
+  name: string;
+  mode: TrainingJobMode;
+  base_model: string;
+  hyperparams?: TrainingJobHyperparams;
+  status: TrainingJobStatus;
+  kairos_run_id?: string | null;
+  compute_backend: string;
+  reforge_suggested?: boolean;
+  error?: string | null;
+  created_at: string;
+  updated_at?: string;
+}
+
+export type CreateTrainingJobBodyMode =
+  (typeof CreateTrainingJobBodyMode)[keyof typeof CreateTrainingJobBodyMode];
+
+export const CreateTrainingJobBodyMode = {
+  prompt_tuning: "prompt_tuning",
+  rag_adaptation: "rag_adaptation",
+  fine_tuning: "fine_tuning",
+} as const;
+
+export type CreateTrainingJobBodyHyperparams = { [key: string]: unknown };
+
+export interface CreateTrainingJobBody {
+  name: string;
+  mode: CreateTrainingJobBodyMode;
+  base_model: string;
+  dataset_id: number;
+  dataset_version_id: number;
+  hyperparams?: CreateTrainingJobBodyHyperparams;
+}
+
+export interface ModelPolicy {
+  tenant_id?: string;
+  allowed_base_models?: string[];
+  max_dataset_bytes?: number;
+  max_concurrent_jobs?: number;
+  deployment_requires_approval?: boolean;
+  budget_limit_usd?: number | null;
+}
+
+export interface ModelRegistration {
+  id?: number;
+  tenant_id?: string;
+  workspace_id?: number;
+  job_id?: number;
+  name?: string;
+  created_at?: string;
+}
+
+export type ModelVersionStatus =
+  (typeof ModelVersionStatus)[keyof typeof ModelVersionStatus];
+
+export const ModelVersionStatus = {
+  candidate: "candidate",
+  approved: "approved",
+  rejected: "rejected",
+  deprecated: "deprecated",
+} as const;
+
+export interface ModelVersion {
+  id?: number;
+  tenant_id?: string;
+  registration_id?: number;
+  version?: number;
+  status?: ModelVersionStatus;
+  approved_by?: string | null;
+  approved_at?: string | null;
+  notes?: string | null;
+  artifact_key?: string | null;
+  created_at?: string;
+}
+
+export type ModelDeploymentStatus =
+  (typeof ModelDeploymentStatus)[keyof typeof ModelDeploymentStatus];
+
+export const ModelDeploymentStatus = {
+  pending: "pending",
+  active: "active",
+  inactive: "inactive",
+  rolled_back: "rolled_back",
+} as const;
+
+export interface ModelDeployment {
+  id?: number;
+  tenant_id?: string;
+  version_id?: number;
+  endpoint_url?: string | null;
+  status?: ModelDeploymentStatus;
+  compute_backend?: string;
+  deployed_at?: string | null;
+  created_at?: string;
+}
+
 export type ListSkillsParams = {
   category?: string;
   search?: string;
+};
+
+export type GetForgeDataset200 = ForgeDataset & {
+  documents?: DatasetDocument[];
+};
+
+export type ListModelRegistry200Item = {
+  registration?: ModelRegistration;
+  versions?: ModelVersion[];
 };

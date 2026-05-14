@@ -63,7 +63,109 @@ export async function runSeed(): Promise<void> {
       `, [tenantId, skillIds[s.slug]]);
     }
 
-    logger.info({ userId: DEMO_USER_ID, tenantId, skills: ZOA_SKILLS.length }, "Seed complete");
+    // ── Model Forge demo seed ─────────────────────────────────────────────────
+    // Workspace: Legal Intelligence Lab
+    const wsRes = await client.query(`
+      INSERT INTO model_workspaces (tenant_id, name, description)
+      VALUES ($1, 'Legal Intelligence Lab', 'Fine-tuning workspace for contract analysis and legal NLU models.')
+      ON CONFLICT DO NOTHING
+      RETURNING id
+    `, [tenantId]);
+
+    // If already seeded, look up the existing workspace id
+    let workspaceId: number;
+    if (wsRes.rows.length > 0) {
+      workspaceId = wsRes.rows[0].id;
+    } else {
+      const existing = await client.query(
+        `SELECT id FROM model_workspaces WHERE tenant_id=$1 AND name='Legal Intelligence Lab' LIMIT 1`,
+        [tenantId]
+      );
+      workspaceId = existing.rows[0].id;
+    }
+
+    // Dataset: Contract Corpus v1
+    const dsRes = await client.query(`
+      INSERT INTO model_datasets (tenant_id, workspace_id, name, description, source_type, status)
+      VALUES ($1, $2, 'Contract Corpus v1',
+              'Curated set of NDA and MSA contracts for legal NLU fine-tuning.',
+              'upload', 'ready')
+      ON CONFLICT DO NOTHING
+      RETURNING id
+    `, [tenantId, workspaceId]);
+
+    let datasetId: number;
+    if (dsRes.rows.length > 0) {
+      datasetId = dsRes.rows[0].id;
+    } else {
+      const existing = await client.query(
+        `SELECT id FROM model_datasets WHERE tenant_id=$1 AND workspace_id=$2 AND name='Contract Corpus v1' LIMIT 1`,
+        [tenantId, workspaceId]
+      );
+      datasetId = existing.rows[0].id;
+    }
+
+    // Two demo documents (metadata-only, no real file storage)
+    await client.query(`
+      INSERT INTO dataset_documents (tenant_id, dataset_id, filename, mime_type, size_bytes)
+      VALUES
+        ($1, $2, 'nda_corpus_500.jsonl',  'application/jsonl', 2621440),
+        ($1, $2, 'msa_corpus_300.jsonl',  'application/jsonl', 1572864)
+      ON CONFLICT DO NOTHING
+    `, [tenantId, datasetId]);
+
+    // Version snapshot v1
+    const vRes = await client.query(`
+      INSERT INTO dataset_versions (tenant_id, dataset_id, version, document_count, status)
+      VALUES ($1, $2, 1, 2, 'ready')
+      ON CONFLICT DO NOTHING
+      RETURNING id
+    `, [tenantId, datasetId]);
+
+    let versionId: number;
+    if (vRes.rows.length > 0) {
+      versionId = vRes.rows[0].id;
+    } else {
+      const existing = await client.query(
+        `SELECT id FROM dataset_versions WHERE tenant_id=$1 AND dataset_id=$2 AND version=1 LIMIT 1`,
+        [tenantId, datasetId]
+      );
+      versionId = existing.rows[0].id;
+    }
+
+    // Training job: Legal NLU v1 — status=queued (submitted, awaiting dispatch)
+    // Preserves governance step: job is visible in UI, can be dispatched or cancelled.
+    await client.query(`
+      INSERT INTO training_jobs (
+        tenant_id, workspace_id, dataset_id, dataset_version_id,
+        name, mode, base_model, hyperparams, status, compute_backend
+      )
+      VALUES (
+        $1, $2, $3, $4,
+        'Legal NLU v1', 'fine-tune', 'mistral-7b-instruct',
+        '{"epochs":3,"learning_rate":2e-5,"batch_size":8}',
+        'queued', 'stub'
+      )
+      ON CONFLICT DO NOTHING
+    `, [tenantId, workspaceId, datasetId, versionId]);
+
+    // Governance policy for the tenant
+    await client.query(`
+      INSERT INTO model_policies (
+        tenant_id, allowed_base_models, max_dataset_bytes,
+        max_concurrent_jobs, deployment_requires_approval, budget_limit_usd
+      )
+      VALUES ($1, $2, 524288000, 3, true, 500.00)
+      ON CONFLICT (tenant_id) DO UPDATE SET
+        allowed_base_models = EXCLUDED.allowed_base_models,
+        deployment_requires_approval = EXCLUDED.deployment_requires_approval,
+        budget_limit_usd = EXCLUDED.budget_limit_usd
+    `, [tenantId, ['mistral-7b-instruct', 'llama-3-8b-instruct', 'phi-3-mini']]);
+
+    logger.info(
+      { userId: DEMO_USER_ID, tenantId, skills: ZOA_SKILLS.length, workspaceId, datasetId, versionId },
+      "Seed complete (ZOA + Model Forge)"
+    );
   } finally {
     client.release();
   }
