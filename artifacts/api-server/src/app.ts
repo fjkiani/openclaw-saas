@@ -36,6 +36,19 @@ app.get("/healthz", (_req, res) => {
   res.json({ status: "ok" });
 });
 
+// DB connectivity probe — no auth required, useful for diagnosing startup issues
+app.get("/dbz", async (_req, res) => {
+  try {
+    const { pool } = await import("@workspace/db");
+    const client = await pool.connect();
+    const result = await client.query("SELECT current_database(), version()");
+    client.release();
+    res.json({ ok: true, db: result.rows[0] });
+  } catch (err: any) {
+    res.status(500).json({ ok: false, error: err.message, cause: err.cause?.message });
+  }
+});
+
 app.use(CLERK_PROXY_PATH, clerkProxyMiddleware());
 
 app.use(cors({ credentials: true, origin: true }));
@@ -48,9 +61,14 @@ app.use("/api", router);
 
 // Global error handler — catches unhandled errors from async route handlers
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
+app.use((err: Error & { cause?: Error; query?: string }, _req: Request, res: Response, _next: NextFunction) => {
   logger.error({ err }, "Unhandled route error");
-  res.status(500).json({ error: err.message ?? "Internal server error" });
+  const cause = (err.cause as any)?.message ?? String(err.cause ?? "");
+  res.status(500).json({
+    error: err.message ?? "Internal server error",
+    ...(cause ? { cause } : {}),
+    ...(err.query ? { query: err.query } : {}),
+  });
 });
 
 export default app;
