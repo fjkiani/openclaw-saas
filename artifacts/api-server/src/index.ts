@@ -182,11 +182,17 @@ async function runMigrations(): Promise<void> {
         "id" serial PRIMARY KEY NOT NULL,
         "tenant_id" text NOT NULL,
         "name" text NOT NULL,
-        "domain" text NOT NULL,
+        "domain" text NOT NULL DEFAULT '',
         "description" text,
         "status" text DEFAULT 'active' NOT NULL,
         "created_at" timestamptz DEFAULT now() NOT NULL
       )
+    `);
+
+    // Backfill: set default on domain column for existing rows/schema
+    await client.query(`
+      ALTER TABLE "model_workspaces"
+        ALTER COLUMN "domain" SET DEFAULT ''
     `);
 
     await client.query(`

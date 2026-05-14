@@ -66,8 +66,8 @@ export async function runSeed(): Promise<void> {
     // ── Model Forge demo seed ─────────────────────────────────────────────────
     // Workspace: Legal Intelligence Lab
     const wsRes = await client.query(`
-      INSERT INTO model_workspaces (tenant_id, name, description)
-      VALUES ($1, 'Legal Intelligence Lab', 'Fine-tuning workspace for contract analysis and legal NLU models.')
+      INSERT INTO model_workspaces (tenant_id, name, domain, description)
+      VALUES ($1, 'Legal Intelligence Lab', 'legal-intelligence-lab', 'Fine-tuning workspace for contract analysis and legal NLU models.')
       ON CONFLICT DO NOTHING
       RETURNING id
     `, [tenantId]);
