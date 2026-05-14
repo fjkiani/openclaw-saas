@@ -1,6 +1,7 @@
 import app from "./app";
 import { logger } from "./lib/logger";
 import { pool } from "@workspace/db";
+import { runSeed } from "./seed";
 
 const rawPort = process.env["PORT"];
 
@@ -170,8 +171,9 @@ async function runMigrations(): Promise<void> {
   }
 }
 
-// Run migrations then start server
+// Run migrations + seed, then start server
 runMigrations()
+  .then(() => runSeed())
   .then(() => {
     app.listen(port, (err) => {
       if (err) {
@@ -182,6 +184,6 @@ runMigrations()
     });
   })
   .catch((err) => {
-    logger.error({ err }, "Migration failed — aborting startup");
+    logger.error({ err }, "Startup failed — aborting");
     process.exit(1);
   });
