@@ -31,6 +31,11 @@ app.use(
   }),
 );
 
+// Health check BEFORE Clerk middleware so it works even without CLERK_SECRET_KEY
+app.get("/healthz", (_req, res) => {
+  res.json({ status: "ok" });
+});
+
 app.use(CLERK_PROXY_PATH, clerkProxyMiddleware());
 
 app.use(cors({ credentials: true, origin: true }));
