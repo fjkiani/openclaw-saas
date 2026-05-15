@@ -136,7 +136,7 @@ async function callOpenRouter(
 }
 
 // ── POST /api/v1/legal/extract-clause ────────────────────────────────────────
-router.post("/api/v1/legal/extract-clause", async (req, res): Promise<void> => {
+router.post("/v1/legal/extract-clause", async (req, res): Promise<void> => {
   const { text, use_rag = true } = req.body ?? {};
 
   if (!text || typeof text !== "string") {
@@ -187,7 +187,7 @@ router.post("/api/v1/legal/extract-clause", async (req, res): Promise<void> => {
 });
 
 // ── GET /api/v1/legal/extract-clause (health + asset info) ───────────────────
-router.get("/api/v1/legal/extract-clause", (_req, res): void => {
+router.get("/v1/legal/extract-clause", (_req, res): void => {
   res.json({
     asset: "Legal Clause Extractor v1",
     version: "1",
