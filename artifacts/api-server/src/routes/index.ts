@@ -9,6 +9,7 @@ import dashboardRouter from "./dashboard";
 import billingRouter from "./billing";
 import webhooksRouter from "./webhooks";
 import forgeRouter from "./forge";
+import legalRouter from "./legal";
 
 const router: IRouter = Router();
 
@@ -22,5 +23,6 @@ router.use(dashboardRouter);
 router.use(billingRouter);
 router.use(webhooksRouter);
 router.use(forgeRouter);
+router.use(legalRouter);
 
 export default router;
