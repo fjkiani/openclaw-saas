@@ -42,7 +42,7 @@ export default function ForgePage() {
     provisionedRef.current = true;
 
     setProvisioning(true);
-    fetch("/api/onboarding/provision", { method: "POST" })
+    fetch("/api/onboarding/provision", { method: "POST", credentials: "include" })
       .then((r) => {
         if (!r.ok) throw new Error(`${r.status}`);
         return r.json();
