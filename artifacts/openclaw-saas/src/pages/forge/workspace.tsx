@@ -35,6 +35,7 @@ import { ChevronDown, ChevronRight, Plus, X, Database, Briefcase, BookOpen, Serv
 import { OnboardingChecklist } from "@/components/OnboardingChecklist";
 import { DatasetExplorerTab } from "@/components/DatasetExplorer";
 import { SaaSShowcaseTab } from "@/components/SaaSShowcase";
+import { TrainingTab } from "@/components/TrainingTab";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -1251,6 +1252,7 @@ const TABS = [
   { key: "policies",   label: "Policies" },
   { key: "explorer",   label: "Explorer" },
   { key: "showcase",   label: "Showcase" },
+  { key: "training",   label: "Training" },
   { key: "journey",    label: "Journey" },
 ] as const;
 
@@ -1313,6 +1315,7 @@ export default function ForgeWorkspacePage() {
           {tab === "policies"    && <PoliciesTab wid={wid} />}
           {tab === "journey"     && <JourneyTab wid={wid} />}
           {tab === "explorer"    && <DatasetExplorerTab />}
+          {tab === "training"    && <TrainingTab />}
           {tab === "showcase"    && <SaaSShowcaseTab />}
         </div>
       </div>
