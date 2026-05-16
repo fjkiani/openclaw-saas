@@ -118,7 +118,7 @@ export async function runTerminationExtractionBaseline(apiKey: string): Promise<
       const resp = await fetch("https://openrouter.ai/api/v1/chat/completions", {
         method: "POST",
         headers: {
-          Authorization: \`Bearer \${apiKey}\`,
+          Authorization: `Bearer \${apiKey}`,
           "Content-Type": "application/json",
           "HTTP-Referer": "https://openclaw-api-k30t.onrender.com",
           "X-Title": "OpenClaw Next Asset Baseline",
@@ -127,7 +127,7 @@ export async function runTerminationExtractionBaseline(apiKey: string): Promise<
           model: "openai/gpt-oss-20b:free",
           messages: [
             { role: "system", content: EXTRACTION_SYSTEM_PROMPT },
-            { role: "user", content: \`Extract structured fields from this termination clause:\n\n"""\n\${ex.text}\n"""\` },
+            { role: "user", content: `Extract structured fields from this termination clause:\n\n"""\n\${ex.text}\n"""` },
           ],
           temperature: 0.0,
           max_tokens: 300,

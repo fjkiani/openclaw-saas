@@ -451,7 +451,7 @@ Respond with valid JSON only:
 
   const usageEventId = generateUsageEventId();
   const t0 = Date.now();
-  let modelUsed = MODEL_CHAIN[0].id;
+  let modelUsed: string = MODEL_CHAIN[0].id;
   let fallbackUsed = false;
   let fallbackReason: string | null = null;
   let parsed: { matter_type: string; confidence: number; reasoning: string } | null = null;
@@ -557,7 +557,7 @@ router.post("/v1/legal/contract/analyze", async (req, res): Promise<void> => {
 
   const usageEventId = generateUsageEventId();
   const t0 = Date.now();
-  let modelUsed = MODEL_CHAIN[0].id;
+  let modelUsed: string = MODEL_CHAIN[0].id;
   let fallbackUsed = false;
   let fallbackReason: string | null = null;
   let parsed: any = null;
@@ -658,7 +658,7 @@ router.post("/v1/legal/litigation/analyze", async (req, res): Promise<void> => {
 
   const usageEventId = generateUsageEventId();
   const t0 = Date.now();
-  let modelUsed = MODEL_CHAIN[0].id;
+  let modelUsed: string = MODEL_CHAIN[0].id;
   let fallbackUsed = false;
   let fallbackReason: string | null = null;
   let parsed: any = null;
@@ -761,7 +761,7 @@ router.post("/v1/legal/ip/analyze", async (req, res): Promise<void> => {
 
   const usageEventId = generateUsageEventId();
   const t0 = Date.now();
-  let modelUsed = MODEL_CHAIN[0].id;
+  let modelUsed: string = MODEL_CHAIN[0].id;
   let fallbackUsed = false;
   let fallbackReason: string | null = null;
   let parsed: any = null;
@@ -864,7 +864,7 @@ router.post("/v1/legal/employment/analyze", async (req, res): Promise<void> => {
 
   const usageEventId = generateUsageEventId();
   const t0 = Date.now();
-  let modelUsed = MODEL_CHAIN[0].id;
+  let modelUsed: string = MODEL_CHAIN[0].id;
   let fallbackUsed = false;
   let fallbackReason: string | null = null;
   let parsed: any = null;
@@ -966,7 +966,7 @@ router.post("/v1/legal/corporate/analyze", async (req, res): Promise<void> => {
 
   const usageEventId = generateUsageEventId();
   const t0 = Date.now();
-  let modelUsed = MODEL_CHAIN[0].id;
+  let modelUsed: string = MODEL_CHAIN[0].id;
   let fallbackUsed = false;
   let fallbackReason: string | null = null;
   let parsed: any = null;
