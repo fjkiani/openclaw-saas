@@ -32,6 +32,9 @@ import type {
 import { Layout, PageHeader } from "@/components/Layout";
 import { useToast } from "@/hooks/use-toast";
 import { ChevronDown, ChevronRight, Plus, X, Database, Briefcase, BookOpen, Server, Shield } from "lucide-react";
+import { OnboardingChecklist } from "@/components/OnboardingChecklist";
+import { DatasetExplorerTab } from "@/components/DatasetExplorer";
+import { SaaSShowcaseTab } from "@/components/SaaSShowcase";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -629,24 +632,6 @@ type InvokeResult = {
     model_eval_macro_f1: number;
     latency_ms: number;
   };
-  governance?: {
-    human_review_required: boolean;
-    privilege_warning: string;
-    not_legal_advice: boolean;
-    escalation_flag: boolean;
-    escalation_reason: string | null;
-    jurisdiction_scope: string[];
-  };
-  trace?: {
-    retrieval_used: boolean;
-    retrieval_chunks: number;
-    fallback_used: boolean;
-    fallback_reason: string | null;
-    model_used: string;
-    provider_model: string;
-    latency_ms: number;
-    usage_event_id: string;
-  };
 };
 
 function UseModelPanel({
@@ -754,14 +739,33 @@ function UseModelPanel({
 
       {/* Input */}
       <div>
-        <label className="text-[10px] font-mono text-muted-foreground block mb-1">
-          Contract clause excerpt
-        </label>
+        <div className="flex items-center justify-between mb-1">
+          <label className="text-[10px] font-mono text-muted-foreground">
+            Contract clause excerpt
+          </label>
+          <div className="flex items-center gap-1">
+            <span className="text-[10px] font-mono text-muted-foreground">Try:</span>
+            {[
+              { label: "Governing Law", text: "This Agreement shall be governed by and construed in accordance with the laws of the State of Delaware, without regard to its conflict of law provisions." },
+              { label: "Termination", text: "Either party may terminate this Agreement upon thirty (30) days written notice. Upon termination, all licenses granted hereunder shall immediately cease." },
+              { label: "IP Assignment", text: "Employee hereby irrevocably assigns to Company all right, title, and interest in any inventions, works of authorship, or other intellectual property created during employment." },
+              { label: "Indemnification", text: "Each party shall indemnify, defend, and hold harmless the other party from any claims, damages, or expenses arising from its breach of this Agreement." },
+            ].map((ex) => (
+              <button
+                key={ex.label}
+                onClick={() => setText(ex.text)}
+                className="text-[10px] font-mono px-1.5 py-0.5 rounded border border-border text-muted-foreground hover:text-primary hover:border-primary/40 transition-colors"
+              >
+                {ex.label}
+              </button>
+            ))}
+          </div>
+        </div>
         <textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
           rows={4}
-          placeholder="Paste a contract clause here — e.g. 'This Agreement shall be governed by the laws of the State of Delaware...'"
+          placeholder="Paste a contract clause here, or click an example above..."
           className={textareaCls}
           disabled={loading || deployLoading || !!deployError}
         />
@@ -823,38 +827,6 @@ function UseModelPanel({
               </span>
             )}
           </div>
-
-          {/* Governance */}
-          {result.governance && (
-            <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded text-xs space-y-1">
-              <div className="font-semibold text-amber-800">Governance</div>
-              <div className="text-amber-700">
-                ⚠ {result.governance.privilege_warning}
-              </div>
-              {result.governance.escalation_flag && (
-                <div className="text-red-700 font-medium">
-                  Escalation required: {result.governance.escalation_reason}
-                </div>
-              )}
-              <div className="text-amber-600">
-                Human review required: {result.governance.human_review_required ? "YES (mandatory)" : "no"}
-              </div>
-            </div>
-          )}
-
-          {/* Trace */}
-          {result.trace && (
-            <div className="mt-2 p-2 bg-gray-50 border border-gray-200 rounded text-xs space-y-0.5 font-mono">
-              <div className="font-semibold text-gray-600 font-sans">Trace</div>
-              <div>model: {result.trace.model_used}</div>
-              {result.trace.fallback_used && (
-                <div className="text-orange-600">fallback: {result.trace.fallback_reason}</div>
-              )}
-              <div>retrieval: {result.trace.retrieval_used ? `yes (${result.trace.retrieval_chunks} chunks)` : "no"}</div>
-              <div>latency: {result.trace.latency_ms}ms</div>
-              <div className="text-gray-400">event_id: {result.trace.usage_event_id}</div>
-            </div>
-          )}
         </div>
       )}
 
@@ -1125,6 +1097,150 @@ function PoliciesTab({ wid }: { wid: number }) {
   );
 }
 
+// ─── Journey Tab ──────────────────────────────────────────────────────────────
+
+function JourneyTab({ wid }: { wid: number }) {
+  const [, navigate] = useLocation();
+
+  const stages = [
+    {
+      num: "01",
+      title: "Dataset",
+      subtitle: "What this asset was built and evaluated on",
+      color: "text-blue-400",
+      border: "border-blue-500/20",
+      bg: "bg-blue-500/5",
+      facts: [
+        "CUAD v1 (CC BY 4.0) — 510 contracts, 41 QA types",
+        "50 examples extracted: 30 train / 10 val / 10 test",
+        "5 clause types: governing_law, termination, ip_assignment, limitation_of_liability, indemnification",
+        "Retrieval index: FAISS IndexFlatIP, 384-dim, all-MiniLM-L6-v2",
+      ],
+      cta: "View Datasets",
+      tab: "datasets",
+    },
+    {
+      num: "02",
+      title: "Eval",
+      subtitle: "How the asset was tested",
+      color: "text-purple-400",
+      border: "border-purple-500/20",
+      bg: "bg-purple-500/5",
+      facts: [
+        "Method: RAG adaptation — not fine-tuning. FAISS + sentence-transformers.",
+        "Zero-shot baseline: acc=0.925, macro_f1=0.800 (liquid/lfm-2.5-1.2b-instruct)",
+        "RAG result: acc=1.0, macro_f1=1.0 on 10 test examples",
+        "Internal regression only. Not validated on real contracts. Not production-ready.",
+      ],
+      cta: "View Jobs",
+      tab: "jobs",
+    },
+    {
+      num: "03",
+      title: "Registry",
+      subtitle: "What was registered and deployed",
+      color: "text-emerald-400",
+      border: "border-emerald-500/20",
+      bg: "bg-emerald-500/5",
+      facts: [
+        "7 agents registered: Legal Clause Extractor, Intake Router, Contract, Litigation, IP, Employment, Corporate",
+        "Each agent has a live endpoint at openclaw-api-k30t.onrender.com",
+        "Lineage: dataset v2 → RAG job → eval → approved version → active deployment",
+        "All agents share the same governance envelope and trace output",
+      ],
+      cta: "Open Registry",
+      tab: "registry",
+    },
+    {
+      num: "04",
+      title: "Governance",
+      subtitle: "How every output is governed",
+      color: "text-amber-400",
+      border: "border-amber-500/20",
+      bg: "bg-amber-500/5",
+      facts: [
+        "human_review_required=true on all legal outputs",
+        "privilege_warning on every response — AI interaction does NOT create attorney-client privilege",
+        "escalation_flag=true when confidence is low or matter is complex",
+        "Deployment requires approval. Allowed models: liquid/lfm-2.5-1.2b-instruct, gpt-oss-20b",
+      ],
+      cta: "View Policies",
+      tab: "policies",
+    },
+    {
+      num: "05",
+      title: "Playbook",
+      subtitle: "How the system was adversarially tested",
+      color: "text-red-400",
+      border: "border-red-500/20",
+      bg: "bg-red-500/5",
+      facts: [
+        "v1 harness: 10 scenarios, 19 steps — presence_pass_rate=1.0 (infrastructure proof)",
+        "v2 harness: correctness_pass_rate=0.75 — 3 confirmed gaps: intake calibration, employment escalation, privilege detection",
+        "Confirmed strengths: injection resistance (S9), multi-clause parsing (S2), IP edge cases (S5)",
+        "Confirmed gaps are deterministic fixes — no model retraining required",
+      ],
+      cta: "Try a Model",
+      tab: "registry",
+    },
+  ];
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-start justify-between">
+        <div>
+          <span className="text-xs font-mono font-bold text-foreground">Build Journey</span>
+          <p className="text-[10px] font-mono text-muted-foreground mt-0.5">
+            How the Legal AI Operating Layer was built, evaluated, and deployed.
+            Infrastructure for legal workflows — not legal advice.
+          </p>
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        {stages.map((stage) => (
+          <div
+            key={stage.num}
+            className={`rounded-lg border p-4 ${stage.border} ${stage.bg}`}
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex items-start gap-3 flex-1 min-w-0">
+                <span className={`text-xs font-mono font-bold shrink-0 ${stage.color}`}>
+                  {stage.num}
+                </span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-mono font-bold text-foreground">{stage.title}</p>
+                  <p className="text-[10px] font-mono text-muted-foreground mb-2">{stage.subtitle}</p>
+                  <ul className="space-y-1">
+                    {stage.facts.map((fact, i) => (
+                      <li key={i} className="text-[10px] font-mono text-muted-foreground flex items-start gap-1.5">
+                        <span className="text-muted-foreground/40 shrink-0 mt-0.5">·</span>
+                        <span>{fact}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+              <button
+                onClick={() => navigate(`/forge/${wid}/${stage.tab}`)}
+                className={`shrink-0 font-mono text-[10px] px-2 py-1 rounded border transition-colors ${stage.border} ${stage.color} hover:opacity-80`}
+              >
+                {stage.cta}
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="pt-2 border-t border-border/50">
+        <p className="text-[10px] font-mono text-muted-foreground">
+          OpenClaw is governed AI infrastructure for legal workflows. All outputs require human review. This system is not a law firm and does not provide legal advice.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 // ─── Tab Bar ──────────────────────────────────────────────────────────────────
 
 const TABS = [
@@ -1133,6 +1249,9 @@ const TABS = [
   { key: "registry",   label: "Registry" },
   { key: "deployments", label: "Deployments" },
   { key: "policies",   label: "Policies" },
+  { key: "explorer",   label: "Explorer" },
+  { key: "showcase",   label: "Showcase" },
+  { key: "journey",    label: "Journey" },
 ] as const;
 
 type TabKey = (typeof TABS)[number]["key"];
@@ -1186,11 +1305,15 @@ export default function ForgeWorkspacePage() {
 
         {/* Tab content */}
         <div className="p-6 space-y-6 flex-1 overflow-auto">
+          <OnboardingChecklist wid={wid} />
           {tab === "datasets"    && <DatasetsTab wid={wid} />}
           {tab === "jobs"        && <JobsTab wid={wid} />}
           {tab === "registry"    && <RegistryTab wid={wid} />}
           {tab === "deployments" && <DeploymentsTab wid={wid} />}
           {tab === "policies"    && <PoliciesTab wid={wid} />}
+          {tab === "journey"     && <JourneyTab wid={wid} />}
+          {tab === "explorer"    && <DatasetExplorerTab />}
+          {tab === "showcase"    && <SaaSShowcaseTab />}
         </div>
       </div>
     </Layout>

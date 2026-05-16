@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import { Link, useLocation } from "wouter";
 import { useUser, useClerk } from "@clerk/react";
 import {
@@ -9,6 +10,8 @@ import {
   ChevronRight,
   Activity,
   FlaskConical,
+  Sun,
+  Moon,
 } from "lucide-react";
 
 const navItems = [
@@ -20,41 +23,45 @@ const navItems = [
   { href: "/billing", icon: CreditCard, label: "Billing" },
 ];
 
+function useTheme() {
+  const [theme, setTheme] = useState<"dark" | "light">(() => {
+    if (typeof window === "undefined") return "dark";
+    return (localStorage.getItem("oc-theme") as "dark" | "light") ?? "dark";
+  });
+  useEffect(() => {
+    const root = document.documentElement;
+    if (theme === "light") {
+      root.classList.remove("dark");
+      root.classList.add("light");
+    } else {
+      root.classList.remove("light");
+      root.classList.add("dark");
+    }
+    localStorage.setItem("oc-theme", theme);
+  }, [theme]);
+  const toggle = () => setTheme((t) => (t === "dark" ? "light" : "dark"));
+  return { theme, toggle };
+}
+
 export function Layout({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
   const { user } = useUser();
   const { signOut } = useClerk();
+  const { theme, toggle } = useTheme();
 
   return (
     <div className="flex h-screen bg-background overflow-hidden">
-      {/* Sidebar */}
       <aside className="w-56 flex-shrink-0 border-r border-border bg-card flex flex-col">
-        {/* Logo */}
         <div className="h-14 flex items-center px-4 border-b border-border">
           <img src="/logo.svg" alt="OpenClaw" className="w-7 h-7 mr-2" />
-          <span className="font-mono font-bold text-foreground tracking-tight">
-            OpenClaw
-          </span>
-          <span className="ml-1.5 text-[10px] font-mono bg-primary/10 text-primary border border-primary/20 px-1 rounded">
-            BETA
-          </span>
+          <span className="font-mono font-bold text-foreground tracking-tight">OpenClaw</span>
+          <span className="ml-1.5 text-[10px] font-mono bg-primary/10 text-primary border border-primary/20 px-1 rounded">BETA</span>
         </div>
-
-        {/* Nav */}
         <nav className="flex-1 py-4 px-2 space-y-0.5" data-testid="nav-sidebar">
           {navItems.map(({ href, icon: Icon, label }) => {
             const active = location === href || location.startsWith(href + "/");
             return (
-              <Link
-                key={href}
-                href={href}
-                className={`flex items-center gap-2.5 px-3 py-2 rounded text-sm font-mono transition-colors ${
-                  active
-                    ? "bg-primary/10 text-primary"
-                    : "text-muted-foreground hover:text-foreground hover:bg-secondary/50"
-                }`}
-                data-testid={`nav-${label.toLowerCase()}`}
-              >
+              <Link key={href} href={href} className={`flex items-center gap-2.5 px-3 py-2 rounded text-sm font-mono transition-colors ${active ? "bg-primary/10 text-primary" : "text-muted-foreground hover:text-foreground hover:bg-secondary/50"}`} data-testid={`nav-${label.toLowerCase()}`}>
                 <Icon className="w-4 h-4 shrink-0" />
                 {label}
                 {active && <ChevronRight className="w-3 h-3 ml-auto" />}
@@ -62,9 +69,18 @@ export function Layout({ children }: { children: React.ReactNode }) {
             );
           })}
         </nav>
-
-        {/* User */}
         <div className="border-t border-border p-3">
+          <button
+            onClick={toggle}
+            aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+            aria-pressed={theme === "light"}
+            role="switch"
+            className="w-full flex items-center gap-2 px-2 py-1.5 text-xs font-mono text-muted-foreground hover:text-foreground hover:bg-secondary/50 rounded transition-colors mb-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            data-testid="button-theme-toggle"
+          >
+            {theme === "dark" ? <Sun className="w-3 h-3 shrink-0" aria-hidden="true" /> : <Moon className="w-3 h-3 shrink-0" aria-hidden="true" />}
+            {theme === "dark" ? "Light mode" : "Dark mode"}
+          </button>
           <div className="flex items-center gap-2 mb-2">
             <div className="w-7 h-7 rounded bg-primary/20 flex items-center justify-center">
               <span className="text-xs font-mono text-primary font-bold">
@@ -72,53 +88,27 @@ export function Layout({ children }: { children: React.ReactNode }) {
               </span>
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-xs font-mono text-foreground truncate" data-testid="text-username">
-                {user?.firstName ?? "User"}
-              </p>
-              <p className="text-[10px] font-mono text-muted-foreground truncate">
-                {user?.emailAddresses?.[0]?.emailAddress ?? ""}
-              </p>
+              <p className="text-xs font-mono text-foreground truncate" data-testid="text-username">{user?.firstName ?? "User"}</p>
+              <p className="text-[10px] font-mono text-muted-foreground truncate">{user?.emailAddresses?.[0]?.emailAddress ?? ""}</p>
             </div>
           </div>
-          <button
-            onClick={() => signOut({ redirectUrl: "/" })}
-            className="w-full flex items-center gap-2 px-2 py-1.5 text-xs font-mono text-muted-foreground hover:text-foreground hover:bg-secondary/50 rounded transition-colors"
-            data-testid="button-signout"
-          >
-            <LogOut className="w-3 h-3" />
+          <button onClick={() => signOut({ redirectUrl: "/" })} className="w-full flex items-center gap-2 px-2 py-1.5 text-xs font-mono text-muted-foreground hover:text-foreground hover:bg-secondary/50 rounded transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary" data-testid="button-signout">
+            <LogOut className="w-3 h-3" aria-hidden="true" />
             Sign out
           </button>
         </div>
       </aside>
-
-      {/* Main content */}
-      <main className="flex-1 overflow-auto" data-testid="main-content">
-        {children}
-      </main>
+      <main className="flex-1 overflow-auto" data-testid="main-content">{children}</main>
     </div>
   );
 }
 
-export function PageHeader({
-  title,
-  subtitle,
-  action,
-}: {
-  title: string;
-  subtitle?: string;
-  action?: React.ReactNode;
-}) {
+export function PageHeader({ title, subtitle, action }: { title: string; subtitle?: string; action?: React.ReactNode }) {
   return (
     <div className="flex items-center justify-between px-6 py-4 border-b border-border">
       <div>
-        <h1 className="text-lg font-mono font-bold text-foreground tracking-tight">
-          {title}
-        </h1>
-        {subtitle && (
-          <p className="text-xs font-mono text-muted-foreground mt-0.5">
-            {subtitle}
-          </p>
-        )}
+        <h1 className="text-lg font-mono font-bold text-foreground tracking-tight">{title}</h1>
+        {subtitle && <p className="text-xs font-mono text-muted-foreground mt-0.5">{subtitle}</p>}
       </div>
       {action && <div>{action}</div>}
     </div>
@@ -139,25 +129,17 @@ export function StatusBadge({ status }: { status: string }) {
     error: "bg-red-400",
   };
   return (
-    <span
-      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-mono border ${styles[status] ?? styles.stopped}`}
-      data-testid={`status-${status}`}
-    >
-      <span className={`w-1.5 h-1.5 rounded-full ${dots[status] ?? dots.stopped}`} />
+    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-mono border ${styles[status] ?? styles.stopped}`} data-testid={`status-${status}`}>
+      <span className={`w-1.5 h-1.5 rounded-full ${dots[status] ?? dots.stopped}`} aria-hidden="true" />
       {status.toUpperCase()}
     </span>
   );
 }
 
-export function EmptyState({ icon: Icon, title, description, action }: {
-  icon: React.ComponentType<{ className?: string }>;
-  title: string;
-  description: string;
-  action?: React.ReactNode;
-}) {
+export function EmptyState({ icon: Icon, title, description, action }: { icon: React.ComponentType<{ className?: string }>; title: string; description: string; action?: React.ReactNode }) {
   return (
     <div className="flex flex-col items-center justify-center py-20 text-center">
-      <div className="w-12 h-12 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center mb-4">
+      <div className="w-12 h-12 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center mb-4" aria-hidden="true">
         <Icon className="w-6 h-6 text-primary" />
       </div>
       <h3 className="text-sm font-mono font-bold text-foreground mb-1">{title}</h3>
@@ -176,5 +158,5 @@ export function ActivityIcon({ type }: { type: string }) {
     task_completed: "text-emerald-400",
     error: "text-red-400",
   };
-  return <Activity className={`w-3 h-3 ${map[type] ?? "text-muted-foreground"}`} />;
+  return <Activity className={`w-3 h-3 ${map[type] ?? "text-muted-foreground"}`} aria-hidden="true" />;
 }

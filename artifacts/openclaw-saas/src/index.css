@@ -174,13 +174,61 @@
   --destructive-foreground: 210 40% 98%;
 }
 
+
+.light {
+  --button-outline: rgba(0,0,0, .08);
+  --badge-outline: rgba(0,0,0, .04);
+  --opaque-button-border-intensity: 9;
+  --elevate-1: rgba(0,0,0, .03);
+  --elevate-2: rgba(0,0,0, .06);
+
+  --background: 0 0% 98%;
+  --foreground: 222 47% 8%;
+
+  --border: 220 13% 88%;
+  --input: 220 13% 88%;
+  --ring: 199 89% 40%;
+
+  --card: 0 0% 100%;
+  --card-foreground: 222 47% 8%;
+  --card-border: 220 13% 88%;
+
+  --popover: 0 0% 100%;
+  --popover-foreground: 222 47% 8%;
+  --popover-border: 220 13% 88%;
+
+  --primary: 199 89% 40%;
+  --primary-foreground: 0 0% 100%;
+
+  --secondary: 220 13% 93%;
+  --secondary-foreground: 222 47% 8%;
+
+  --muted: 220 13% 93%;
+  --muted-foreground: 220 9% 46%;
+
+  --accent: 220 13% 93%;
+  --accent-foreground: 222 47% 8%;
+
+  --destructive: 0 72% 51%;
+  --destructive-foreground: 0 0% 100%;
+
+  --sidebar: 0 0% 100%;
+  --sidebar-foreground: 222 47% 8%;
+  --sidebar-border: 220 13% 88%;
+  --sidebar-primary: 199 89% 40%;
+  --sidebar-primary-foreground: 0 0% 100%;
+  --sidebar-accent: 220 13% 93%;
+  --sidebar-accent-foreground: 222 47% 8%;
+  --sidebar-ring: 199 89% 40%;
+}
+
 @layer base {
   * {
     @apply border-border;
   }
   body {
     @apply font-sans antialiased bg-background text-foreground;
-    color-scheme: dark;
+    color-scheme: light dark;
   }
   h1, h2, h3, h4, h5, h6 {
     @apply font-mono font-bold tracking-tight;

@@ -62,11 +62,12 @@ router.get("/forge/workspaces", async (req, res): Promise<void> => {
     return;
   }
 
-  const tenantRes = await pool.query(
+  let tenantRes = await pool.query(
     `SELECT t.id as tenant_id FROM tenants t WHERE t.user_id = $1`,
     [userId],
   );
   if (tenantRes.rows.length === 0) {
+    // No tenant yet — return empty list; provision happens on first workspace create
     res.json([]);
     return;
   }
@@ -93,15 +94,24 @@ router.post("/forge/workspaces", async (req, res): Promise<void> => {
     return;
   }
 
-  const tenantRes = await pool.query(
+  // Auto-provision tenant if none exists for this user
+  let tenantRes = await pool.query(
     `SELECT t.id as tenant_id FROM tenants t WHERE t.user_id = $1`,
     [userId],
   );
+  let tenantId: string;
   if (tenantRes.rows.length === 0) {
-    res.status(400).json({ error: "No tenant found for user" });
-    return;
+    const newTenantId = `tenant-${userId.replace(/[^a-z0-9]/gi, "-").toLowerCase().slice(0, 32)}`;
+    await pool.query(
+      `INSERT INTO tenants (id, name, user_id, plan)
+       VALUES ($1, $2, $3, 'free')
+       ON CONFLICT (id) DO UPDATE SET user_id = EXCLUDED.user_id`,
+      [newTenantId, "My Workspace", userId],
+    );
+    tenantId = newTenantId;
+  } else {
+    tenantId = tenantRes.rows[0].tenant_id;
   }
-  const tenantId: string = tenantRes.rows[0].tenant_id;
 
   const wsRes = await pool.query(
     `INSERT INTO model_workspaces (tenant_id, name, domain, description)

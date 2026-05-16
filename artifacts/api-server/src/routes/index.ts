@@ -10,6 +10,7 @@ import billingRouter from "./billing";
 import webhooksRouter from "./webhooks";
 import forgeRouter from "./forge";
 import legalRouter from "./legal";
+import onboardingRouter from "./onboarding";
 
 const router: IRouter = Router();
 
@@ -24,5 +25,6 @@ router.use(billingRouter);
 router.use(webhooksRouter);
 router.use(forgeRouter);
 router.use(legalRouter);
+router.use(onboardingRouter);
 
 export default router;

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useLocation } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -8,7 +8,7 @@ import {
 } from "@workspace/api-client-react";
 import { Layout, PageHeader } from "@/components/Layout";
 import { useToast } from "@/hooks/use-toast";
-import { FlaskConical, Plus, X } from "lucide-react";
+import { FlaskConical, Plus, X, Loader2 } from "lucide-react";
 
 function statusBadgeClass(status: string): string {
   switch (status) {
@@ -30,8 +30,37 @@ export default function ForgePage() {
   const [name, setName] = useState("");
   const [domain, setDomain] = useState("");
   const [description, setDescription] = useState("");
+  const [provisioning, setProvisioning] = useState(false);
+  const provisionedRef = useRef(false);
 
   const { data: workspaces, isLoading } = useListForgeWorkspaces();
+
+  // On first load: call provision endpoint to ensure tenant + starter workspace exist.
+  // If a new workspace was provisioned, redirect directly to its registry tab.
+  useEffect(() => {
+    if (provisionedRef.current) return;
+    provisionedRef.current = true;
+
+    setProvisioning(true);
+    fetch("/api/onboarding/provision", { method: "POST" })
+      .then((r) => {
+        if (!r.ok) throw new Error(`${r.status}`);
+        return r.json();
+      })
+      .then((data: { workspace_id: number; provisioned: boolean }) => {
+        setProvisioning(false);
+        if (data.provisioned) {
+          // Fresh user — redirect to the seeded workspace's registry tab
+          queryClient.invalidateQueries({ queryKey: getListForgeWorkspacesQueryKey() });
+          navigate(`/forge/${data.workspace_id}/registry`);
+        }
+        // Existing user — stay on Forge list, workspaces will load normally
+      })
+      .catch(() => {
+        // Provision failed (e.g. not signed in) — stay on page, show normal list
+        setProvisioning(false);
+      });
+  }, [navigate, queryClient]);
 
   const createWorkspace = useCreateForgeWorkspace({
     mutation: {
@@ -59,6 +88,22 @@ export default function ForgePage() {
       data: { name: name.trim(), domain: domain.trim(), description: description.trim() || undefined },
     });
   };
+
+  // Show a brief loading state while provisioning on first visit
+  if (provisioning) {
+    return (
+      <Layout>
+        <PageHeader
+          title="Model Forge"
+          subtitle="Fine-tune and deploy domain-specific models"
+        />
+        <div className="flex flex-col items-center justify-center py-32 text-center">
+          <Loader2 className="w-8 h-8 text-primary animate-spin mb-4" />
+          <p className="text-xs font-mono text-muted-foreground">Initializing your workspace...</p>
+        </div>
+      </Layout>
+    );
+  }
 
   return (
     <Layout>
@@ -157,7 +202,7 @@ export default function ForgePage() {
             </div>
             <h3 className="text-sm font-mono font-bold text-foreground mb-1">No workspaces yet</h3>
             <p className="text-xs font-mono text-muted-foreground max-w-xs mb-4">
-              No workspaces yet. Create your first model workspace.
+              Create your first model workspace to get started.
             </p>
             <button
               onClick={() => setShowForm(true)}
@@ -172,7 +217,7 @@ export default function ForgePage() {
             {workspaces.map((ws) => (
               <div
                 key={ws.id}
-                onClick={() => navigate(`/forge/${ws.id}/datasets`)}
+                onClick={() => navigate(`/forge/${ws.id}/registry`)}
                 className="bg-card border border-border rounded-lg p-4 hover:border-primary/30 transition-colors cursor-pointer"
               >
                 <div className="flex items-center justify-between">
