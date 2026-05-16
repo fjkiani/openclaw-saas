@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useParams, useLocation } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -600,8 +600,275 @@ function JobsTab({ wid }: { wid: number }) {
 
 // ─── Registry Tab ─────────────────────────────────────────────────────────────
 
+type DeploymentInfo = {
+  registration_id: number;
+  registration_name: string;
+  version: number;
+  version_id: number;
+  version_status: string;
+  artifact_key: string | null;
+  deployment_id: number;
+  deployment_status: string;
+  endpoint_url: string;
+  auth_required: boolean;
+  deployed_at: string | null;
+};
+
+type InvokeResult = {
+  clause_type: string;
+  confidence: number;
+  reasoning: string;
+  metadata: {
+    model: string;
+    fallback_count: number;
+    rag_used: boolean;
+    asset_version: string;
+    dataset_version: string;
+    eval_run: string;
+    model_eval_accuracy: number;
+    model_eval_macro_f1: number;
+    latency_ms: number;
+  };
+  governance?: {
+    human_review_required: boolean;
+    privilege_warning: string;
+    not_legal_advice: boolean;
+    escalation_flag: boolean;
+    escalation_reason: string | null;
+    jurisdiction_scope: string[];
+  };
+  trace?: {
+    retrieval_used: boolean;
+    retrieval_chunks: number;
+    fallback_used: boolean;
+    fallback_reason: string | null;
+    model_used: string;
+    provider_model: string;
+    latency_ms: number;
+    usage_event_id: string;
+  };
+};
+
+function UseModelPanel({
+  wid,
+  registrationId,
+  registrationName,
+  onClose,
+}: {
+  wid: number;
+  registrationId: number;
+  registrationName: string;
+  onClose: () => void;
+}) {
+  const { toast } = useToast();
+  const [text, setText] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [deployment, setDeployment] = useState<DeploymentInfo | null>(null);
+  const [deployLoading, setDeployLoading] = useState(true);
+  const [deployError, setDeployError] = useState<string | null>(null);
+  const [result, setResult] = useState<InvokeResult | null>(null);
+  const [invokeError, setInvokeError] = useState<string | null>(null);
+
+  // Fetch deployment info on mount
+  useEffect(() => {
+    setDeployLoading(true);
+    fetch(`/api/forge/workspaces/${wid}/registry/${registrationId}/deployment`)
+      .then((r) => {
+        if (!r.ok) throw new Error(`${r.status}`);
+        return r.json();
+      })
+      .then((d: DeploymentInfo) => {
+        setDeployment(d);
+        setDeployLoading(false);
+      })
+      .catch((e: any) => {
+        setDeployError(e.message);
+        setDeployLoading(false);
+      });
+  }, [wid, registrationId]);
+
+  const handleRun = async () => {
+    if (!text.trim()) {
+      toast({ title: "Contract text is required" });
+      return;
+    }
+    if (!deployment?.endpoint_url) {
+      toast({ title: "No endpoint available", variant: "destructive" });
+      return;
+    }
+    setLoading(true);
+    setResult(null);
+    setInvokeError(null);
+    try {
+      const resp = await fetch(`/api${deployment.endpoint_url}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: text.trim(), use_rag: true }),
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ error: resp.statusText }));
+        throw new Error(err.error ?? resp.statusText);
+      }
+      const data: InvokeResult = await resp.json();
+      setResult(data);
+    } catch (e: any) {
+      setInvokeError(e.message);
+      toast({ title: "Inference failed", description: e.message, variant: "destructive" });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const CLAUSE_COLORS: Record<string, string> = {
+    governing_law: "bg-blue-500/10 text-blue-400 border-blue-500/20",
+    termination: "bg-red-500/10 text-red-400 border-red-500/20",
+    ip_assignment: "bg-purple-500/10 text-purple-400 border-purple-500/20",
+    limitation_of_liability: "bg-amber-500/10 text-amber-400 border-amber-500/20",
+    indemnification: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
+  };
+
+  return (
+    <div className="mt-3 border-t border-border pt-3 space-y-3">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <span className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest">
+          Use Model — {registrationName}
+        </span>
+        <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
+          <X className="w-3.5 h-3.5" />
+        </button>
+      </div>
+
+      {/* Deployment status */}
+      {deployLoading ? (
+        <div className="text-[10px] font-mono text-muted-foreground">Loading endpoint...</div>
+      ) : deployError ? (
+        <div className="text-[10px] font-mono text-red-400">Endpoint error: {deployError}</div>
+      ) : deployment ? (
+        <div className="flex items-center gap-3 text-[10px] font-mono text-muted-foreground">
+          <span className="text-emerald-400">● ACTIVE</span>
+          <span>{deployment.endpoint_url}</span>
+          <span>v{deployment.version}</span>
+        </div>
+      ) : null}
+
+      {/* Input */}
+      <div>
+        <label className="text-[10px] font-mono text-muted-foreground block mb-1">
+          Contract clause excerpt
+        </label>
+        <textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          rows={4}
+          placeholder="Paste a contract clause here — e.g. 'This Agreement shall be governed by the laws of the State of Delaware...'"
+          className={textareaCls}
+          disabled={loading || deployLoading || !!deployError}
+        />
+        <div className="flex items-center justify-between mt-1">
+          <span className="text-[10px] font-mono text-muted-foreground">{text.length}/8000 chars</span>
+          <button
+            onClick={handleRun}
+            disabled={loading || !text.trim() || deployLoading || !!deployError}
+            className={btnPrimary}
+          >
+            {loading ? "Running..." : "Run"}
+          </button>
+        </div>
+      </div>
+
+      {/* Result */}
+      {result && (
+        <div className="bg-secondary/20 border border-border rounded p-3 space-y-2">
+          {/* Clause type + confidence */}
+          <div className="flex items-center gap-2">
+            <span
+              className={`text-[10px] font-mono px-2 py-0.5 rounded border ${
+                CLAUSE_COLORS[result.clause_type] ?? "bg-zinc-500/10 text-zinc-400 border-zinc-500/20"
+              }`}
+            >
+              {result.clause_type.replace(/_/g, " ").toUpperCase()}
+            </span>
+            <span className="text-[10px] font-mono text-muted-foreground">
+              {(result.confidence * 100).toFixed(0)}% confidence
+            </span>
+            <span className="text-[10px] font-mono text-muted-foreground ml-auto">
+              {result.metadata.latency_ms}ms
+            </span>
+          </div>
+
+          {/* Reasoning */}
+          <p className="text-xs font-mono text-foreground">{result.reasoning}</p>
+
+          {/* Lineage strip */}
+          <div className="flex flex-wrap gap-x-4 gap-y-1 pt-1 border-t border-border/50">
+            <span className="text-[10px] font-mono text-muted-foreground">
+              model: <span className="text-foreground">{result.metadata.model.split("/").pop()}</span>
+            </span>
+            <span className="text-[10px] font-mono text-muted-foreground">
+              asset: <span className="text-foreground">{result.metadata.asset_version}</span>
+            </span>
+            <span className="text-[10px] font-mono text-muted-foreground">
+              dataset: <span className="text-foreground">{result.metadata.dataset_version}</span>
+            </span>
+            <span className="text-[10px] font-mono text-muted-foreground">
+              eval: <span className="text-foreground">{(result.metadata.model_eval_accuracy * 100).toFixed(0)}% acc</span>
+            </span>
+            <span className="text-[10px] font-mono text-muted-foreground">
+              rag: <span className="text-foreground">{result.metadata.rag_used ? "on" : "off"}</span>
+            </span>
+            {result.metadata.fallback_count > 0 && (
+              <span className="text-[10px] font-mono text-amber-400">
+                fallback #{result.metadata.fallback_count}
+              </span>
+            )}
+          </div>
+
+          {/* Governance */}
+          {result.governance && (
+            <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded text-xs space-y-1">
+              <div className="font-semibold text-amber-800">Governance</div>
+              <div className="text-amber-700">
+                ⚠ {result.governance.privilege_warning}
+              </div>
+              {result.governance.escalation_flag && (
+                <div className="text-red-700 font-medium">
+                  Escalation required: {result.governance.escalation_reason}
+                </div>
+              )}
+              <div className="text-amber-600">
+                Human review required: {result.governance.human_review_required ? "YES (mandatory)" : "no"}
+              </div>
+            </div>
+          )}
+
+          {/* Trace */}
+          {result.trace && (
+            <div className="mt-2 p-2 bg-gray-50 border border-gray-200 rounded text-xs space-y-0.5 font-mono">
+              <div className="font-semibold text-gray-600 font-sans">Trace</div>
+              <div>model: {result.trace.model_used}</div>
+              {result.trace.fallback_used && (
+                <div className="text-orange-600">fallback: {result.trace.fallback_reason}</div>
+              )}
+              <div>retrieval: {result.trace.retrieval_used ? `yes (${result.trace.retrieval_chunks} chunks)` : "no"}</div>
+              <div>latency: {result.trace.latency_ms}ms</div>
+              <div className="text-gray-400">event_id: {result.trace.usage_event_id}</div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Error */}
+      {invokeError && (
+        <div className="text-[10px] font-mono text-red-400">Error: {invokeError}</div>
+      )}
+    </div>
+  );
+}
+
 function RegistryTab({ wid }: { wid: number }) {
   const { data: registry, isLoading } = useListModelRegistry(wid);
+  const [openPanelId, setOpenPanelId] = useState<number | null>(null);
 
   return (
     <div className="space-y-4">
@@ -622,6 +889,9 @@ function RegistryTab({ wid }: { wid: number }) {
             const reg = item.registration;
             const versions = item.versions ?? [];
             const latestVersion = versions[versions.length - 1];
+            const isApprovedAndDeployed = latestVersion?.status === "approved";
+            const isPanelOpen = openPanelId === (reg?.id ?? idx);
+
             return (
               <div key={reg?.id ?? idx} className="bg-card border border-border rounded-lg p-4">
                 <div className="flex items-center justify-between">
@@ -632,14 +902,39 @@ function RegistryTab({ wid }: { wid: number }) {
                       {latestVersion?.status ? ` · latest: ${latestVersion.status}` : ""}
                     </p>
                   </div>
-                  <button
-                    disabled
-                    title="Coming in Phase 6"
-                    className="font-mono text-xs px-3 py-1.5 rounded border border-border text-muted-foreground opacity-40 cursor-not-allowed"
-                  >
-                    Approve
-                  </button>
+                  {isApprovedAndDeployed ? (
+                    <button
+                      onClick={() =>
+                        setOpenPanelId(isPanelOpen ? null : (reg?.id ?? idx))
+                      }
+                      className={`font-mono text-xs px-3 py-1.5 rounded border transition-colors ${
+                        isPanelOpen
+                          ? "border-primary text-primary bg-primary/10"
+                          : "border-primary text-primary hover:bg-primary/10"
+                      }`}
+                    >
+                      {isPanelOpen ? "Close" : "Use Model"}
+                    </button>
+                  ) : (
+                    <button
+                      disabled
+                      title="Model must be approved before use"
+                      className="font-mono text-xs px-3 py-1.5 rounded border border-border text-muted-foreground opacity-40 cursor-not-allowed"
+                    >
+                      {latestVersion?.status === "candidate" ? "Pending Approval" : "Not Ready"}
+                    </button>
+                  )}
                 </div>
+
+                {/* Inline Use Model panel */}
+                {isPanelOpen && reg?.id != null && (
+                  <UseModelPanel
+                    wid={wid}
+                    registrationId={reg.id}
+                    registrationName={reg.name ?? "Model"}
+                    onClose={() => setOpenPanelId(null)}
+                  />
+                )}
               </div>
             );
           })}

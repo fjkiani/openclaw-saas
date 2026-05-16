@@ -1017,4 +1017,78 @@ router.get(
   },
 );
 
+// GET /forge/workspaces/:wid/registry/:rid/deployment
+// Returns the active deployment for a registry item, including the callable endpoint_url.
+// Used by the in-product "Use Model" panel in the Forge workspace UI.
+router.get(
+  "/forge/workspaces/:wid/registry/:rid/deployment",
+  requireWorkspaceMember,
+  async (req, res): Promise<void> => {
+    const tenantId = req.resolvedTenantId!;
+    const registrationId = parseInt(req.params.rid as string, 10);
+    if (isNaN(registrationId)) {
+      res.status(400).json({ error: "Invalid registration id" });
+      return;
+    }
+
+    // Verify registration belongs to this tenant
+    const regRes = await pool.query(
+      `SELECT mr.id, mr.name FROM model_registrations mr
+       WHERE mr.id = $1 AND mr.tenant_id = $2`,
+      [registrationId, tenantId],
+    );
+    if (regRes.rows.length === 0) {
+      res.status(404).json({ error: "Registration not found" });
+      return;
+    }
+
+    // Find the latest approved version
+    const versionRes = await pool.query(
+      `SELECT mv.id, mv.version, mv.status, mv.notes, mv.artifact_key
+       FROM model_versions mv
+       WHERE mv.registration_id = $1 AND mv.tenant_id = $2 AND mv.status = 'approved'
+       ORDER BY mv.version DESC
+       LIMIT 1`,
+      [registrationId, tenantId],
+    );
+    if (versionRes.rows.length === 0) {
+      res.status(404).json({ error: "No approved version found" });
+      return;
+    }
+    const version = versionRes.rows[0];
+
+    // Find the active deployment for this version
+    const deployRes = await pool.query(
+      `SELECT md.id, md.status, md.compute_backend, md.deployed_at,
+              de.path as endpoint_url, de.auth_required
+       FROM model_deployments md
+       LEFT JOIN deployment_endpoints de ON de.deployment_id = md.id AND de.tenant_id = md.tenant_id
+       WHERE md.version_id = $1 AND md.tenant_id = $2 AND md.status = 'active'
+       ORDER BY md.deployed_at DESC
+       LIMIT 1`,
+      [version.id, tenantId],
+    );
+
+    if (deployRes.rows.length === 0) {
+      res.status(404).json({ error: "No active deployment found" });
+      return;
+    }
+    const deployment = deployRes.rows[0];
+
+    res.json({
+      registration_id: registrationId,
+      registration_name: regRes.rows[0].name,
+      version: version.version,
+      version_id: version.id,
+      version_status: version.status,
+      artifact_key: version.artifact_key,
+      deployment_id: deployment.id,
+      deployment_status: deployment.status,
+      endpoint_url: deployment.endpoint_url,
+      auth_required: deployment.auth_required ?? false,
+      deployed_at: deployment.deployed_at,
+    });
+  },
+);
+
 export default router;
