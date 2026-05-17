@@ -101,6 +101,7 @@ export const CORE_SCENARIOS: PlaybookScenario[] = [
     expects_escalation: false,
     expects_impact_tier: "decision_support",
     required_fields: ["risk_flags", "blocking_issues", "next_steps", "overall_risk"],
+    expects_empty_arrays: ["blocking_issues"],  // blocking_issues is legitimately empty when no blocking issues exist
     full_work: true,
   },
 
@@ -155,7 +156,7 @@ export const CORE_SCENARIOS: PlaybookScenario[] = [
     specialist: "employment",
     path: "full_work",
     description: "Complex employment agreement with multiple compliance issues. compliance_flags must reference detected rules, next_steps must be specific.",
-    input_text: `This Employment Agreement covers a position in New York. Employee is classified as exempt from overtime under the FLSA administrative exemption. Employee will work remotely but must be available during core hours 9am-3pm EST. The agreement includes a mandatory arbitration clause for all employment disputes, waiving the right to jury trial. Employee is entitled to 10 days PTO in year one, increasing to 15 days after two years. The non-disparagement clause prohibits Employee from making any public statements about Company following termination.`,
+    input_text: `EMPLOYMENT AGREEMENT — New York. Employee is classified as exempt from overtime under the FLSA administrative exemption. The agreement includes a mandatory arbitration clause for all employment disputes, waiving the right to jury trial and class action rights. Employee is entitled to 10 days PTO in year one. The non-disparagement clause prohibits Employee from making any public statements about Company following termination. Employee must sign a broad release of all claims as a condition of receiving any severance. The agreement contains a clawback provision allowing Company to recover bonuses paid in the prior 24 months.`,
     expects_routing: "employment",
     expects_escalation: false,
     expects_impact_tier: "decision_support",
