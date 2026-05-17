@@ -96,7 +96,7 @@ export const CORE_SCENARIOS: PlaybookScenario[] = [
     specialist: "contract",
     path: "full_work",
     description: "High-risk contract with IP assignment and indemnification. risk_flags must reference detected clauses, next_steps must be specific.",
-    input_text: `Employee hereby assigns to Company all right, title, and interest in any inventions, discoveries, or works created during or related to employment, including those created on personal time. Company shall indemnify Employee against third-party claims arising from Company's breach. In no event shall either party be liable for indirect, incidental, or consequential damages. This Agreement shall be governed by the laws of the State of Delaware.`,
+    input_text: `SOFTWARE LICENSE AGREEMENT. Licensor grants Licensee a non-exclusive, non-transferable license to use the Software for internal business purposes only. Licensee shall not sublicense, sell, or distribute the Software. All modifications and derivative works created by Licensee shall be automatically assigned to Licensor upon creation. Licensor's total liability shall not exceed fees paid in the preceding 12 months. This Agreement shall be governed by the laws of the State of Delaware.`,
     expects_routing: "contract",
     expects_escalation: false,
     expects_impact_tier: "decision_support",

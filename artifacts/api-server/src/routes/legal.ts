@@ -578,6 +578,11 @@ async function handleMatter(text: string, tenantId: string): Promise<{
   const matterId = randomUUID();
   const t0 = Date.now();
 
+  // Input validation — enforced here so playbook (which calls handleMatter directly) also validates
+  if (!text || text.trim().length < 20) {
+    throw Object.assign(new Error("text required (min 20 chars)"), { status: 400 });
+  }
+
   // Step 1: Intake classification (direct function call)
   const intake = await intakeClassify(text);
   const intakeLatency = Date.now() - t0;
@@ -1085,7 +1090,9 @@ router.post("/v1/legal/playbook/run", async (_req, res): Promise<void> => {
       try {
         return await handleMatter(text, "playbook");
       } catch (err: any) {
-        return { error: err.message, status: 503 } as any;
+        // Preserve status code from validation errors (e.g., 400 for short text)
+        const status = typeof err.status === "number" ? err.status : 503;
+        return { error: err.message, status } as any;
       }
     };
 
