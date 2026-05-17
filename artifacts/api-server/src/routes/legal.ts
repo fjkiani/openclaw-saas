@@ -14,14 +14,17 @@
  *   POST /api/v1/legal/matter                — WORKFORCE ENTRY POINT (orchestrated)
  *   POST /api/v1/legal/playbook/run          — 10-scenario playbook runner
  *
- * Model selection:
- *   Intake (routing):   gpt-oss-20b:free → gpt-oss-120b:free → lfm-2.5-1.2b:free
- *   Specialist (extraction): llama-3.3-70b-instruct:free → gpt-oss-120b:free → gpt-oss-20b:free
+ * Model selection (provider-aware with key rotation):
+ *   Intake:     OpenRouter gpt-oss-20b → gpt-oss-120b → lfm-2.5-1.2b
+ *   Specialist: Groq llama-3.3-70b (GROQ_API_KEY)
+ *               → OpenRouter llama-3.3-70b key 1 (OPENROUTER_API_KEY)
+ *               → OpenRouter llama-3.3-70b key 2 (OPENROUTER_API_KEY_2)
+ *               → OpenRouter gpt-oss-120b key 1
+ *               → OpenRouter gpt-oss-20b key 2
  *
- *   Specialist chain uses llama-3.3-70b as primary because gpt-oss-20b:free returns
- *   empty arrays (~30% of runs) on complex multi-field JSON schemas. 70B instruction-tuned
- *   models are significantly more reliable for structured extraction tasks.
- *   Operator override: LEGAL_INFERENCE_MODEL env var (applies to both chains).
+ *   Groq has ~30 req/min free tier on llama-3.3-70b — significantly better than
+ *   OpenRouter's shared free pool. Two OpenRouter keys provide 2x quota as fallback.
+ *   Required env vars: GROQ_API_KEY, OPENROUTER_API_KEY, OPENROUTER_API_KEY_2
  *
  * TRAINING PATH: RAG adaptation (retrieval asset creation — not fine-tune)
  * This path builds a FAISS index from labeled examples. It does NOT modify model weights.
@@ -54,42 +57,63 @@ const CLAUSE_TYPES = [
 
 type ClauseType = (typeof CLAUSE_TYPES)[number];
 
-// ── Model chains ─────────────────────────────────────────────────────────────
+// ── Provider-aware model chains ──────────────────────────────────────────────
 //
-// Two separate chains:
-//   INTAKE_MODEL_CHAIN    — fast, small model for routing classification (low stakes, high volume)
-//   SPECIALIST_MODEL_CHAIN — capable model for structured extraction (high stakes, must follow JSON schema)
+// Each entry specifies: model id, provider endpoint, which API key env var to use.
+// This enables key rotation across providers and across multiple keys for the same provider.
 //
-// Why split: gpt-oss-20b:free works reliably for intake (5-way classification, simple output).
-// It fails ~30% of runs on specialist tasks (complex multi-field JSON with arrays) because:
-//   1. 20B parameters — insufficient capacity for complex structured extraction under load
-//   2. Shared free endpoint — no JSON mode, no output guarantees, variable quality
-//   3. Same failure mode as gpt-oss-120b:free (same model family)
+// Provider rate limits (free tier):
+//   Groq:        ~30 req/min on llama-3.3-70b — best free-tier rate limit for 70B
+//   OpenRouter:  shared pool across all free models; two keys = 2x quota
 //
-// Fix: specialist primary = meta-llama/llama-3.3-70b-instruct:free
-//   - 70B parameters, instruction-tuned, widely benchmarked for structured JSON output
-//   - Consistently follows complex array schemas (compliance_flags, risk_flags, etc.)
-//   - Same 131k context window as current primary
-//   - Falls back to gpt-oss-120b:free on 429, then gpt-oss-20b:free as last resort
+// INTAKE chain  — fast 20B model for 5-way routing classification (low stakes)
+// SPECIALIST chain — 70B model via Groq first, then OpenRouter key rotation (high stakes)
+//
+// Rotation order for specialists:
+//   1. Groq / llama-3.3-70b        (GROQ_API_KEY)          — best rate limit
+//   2. OpenRouter / llama-3.3-70b  (OPENROUTER_API_KEY)    — key 1
+//   3. OpenRouter / llama-3.3-70b  (OPENROUTER_API_KEY_2)  — key 2
+//   4. OpenRouter / gpt-oss-120b   (OPENROUTER_API_KEY)    — key 1 fallback
+//   5. OpenRouter / gpt-oss-20b    (OPENROUTER_API_KEY_2)  — key 2 last resort
 
-const INTAKE_MODEL_CHAIN = [
-  { id: "openai/gpt-oss-20b:free",              eval_accuracy: 1.0,  eval_macro_f1: 1.0,    eval_latency_s: 3.44, use_rag: false },
-  { id: "openai/gpt-oss-120b:free",             eval_accuracy: 1.0,  eval_macro_f1: 1.0,    eval_latency_s: 3.45, use_rag: false },
-  { id: "liquid/lfm-2.5-1.2b-instruct:free",   eval_accuracy: 0.9,  eval_macro_f1: 0.8933, eval_latency_s: 0.87, use_rag: true  },
-] as const;
+type Provider = "groq" | "openrouter";
 
-const SPECIALIST_MODEL_CHAIN = [
-  // Primary: Llama 3.3 70B — best free model for structured JSON extraction
-  { id: "meta-llama/llama-3.3-70b-instruct:free", eval_accuracy: 1.0, eval_macro_f1: 1.0, eval_latency_s: 5.0,  use_rag: false },
-  // Fallback 1: Gemma 4 31B — Google provider, separate rate limit pool from Meta/OpenAI
-  { id: "google/gemma-4-31b-it:free",             eval_accuracy: 0.9, eval_macro_f1: 0.9, eval_latency_s: 4.0,  use_rag: false },
-  // Fallback 2: DeepSeek V4 Flash — different provider, 1M context, good instruction following
-  { id: "deepseek/deepseek-v4-flash:free",        eval_accuracy: 0.85, eval_macro_f1: 0.85, eval_latency_s: 3.0, use_rag: false },
-  // Fallback 3: gpt-oss-120b — same provider as primary but larger model
-  { id: "openai/gpt-oss-120b:free",               eval_accuracy: 0.8, eval_macro_f1: 0.8, eval_latency_s: 3.45, use_rag: false },
-  // Last resort: gpt-oss-20b — original primary, known to fail ~30% on complex schemas
-  { id: "openai/gpt-oss-20b:free",                eval_accuracy: 0.7, eval_macro_f1: 0.7, eval_latency_s: 3.44, use_rag: false },
-] as const;
+interface ModelEntry {
+  id: string;                  // model id as the provider expects it
+  provider: Provider;
+  apiKeyEnv: string;           // env var name for the API key
+  eval_accuracy: number;
+  eval_macro_f1: number;
+  eval_latency_s: number;
+  use_rag: boolean;
+}
+
+// Groq uses its own model id format (no provider prefix)
+const GROQ_LLAMA_70B = "llama-3.3-70b-versatile";
+// OpenRouter uses provider/model format
+const OR_LLAMA_70B   = "meta-llama/llama-3.3-70b-instruct:free";
+const OR_GPT_120B    = "openai/gpt-oss-120b:free";
+const OR_GPT_20B     = "openai/gpt-oss-20b:free";
+const OR_GPT_20B_RAG = "liquid/lfm-2.5-1.2b-instruct:free";
+
+const INTAKE_MODEL_CHAIN: ModelEntry[] = [
+  { id: OR_GPT_20B,     provider: "openrouter", apiKeyEnv: "OPENROUTER_API_KEY",   eval_accuracy: 1.0,  eval_macro_f1: 1.0,    eval_latency_s: 3.44, use_rag: false },
+  { id: OR_GPT_120B,    provider: "openrouter", apiKeyEnv: "OPENROUTER_API_KEY",   eval_accuracy: 1.0,  eval_macro_f1: 1.0,    eval_latency_s: 3.45, use_rag: false },
+  { id: OR_GPT_20B_RAG, provider: "openrouter", apiKeyEnv: "OPENROUTER_API_KEY",   eval_accuracy: 0.9,  eval_macro_f1: 0.8933, eval_latency_s: 0.87, use_rag: true  },
+];
+
+const SPECIALIST_MODEL_CHAIN: ModelEntry[] = [
+  // 1. Groq — llama-3.3-70b, ~30 req/min free tier, fastest 70B available
+  { id: GROQ_LLAMA_70B, provider: "groq",       apiKeyEnv: "GROQ_API_KEY",         eval_accuracy: 1.0,  eval_macro_f1: 1.0,    eval_latency_s: 1.5,  use_rag: false },
+  // 2. OpenRouter key 1 — llama-3.3-70b
+  { id: OR_LLAMA_70B,   provider: "openrouter", apiKeyEnv: "OPENROUTER_API_KEY",   eval_accuracy: 1.0,  eval_macro_f1: 1.0,    eval_latency_s: 5.0,  use_rag: false },
+  // 3. OpenRouter key 2 — llama-3.3-70b (separate quota)
+  { id: OR_LLAMA_70B,   provider: "openrouter", apiKeyEnv: "OPENROUTER_API_KEY_2", eval_accuracy: 1.0,  eval_macro_f1: 1.0,    eval_latency_s: 5.0,  use_rag: false },
+  // 4. OpenRouter key 1 — gpt-oss-120b fallback
+  { id: OR_GPT_120B,    provider: "openrouter", apiKeyEnv: "OPENROUTER_API_KEY",   eval_accuracy: 0.8,  eval_macro_f1: 0.8,    eval_latency_s: 3.45, use_rag: false },
+  // 5. OpenRouter key 2 — gpt-oss-20b last resort
+  { id: OR_GPT_20B,     provider: "openrouter", apiKeyEnv: "OPENROUTER_API_KEY_2", eval_accuracy: 0.7,  eval_macro_f1: 0.7,    eval_latency_s: 3.44, use_rag: false },
+];
 
 // Legacy alias — used by extract-clause and other standalone endpoints
 const MODEL_CHAIN = INTAKE_MODEL_CHAIN;
@@ -186,8 +210,10 @@ async function callWithFallback(
   fallback_count: number;
   model_index: number;
 }> {
-  const apiKey = process.env.OPENROUTER_API_KEY;
-  if (!apiKey) throw new Error("OPENROUTER_API_KEY not set");
+  const apiKey  = process.env.OPENROUTER_API_KEY  ?? "";
+  const apiKey2 = process.env.OPENROUTER_API_KEY_2 ?? "";
+  if (!apiKey && !apiKey2) throw new Error("No OpenRouter API key configured");
+  // Use key2 as fallback when key1 is exhausted (handled in the loop below via activeKey)
 
   const EXTRACT_SYSTEM_PROMPT = `You are a legal contract analyst. Your task is to classify a contract clause excerpt into exactly one of these categories:
 - governing_law: Specifies which jurisdiction's laws govern the contract
@@ -212,10 +238,12 @@ Respond with valid JSON only. No explanation, no markdown, no extra text.`;
     const useRag = requestedUseRag && model.use_rag;
     const context = useRag ? keywordRetrieve(text) : "";
 
+    // Rotate keys: odd-indexed fallback attempts use key2 for separate quota
+    const activeKey = (i % 2 === 0 || !apiKey2) ? (apiKey || apiKey2) : (apiKey2 || apiKey);
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: `Bearer ${activeKey}`,
         "Content-Type": "application/json",
         "HTTP-Referer": "https://openclaw-api-k30t.onrender.com",
         "X-Title": "OpenClaw Legal Clause Extractor v1",
@@ -262,37 +290,72 @@ Respond with valid JSON only. No explanation, no markdown, no extra text.`;
   throw new Error(`All models exhausted. Last error: ${lastError}`);
 }
 
-// ── Generic OpenRouter call for specialist functions ──────────────────────────
+// ── Provider-aware model call with key rotation ──────────────────────────────
+//
+// Supports two providers:
+//   groq       — https://api.groq.com/openai/v1  (OpenAI-compatible, better rate limits)
+//   openrouter — https://openrouter.ai/api/v1    (multi-model gateway)
+//
+// Key rotation: each ModelEntry specifies which env var holds its API key.
+// When a key is rate-limited (429), the next entry in the chain may use a different key.
+// This gives effective 2x quota on OpenRouter and priority access via Groq.
+
+function getProviderConfig(entry: ModelEntry): { endpoint: string; apiKey: string; modelId: string } {
+  const apiKey = process.env[entry.apiKeyEnv] ?? "";
+  if (entry.provider === "groq") {
+    return {
+      endpoint: "https://api.groq.com/openai/v1/chat/completions",
+      apiKey,
+      modelId: entry.id,  // Groq uses plain model names (no provider prefix)
+    };
+  }
+  return {
+    endpoint: "https://openrouter.ai/api/v1/chat/completions",
+    apiKey,
+    modelId: entry.id,
+  };
+}
+
 async function callModelWithFallback(
   systemPrompt: string,
   userContent: string,
   title: string,
   maxTokens = 800,
-  chain: ReadonlyArray<{ id: string; eval_accuracy: number; eval_macro_f1: number; eval_latency_s: number; use_rag: boolean }> = INTAKE_MODEL_CHAIN,
+  chain: ModelEntry[] = INTAKE_MODEL_CHAIN,
 ): Promise<{ parsed: any; model_used: string; fallback_used: boolean; latency_ms: number }> {
-  const apiKey = process.env.OPENROUTER_API_KEY;
-  if (!apiKey) throw new Error("OPENROUTER_API_KEY not set");
-
   const t0 = Date.now();
   let modelUsed = chain[0].id;
   let fallbackUsed = false;
 
   for (let i = 0; i < chain.length; i++) {
-    const model = chain[i];
-    try {
-      const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    const entry = chain[i];
+    const { endpoint, apiKey, modelId } = getProviderConfig(entry);
+
+    if (!apiKey) {
+      // Key env var not set — skip this entry silently
+      if (i < chain.length - 1) { fallbackUsed = true; continue; }
+      throw new Error(`API key env var '${entry.apiKeyEnv}' not set and no more fallbacks`);
+    }
+
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    };
+    // OpenRouter-specific headers
+    if (entry.provider === "openrouter") {
+      headers["HTTP-Referer"] = "https://openclaw-api-k30t.onrender.com";
+      headers["X-Title"] = title;
+    }
+
+    const makeRequest = async (sysPrompt: string) =>
+      fetch(endpoint, {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-          "HTTP-Referer": "https://openclaw-api-k30t.onrender.com",
-          "X-Title": title,
-        },
+        headers,
         body: JSON.stringify({
-          model: model.id,
+          model: modelId,
           messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userContent },
+            { role: "system", content: sysPrompt },
+            { role: "user",   content: userContent },
           ],
           temperature: 0,
           max_tokens: maxTokens,
@@ -300,53 +363,48 @@ async function callModelWithFallback(
         signal: AbortSignal.timeout(25_000),
       });
 
+    try {
+      const response = await makeRequest(systemPrompt);
+
       if (response.status === 429) {
+        // Rate-limited — try next entry (may be different key or provider)
         if (i < chain.length - 1) { fallbackUsed = true; continue; }
-        throw new Error("All models rate-limited (429)");
+        throw new Error("All models/keys rate-limited (429)");
       }
-      if (!response.ok) throw new Error(`Model error: ${response.status}`);
+      if (!response.ok) {
+        const body = await response.text();
+        throw new Error(`${entry.provider} ${response.status} on ${modelId}: ${body.slice(0, 200)}`);
+      }
 
       const data = (await response.json()) as any;
-      const raw = data.choices?.[0]?.message?.content ?? "";
-      modelUsed = model.id;
+      const raw  = data.choices?.[0]?.message?.content ?? "";
+      modelUsed  = entry.id;  // record which entry succeeded
 
+      // Extract JSON from response
       const match = raw.match(/\{[\s\S]*\}/);
       let parsed: any = null;
       if (match) { try { parsed = JSON.parse(match[0]); } catch { parsed = null; } }
 
-      // If JSON parsing failed or returned null, retry once on the same model with an explicit JSON reminder.
-      // This handles the case where the model returns prose or a malformed response on the first attempt.
-      if (parsed === null && i === 0) {
-        const retryResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-            "Content-Type": "application/json",
-            "HTTP-Referer": "https://openclaw-api-k30t.onrender.com",
-            "X-Title": title,
-          },
-          body: JSON.stringify({
-            model: model.id,
-            messages: [
-              { role: "system", content: systemPrompt + "\n\nCRITICAL: You MUST respond with valid JSON only. No prose. No explanation. Start your response with { and end with }." },
-              { role: "user", content: userContent },
-            ],
-            temperature: 0,
-            max_tokens: maxTokens,
-          }),
-          signal: AbortSignal.timeout(25_000),
-        });
-        if (retryResponse.ok) {
-          const retryData = (await retryResponse.json()) as any;
-          const retryRaw = retryData.choices?.[0]?.message?.content ?? "";
+      // If JSON parse failed, retry once on the same entry with an explicit JSON instruction.
+      // Handles models that return prose or markdown-wrapped JSON on first attempt.
+      if (parsed === null) {
+        const retryResp = await makeRequest(
+          systemPrompt + "\n\nCRITICAL: Respond with valid JSON only. No prose, no markdown, no explanation. Start with { and end with }."
+        );
+        if (retryResp.ok) {
+          const retryData = (await retryResp.json()) as any;
+          const retryRaw  = retryData.choices?.[0]?.message?.content ?? "";
           const retryMatch = retryRaw.match(/\{[\s\S]*\}/);
           if (retryMatch) { try { parsed = JSON.parse(retryMatch[0]); } catch { parsed = null; } }
         }
+        // If still null after retry, fall through to next chain entry
+        if (parsed === null && i < chain.length - 1) { fallbackUsed = true; continue; }
       }
 
       return { parsed, model_used: modelUsed, fallback_used: fallbackUsed, latency_ms: Date.now() - t0 };
     } catch (err: any) {
       if (i === chain.length - 1) throw err;
+      fallbackUsed = true;
     }
   }
   throw new Error("All models failed");
@@ -945,8 +1003,8 @@ router.get("/v1/legal/extract-clause", (_req, res): void => {
 
 // ── POST /v1/legal/next-asset-baseline ───────────────────────────────────────
 router.post("/v1/legal/next-asset-baseline", async (_req, res): Promise<void> => {
-  const apiKey = process.env.OPENROUTER_API_KEY;
-  if (!apiKey) { res.status(503).json({ error: "OPENROUTER_API_KEY not set" }); return; }
+  const apiKey = process.env.OPENROUTER_API_KEY ?? process.env.OPENROUTER_API_KEY_2 ?? "";
+  if (!apiKey) { res.status(503).json({ error: "No OpenRouter API key configured" }); return; }
   try {
     const result = await runTerminationExtractionBaseline(apiKey);
     res.json(result);
