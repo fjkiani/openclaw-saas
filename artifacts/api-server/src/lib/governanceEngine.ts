@@ -99,7 +99,20 @@ export function detectPrivilege(text: string): boolean {
 
 // ── CA non-compete detection ──────────────────────────────────────────────────
 
-const CA_NONCOMPETE_PATTERNS = [/non[- ]compete/i, /non[- ]solicitation/i, /noncompete/i, /nonsolicitation/i];
+const CA_NONCOMPETE_PATTERNS = [
+  /non[- ]compete/i,
+  /non[- ]solicitation/i,
+  /noncompete/i,
+  /nonsolicitation/i,
+  /not\s+to\s+compete/i,
+  /agree[sd]?\s+not\s+to\s+compete/i,
+  /shall\s+not\s+compete/i,
+  /not\s+to\s+solicit/i,
+  /agree[sd]?\s+not\s+to\s+solicit/i,
+  /shall\s+not\s+solicit/i,
+  /covenant\s+not\s+to\s+compete/i,
+  /restrictive\s+covenant/i,
+];
 const CA_JURISDICTION_PATTERNS = [/california/i, /\bCA\b/, /cal\./i];
 
 export function detectCANonCompete(text: string, jurisdiction?: string): boolean {
@@ -248,6 +261,17 @@ export function evaluateGovernance(input: GovernanceInput): GovernanceDecision {
       escalationReasons.push("CA non-compete — void under CA Bus & Prof Code §16600");
       action = "escalate";
     }
+  }
+
+  // 2b. Specialist-reported escalation passthrough
+  // If the specialist itself sets escalation_required = true (e.g., employment CA non-compete
+  // detected by applyCANoncompeteRule), the governance engine must honor it.
+  if (output["escalation_required"] === true && !escalationReasons.some(r => r.includes("CA non-compete"))) {
+    const specialistReason = typeof output["ca_noncompete_void"] === "boolean" && output["ca_noncompete_void"] === true
+      ? "CA non-compete — void under CA Bus & Prof Code §16600"
+      : "specialist_escalation — specialist flagged escalation_required";
+    escalationReasons.push(specialistReason);
+    action = "escalate";
   }
 
   // 3. Low confidence gate
