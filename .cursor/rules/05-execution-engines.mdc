@@ -1,0 +1,185 @@
+---
+description: ZOA, Archon, and Kairos execution engines — roles, APIs, and integration points
+globs: ["**/lib/kairosClient.ts", "**/lib/benchmarkClient.ts", "**/archon-factory/**", "**/packages/archon/**", "**/zoaClient.ts"]
+alwaysApply: false
+---
+
+# OpenClaw — Execution Engines (ZOA, Archon, Kairos)
+
+## The Three Engines
+
+| Engine | Role | Service |
+|---|---|---|
+| **ZOA** | Multi-LLM router + agent orchestration | `openclaw-benchmark` (FastAPI) |
+| **Archon** | Skill generation workflow engine | `archon-factory` (Node.js) + `archon-zeta` (Render) |
+| **Kairos** | Training job execution + governance enforcement | `openclaw-benchmark` (FastAPI) |
+
+---
+
+## ZOA — Multi-LLM Router
+
+ZOA is the agent orchestration layer. It routes tasks to the right LLM based on task type.
+
+### Router Map (100% Free Tier)
+
+| Role | Model | Why |
+|---|---|---|
+| MANAGER | `meta-llama/llama-3.3-70b-instruct:free` | Battle-tested, proven JSON routing |
+| WORKER: Research/RAG | `qwen/qwen3-next-80b-a3b-instruct:free` | 262K context, built for RAG |
+| WORKER: Hard Reasoning | `nousresearch/hermes-3-llama-3.1-405b:free` | 405B frontier, best function calling |
+| WORKER: Vision/Math | `google/gemma-3-27b-it:free` | Only real multimodal free model |
+| WORKER: Write/Clinical | `cognitivecomputations/dolphin-mistral-24b-venice-edition:free` | Uncensored, no filters |
+| WORKER: OCR | `baidu/qianfan-ocr-fast:free` | Purpose-built OCR |
+| WORKER: Audio | `google/gemma-3n-e4b-it:free` | Only model with audio input |
+| PLUMBER: Short | `liquid/lfm-2.5-1.2b-instruct:free` | 1.2B = pure throughput, format/merge |
+| PLUMBER: Long | `meta-llama/llama-3.2-3b-instruct:free` | 131K context, merges long outputs |
+
+### Plumber Selection Logic
+
+```typescript
+function selectPlumber(workerResults: WorkerResult[]): string {
+  const hasImages = workerResults.some(r => r.hasImageContext);
+  const totalTokens = workerResults.reduce((n, r) => n + r.outputTokens, 0);
+  if (hasImages) return 'google/gemma-3-4b-it:free';
+  if (totalTokens > 4000) return 'meta-llama/llama-3.2-3b-instruct:free';
+  return 'liquid/lfm-2.5-1.2b-instruct:free';
+}
+```
+
+### Rate Limit Fallback Chains
+
+- vision: `gemma-3-27b → gemma-3-12b → gemma-3-4b`
+- research: `qwen3-next-80b → llama-3.3-70b`
+- reasoning: `hermes-405b → llama-3.3-70b` (paid fallback only if needed)
+
+All OpenRouter calls include:
+```json
+{ "provider": { "sort": "throughput", "allow_fallbacks": true } }
+```
+
+### ZOA API Base
+
+`VITE_ZOA_SERVICE_URL` / `BENCHMARK_SERVICE_URL` → `/api/v1/zoa`
+
+---
+
+## Archon — Skill Generation Engine
+
+Archon is the workflow engine for the Zeta Skill Forge. It generates, validates, benchmarks, and catalogs skills from plain-English prompts.
+
+### Zeta Skill Forge Pipeline
+
+```
+prompt → generate (Qwen3 Coder 480B) → L0 validate (tsc) → fix loop (max 2) → L1-L4 benchmark → catalog
+```
+
+### Trigger
+
+```bash
+POST /archon/generate
+{ "description": "Build a skill that fetches RSS headlines for a company" }
+```
+
+Or directly via Archon REST API:
+```bash
+POST http://archon-zeta.onrender.com/api/workflows/zeta-skill-forge/run
+{ "message": "Build a skill that fetches RSS headlines for a company" }
+```
+
+### Pipeline Stages
+
+| Stage | Action | Endpoint |
+|---|---|---|
+| generate | Qwen3 Coder 480B generates TypeScript skill JSON | `POST /internal/generate` |
+| validate | `tsc` syntax check + export verification | `POST /internal/validate` |
+| fix-loop | If L0 fails, fix and re-validate (max 2 retries) | `POST /internal/fix` |
+| benchmark | L1-L4 benchmark via OpenRouter | `POST /api/v1/benchmark/run-sync` |
+| catalog | If CERTIFIED/CONDITIONAL, insert into skill catalog | `POST /api/skills` |
+
+### Archon Client (`packages/archon-factory/src/archonClient.ts`)
+
+```typescript
+triggerArchonWorkflow(workflowName, message, conversationId?) → ArchonRunResponse
+getArchonRunStatus(runId) → ArchonRunStatus
+```
+
+### Environment Variables
+
+| Variable | Description |
+|---|---|
+| `ARCHON_FACTORY_URL` | URL of archon-factory service |
+| `BENCHMARK_SERVICE_URL` | URL of mcp-benchmarks FastAPI service |
+| `OPENCLAW_API_URL` | URL of openclaw-api service |
+| `OPENCLAW_SERVICE_TOKEN` | Service-to-service bearer token |
+
+---
+
+## Kairos — Training Job Execution Engine
+
+Kairos executes training workflows dispatched from the Model Forge. It enforces governance rules during execution.
+
+### Kairos API Base
+
+`KAIROS_SERVICE_URL` → `/api/v1/zoa/kairos`
+
+### Kairos Client (`artifacts/api-server/src/lib/kairosClient.ts`)
+
+```typescript
+kairosClient.runWorkflow(req: KairosWorkflowRequest) → KairosRunResponse
+kairosClient.getRunStatus(runId) → KairosRunStatus
+kairosClient.getRunStreamUrl(runId) → string  // SSE stream URL
+kairosClient.listRuns(skillId?, tenantId?) → { runs, total }
+```
+
+### KairosWorkflowRequest
+
+```typescript
+interface KairosWorkflowRequest {
+  skill_id: string;   // "forge-job-{jobId}"
+  goal: string;       // structured goal string with dataset/model/hyperparams
+  tenant_id: string;
+  max_turns?: number; // default 10
+}
+```
+
+### KairosRunStatus
+
+```typescript
+interface KairosRunStatus {
+  run_id: string;
+  status: "running" | "done" | "failed";
+  turn_count: number;
+  tool_calls_made: number;
+  violations: Array<{ tool_name: string; reason: string; benchmark_score: number }>;
+  degraded: boolean;
+  result: string | null;
+  error: string | null;
+  archon_reforge_ready: boolean;  // true if skill needs regeneration
+}
+```
+
+### Job Monitor (`artifacts/api-server/src/lib/jobMonitor.ts`)
+
+Polls Kairos run status every 30s after dispatch. On completion:
+- Updates `training_jobs.status` to `completed` or `failed`
+- Sets `reforge_suggested = true` if `archon_reforge_ready = true`
+
+### Dispatch Flow
+
+```
+POST /forge/workspaces/:wid/jobs/:jid/dispatch
+  → assertJobStatus(job, "queued")
+  → build goal string from job + dataset + version
+  → kairosClient.runWorkflow(...)
+  → UPDATE training_jobs SET status='running', kairos_run_id=...
+  → INSERT model_usage_events (training_started)
+  → jobMonitor.start(jobId, runId, tenantId, workspaceId)
+```
+
+### SSE Stream
+
+Frontend connects directly to Kairos SSE stream via:
+```
+GET /forge/workspaces/:wid/jobs/:jid/events
+```
+API server proxies the Kairos SSE stream to the client.

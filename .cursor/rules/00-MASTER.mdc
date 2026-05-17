@@ -1,0 +1,393 @@
+---
+description: MASTER — OpenClaw complete product spec. Read this first. Always apply.
+globs: ["**"]
+alwaysApply: true
+---
+
+# OpenClaw — Master Specification
+
+> **Read this before touching any code.** This document is the ground truth for what OpenClaw is, how it works, and how to build it correctly.
+
+---
+
+## 1. What OpenClaw Is (Non-Negotiable)
+
+OpenClaw is a **factory framework** that empowers organizations to spin up their own AI workforces.
+
+**The factory builds AI SaaS products. Organizations are the customers. Their AI workforce is the product.**
+
+The law firm vertical is the **first proof-of-concept** to validate the repeatable framework. It is not the product. It is the demonstration that the factory works.
+
+Every future vertical — IR, marketing, HR, biotech, finance, legal — runs on **identical infrastructure** with different skill bundles installed.
+
+### What the Platform Handles
+
+- Model training pipeline (RAG adaptation, FAISS, eval harness)
+- Multi-tenant Model Forge (workspaces, datasets, jobs, registry, deployments)
+- Governance layer (human-in-loop, audit trace, privilege warnings)
+- Benchmark integration (adversarial playbook, multi-LLM testing)
+- ZOA, Archon, Kairos execution engines
+- Skill generation, validation, and catalog (791+ skills)
+- Per-tenant Gateway provisioning (Docker on Render)
+
+### Forbidden Language
+
+| Never say | Say instead |
+|---|---|
+| "Legal AI API" | "AI workforce factory" |
+| "Law firm tool" | "First proof-of-concept vertical" |
+| "Demo" | "Live" or "Production" |
+| "API endpoints" | "Deployed AI workforce" |
+| "Legal SaaS" | "SaaS-as-a-Service factory" |
+
+---
+
+## 2. System Architecture
+
+### Service Topology
+
+| Service | Name | Runtime | URL |
+|---|---|---|---|
+| API Server | `openclaw-api` | Node.js (Express 5) | `openclaw-api-k30t.onrender.com` |
+| Frontend | `openclaw-saas` | React + Vite (Static) | Render static |
+| Benchmark + ZOA + Kairos | `openclaw-benchmark` | Python (FastAPI) | `openclaw-benchmark.onrender.com` |
+| Archon Factory | `archon-factory` | Node.js | `archon-factory.onrender.com` |
+| Database | `openclaw-db` | PostgreSQL | Render free |
+| Per-tenant Gateway | `openclaw-gateway-{id}` | Docker | Dynamic, per tenant |
+
+### Monorepo Layout
+
+```
+openclaw-saas/
+├── artifacts/api-server/          # Express 5 API
+├── artifacts/openclaw-saas/       # React + Vite frontend
+├── lib/db/                        # Drizzle ORM + 28-table schema
+├── lib/api-spec/                  # OpenAPI + Orval codegen
+├── lib/api-client-react/          # Generated React Query hooks
+├── lib/skill-contract/            # Skill interface types
+├── lib/gateway-provisioner/       # Render Deploy API client
+├── packages/archon/               # Archon workflow YAML
+└── packages/archon-factory/       # Skill generation pipeline
+```
+
+### Infrastructure Layer Model
+
+```
+TENANT LAYER        Auth · Billing · Permissions · Isolation
+AGENT RUNTIME       Start/Stop · Gateway Proxy · Chat · History
+SKILL BUS           Registry · Install · Benchmark gate · Connector check
+KNOWLEDGE GRAPH BUS Create · Ingest · Bind to skills · Full-text search
+PLAYBOOK ENGINE     Ordered skill chain + graph bindings + state passing
+CONNECTOR REGISTRY  CRM · Email · Slack · LinkedIn · Databases · APIs
+```
+
+---
+
+## 3. Auth Architecture
+
+- **Frontend**: Clerk `@clerk/react` — `<ClerkProvider>` wraps the app
+- **API**: Clerk `@clerk/express` — every route checks `getAuth(req).userId`
+- **Cross-origin**: `customFetch` in `lib/api-client-react/src/custom-fetch.ts` sends `credentials: 'include'` — **never remove this**
+- **CORS**: `cors({ credentials: true, origin: true })` on API server
+- **Service-to-service**: Bearer token via `OPENCLAW_SERVICE_TOKEN`
+
+---
+
+## 4. Skill Contract
+
+Every skill MUST implement:
+
+```typescript
+interface Skill<TInput = Record<string, unknown>> {
+  id: string;                    // "ir-research-v1"
+  name: string;
+  version: string;
+  category: SkillCategory;       // RESEARCH | GENERATE | VALIDATE | SEND | ANALYZE | TRANSFORM | ENRICH
+  description: string;
+  inputs: object;                // JSON Schema
+  outputs: object;               // JSON Schema
+  requiredConnectors: string[];
+  requiredGraphs: string[];
+  execute: (input: TInput, ctx: SkillContext) => Promise<SkillOutput>;
+}
+```
+
+`SkillOutput` always returns `{ success, data, metadata?, error? }` — never throws.
+
+### Skill Installation Flow
+
+1. Check required connectors authorized
+2. Check required graphs exist
+3. Run benchmark gate (CERTIFIED or CONDITIONAL to pass)
+4. Skill appears in agent's tool palette
+
+### Vertical = Skill Bundle
+
+```
+Legal Bundle v1.0
+├── clause-extractor.skill.ts
+├── intake-router.skill.ts
+├── contract-analyst.skill.ts
+├── graphs/cuad-legal-clauses.graph
+├── connectors/openrouter.connector
+└── playbooks/legal-workflow.playbook
+```
+
+---
+
+## 5. Model Forge
+
+### Training Job State Machine
+
+```
+draft → queued → running → completed → deployed
+                         ↘ failed
+```
+
+### Key Routes
+
+```
+POST /forge/workspaces                              Create workspace (auto-provisions tenant)
+POST /forge/workspaces/:wid/datasets                Create dataset
+POST /forge/workspaces/:wid/datasets/:did/version   Snapshot version
+POST /forge/workspaces/:wid/jobs                    Create job
+POST /forge/workspaces/:wid/jobs/:jid/submit        Validate + queue
+POST /forge/workspaces/:wid/jobs/:jid/dispatch      Dispatch to Kairos
+GET  /forge/workspaces/:wid/jobs/:jid/events        SSE stream
+POST /forge/workspaces/:wid/registry/:rid/versions/:vid/approve  Human approval gate
+POST /forge/workspaces/:wid/jobs/:jid/deploy        Deploy approved model
+```
+
+### Governance Policy (enforced at submit)
+
+```typescript
+{
+  allowed_base_models: string[],
+  max_dataset_bytes: number,        // default 100MB
+  max_concurrent_jobs: number,      // default 2
+  deployment_requires_approval: boolean,  // default true
+  budget_limit_usd: number | null,
+}
+```
+
+### Onboarding Provision
+
+`POST /api/onboarding/provision` — idempotent. Seeds starter workspace with:
+- CUAD Legal Clause Dataset v2 (50 examples, status: ready)
+- Legal Clause Extractor v1 (rag_adaptation, status: completed)
+- Approved model version (eval_accuracy: 1.0)
+- Active deployment at `/v1/legal/extract-clause`
+
+---
+
+## 6. Execution Engines
+
+### ZOA — Multi-LLM Router
+
+| Role | Model |
+|---|---|
+| MANAGER | `meta-llama/llama-3.3-70b-instruct:free` |
+| WORKER: Research | `qwen/qwen3-next-80b-a3b-instruct:free` |
+| WORKER: Reasoning | `nousresearch/hermes-3-llama-3.1-405b:free` |
+| WORKER: Vision | `google/gemma-3-27b-it:free` |
+| WORKER: Write | `cognitivecomputations/dolphin-mistral-24b-venice-edition:free` |
+| PLUMBER: Short | `liquid/lfm-2.5-1.2b-instruct:free` |
+| PLUMBER: Long | `meta-llama/llama-3.2-3b-instruct:free` |
+
+All calls: `provider: { sort: 'throughput', allow_fallbacks: true }`
+
+### Archon — Skill Generation
+
+Pipeline: `prompt → generate (Qwen3 Coder 480B) → L0 validate (tsc) → fix loop (max 2) → L1-L4 benchmark → catalog`
+
+Trigger: `POST /archon/generate { "description": "..." }`
+
+### Kairos — Training Execution
+
+```typescript
+kairosClient.runWorkflow({ skill_id, goal, tenant_id, max_turns })
+kairosClient.getRunStatus(runId)
+kairosClient.getRunStreamUrl(runId)  // SSE
+```
+
+Base: `KAIROS_SERVICE_URL/api/v1/zoa/kairos`
+
+---
+
+## 7. Governance Layer
+
+**Every AI output carries a governance envelope. Always. No exceptions.**
+
+```json
+{
+  "governance": {
+    "human_review_required": true,
+    "privilege_warning": "This output is not legal advice. Review by licensed counsel required.",
+    "not_legal_advice": true,
+    "escalation_flag": false,
+    "jurisdiction_scope": ["US", "EU"]
+  },
+  "trace": {
+    "retrieval_used": true,
+    "fallback_used": false,
+    "model_used": "openai/gpt-oss-20b:free",
+    "latency_ms": 1240,
+    "usage_event_id": "uuid-v4"
+  },
+  "lineage": {
+    "asset_version": "v1",
+    "dataset_version": "v2",
+    "eval_run": "legal-clause-extraction-v2",
+    "model_eval_accuracy": 1.0
+  }
+}
+```
+
+`human_review_required` is ALWAYS `true`. `escalation_flag` strengthens the warning when confidence < 0.70 — it does not create it.
+
+---
+
+## 8. Legal Vertical (Proof-of-Concept)
+
+### Live Endpoints
+
+```
+POST /api/v1/legal/extract-clause    Clause classification (5 types)
+POST /api/v1/legal/intake            Matter routing
+POST /api/v1/legal/contract/analyze  Contract specialist
+POST /api/v1/legal/litigation/analyze
+POST /api/v1/legal/ip/analyze
+POST /api/v1/legal/employment/analyze
+POST /api/v1/legal/corporate/analyze
+```
+
+### Model Chain
+
+```
+1. openai/gpt-oss-20b:free    (100% accuracy, no RAG needed)
+2. openai/gpt-oss-120b:free   (100% accuracy, fallback on 429)
+3. liquid/lfm-2.5-1.2b:free   (90% zero-shot, 100% with RAG, fallback on 429)
+```
+
+### Eval Results (CUAD v2, n=10, 2026-05-15)
+
+- gpt-oss-20b: 100% accuracy, 1.000 macro-F1, 3.44s
+- lfm-1.2b + RAG: 100% accuracy, 1.000 macro-F1, 0.54s
+- Held-out (n=40): 92.5% accuracy — promising, NOT production-ready
+
+### Playbook Results
+
+- v1: 9/10 pass, presence_pass_rate=1.0
+- v2: 6/10 pass, correctness_pass_rate=0.75
+- Gaps: S4 (intake calibration), S6 (employment escalation), S10 (privilege detection)
+
+---
+
+## 9. Database Schema (28 Tables)
+
+### Core
+
+`tenants`, `activity_entries`, `chat_messages`
+
+### Skills
+
+`skills`, `tenant_skills`, `skill_versions`, `skill_benchmarks`
+
+### Connectors
+
+`connectors`, `tenant_connectors` (AES-256-GCM encrypted credentials)
+
+### Knowledge Graphs
+
+`knowledge_graphs`, `graph_documents`, `graph_chunks` (tsvector + GIN index)
+
+### Model Forge
+
+`model_workspaces`, `model_datasets`, `dataset_versions`, `dataset_documents`, `training_jobs`, `training_job_artifacts`, `evaluation_runs`, `evaluation_metrics`, `model_registrations`, `model_versions`, `model_deployments`, `deployment_endpoints`, `model_usage_events`, `model_policies`, `model_approvals`
+
+### Conventions
+
+- All rows scoped by `tenant_id` — never query without it
+- JSONB columns: `hyperparams`, `metadata`, `level_scores` — use `JSON.stringify()` on insert
+- Status columns are text (not PostgreSQL enums)
+- Tenant ID derived from Clerk userId: `tenant-${userId.replace(/[^a-z0-9]/gi, '-').toLowerCase().slice(0, 32)}`
+
+---
+
+## 10. Frontend
+
+### Design
+
+- Dark terminal aesthetic: `bg-[#0a0a0f]`, `font-mono`, cyan accent
+- Light mode: `.light` class on `:root`, `muted-foreground` at 28% lightness (WCAG AA)
+- Status colors: emerald=running/active, amber=provisioning/candidate, red=error, zinc=stopped
+
+### Forge Workspace Tabs (9)
+
+Overview · Datasets · Training · Registry · Deployments · Policies · Explorer · Showcase · Journey
+
+### Auth Rule
+
+`customFetch` in `lib/api-client-react/src/custom-fetch.ts` MUST send `credentials: 'include'`. Never remove this.
+
+---
+
+## 11. Deployment
+
+```yaml
+# render.yaml services:
+openclaw-api       Node.js Starter  — Express API
+openclaw-saas      Static Free      — React frontend
+openclaw-benchmark Python Starter   — FastAPI (ZOA + Kairos + Benchmark)
+archon-factory     Node.js Starter  — Skill generation
+openclaw-db        PostgreSQL Free  — Database
+```
+
+### Required Env Vars
+
+`DATABASE_URL`, `CLERK_SECRET_KEY`, `SESSION_SECRET`, `OPENROUTER_API_KEY`, `RENDER_API_KEY`, `RENDER_OWNER_ID`, `KAIROS_SERVICE_URL`, `BENCHMARK_SERVICE_URL`, `VITE_CLERK_PUBLISHABLE_KEY`, `VITE_API_URL`
+
+---
+
+## 12. Build Sequence (What to Build Next)
+
+### Phase 1 — Infra hardening (current)
+- [x] Connector registry with AES-256 credential vault
+- [x] Knowledge Graph manager (create, ingest, full-text search)
+- [x] Skill contract interface + benchmark gate
+- [ ] Fix forge workspace creation bug (diagnose after auth fix deploys)
+- [ ] Wire `model_usage_events` DB inserts in legal endpoints
+- [ ] Fix S4, S6, S10 playbook gaps
+
+### Phase 2 — Playbook engine
+- [ ] Chain skills in sequence with state passing
+- [ ] Conditional branching (compliance flag → human review)
+- [ ] Run history + output store
+
+### Phase 3 — Tenant self-serve
+- [ ] Skill marketplace UI (install, configure, bind to graphs)
+- [ ] Connector authorization flow (one-click OAuth)
+- [ ] Playbook builder (visual or JSON)
+
+### Phase 4 — Second vertical
+- [ ] IR bundle (ir-research, ir-outreach, ir-pitch skills)
+- [ ] Crunchbase + Gmail connectors
+- [ ] Investor profiles + data room graphs
+
+---
+
+## 13. Individual MDC Files
+
+For detailed specs, see:
+
+| File | Topic |
+|---|---|
+| `01-product-vision.mdc` | Vision, positioning, forbidden language |
+| `02-architecture.mdc` | Service topology, monorepo, tenant isolation |
+| `03-skill-contract.mdc` | Skill interface, categories, Archon generation |
+| `04-model-forge.mdc` | Forge routes, state machine, governance policy |
+| `05-execution-engines.mdc` | ZOA router map, Archon pipeline, Kairos client |
+| `06-governance-layer.mdc` | Governance envelope, escalation, approval gate |
+| `07-legal-vertical.mdc` | Legal endpoints, model chain, eval results, gaps |
+| `08-database-schema.mdc` | All 28 tables, conventions, credential security |
+| `09-frontend-design.mdc` | Design tokens, routes, hook patterns, copy rules |

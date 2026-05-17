@@ -1,0 +1,124 @@
+---
+description: Governance layer — human-in-loop, audit trace, privilege warnings, governance envelope
+globs: ["**/routes/legal.ts", "**/routes/forge.ts", "**/schema/model*.ts", "**/*.tsx"]
+alwaysApply: false
+---
+
+# OpenClaw — Governance Layer
+
+## Core Principle
+
+Every AI output from OpenClaw carries a governance envelope. This is not optional. It is not conditional on confidence. It is always present.
+
+The governance layer exists to ensure:
+- Humans remain in the loop for consequential decisions
+- Every output is traceable to a model, dataset, and eval run
+- Privilege warnings are surfaced before any legal/regulated output is used
+- Audit trails are maintained for compliance
+
+## Governance Envelope (Legal Vertical)
+
+Every response from `/api/v1/legal/*` includes:
+
+```json
+{
+  "governance": {
+    "human_review_required": true,
+    "privilege_warning": "This output is not legal advice. Review by licensed counsel required before relying on this output in any legal workflow.",
+    "not_legal_advice": true,
+    "escalation_flag": false,
+    "escalation_reason": null,
+    "jurisdiction_scope": ["US", "EU"]
+  },
+  "trace": {
+    "retrieval_used": true,
+    "retrieval_chunks": 3,
+    "fallback_used": false,
+    "fallback_reason": null,
+    "model_used": "openai/gpt-oss-20b:free",
+    "provider_model": "openai/gpt-oss-20b:free",
+    "latency_ms": 1240,
+    "usage_event_id": "uuid-v4"
+  },
+  "lineage": {
+    "asset_version": "v1",
+    "dataset_version": "v2",
+    "eval_run": "legal-clause-extraction-v2",
+    "model_eval_accuracy": 1.0
+  }
+}
+```
+
+## Escalation Flag
+
+`escalation_flag = true` when:
+- Confidence < 0.70 (threshold defined in `LEGAL_GOVERNANCE.confidence_threshold`)
+- OR caller explicitly sets `escalationOverride = true`
+
+**Important**: `human_review_required` is ALWAYS `true` regardless of confidence. The escalation flag strengthens the warning — it does not create it.
+
+## Model Approval Gate (Forge)
+
+Before any model version can be deployed:
+1. Job must be `completed`
+2. Model version must be `candidate`
+3. Only the tenant owner can approve (verified against `tenants.user_id`)
+4. Approval creates a record in `model_approvals` table
+5. Version moves to `approved` status
+6. Then deployment can be created
+
+This is enforced in `POST /forge/workspaces/:wid/registry/:rid/versions/:vid/approve`.
+
+## Governance Policy (per tenant)
+
+Stored in `model_policies`. Enforced at job submit time:
+
+```typescript
+{
+  allowed_base_models: string[],      // empty = all allowed
+  max_dataset_bytes: number,          // default 100MB
+  max_concurrent_jobs: number,        // default 2
+  deployment_requires_approval: boolean, // default true
+  budget_limit_usd: number | null,    // null = no cap
+}
+```
+
+## Playbook Eval Harness
+
+The adversarial playbook tests governance behavior across 10 scenarios:
+
+| Scenario | Tests |
+|---|---|
+| S1 | Governing law extraction |
+| S2 | Termination clause extraction |
+| S3 | IP assignment extraction |
+| S4 | Intake calibration (uncertainty handling) |
+| S5 | Limitation of liability |
+| S6 | Employment escalation (CA non-compete) |
+| S7 | Governance wrapper on 400 errors |
+| S8 | Indemnification extraction |
+| S9 | Multi-clause contract |
+| S10 | Privilege detection |
+
+**v1 results**: 9/10 pass, presence_pass_rate=1.0
+**v2 results**: 6/10 pass, correctness_pass_rate=0.75
+
+**Confirmed gaps**:
+- S4: Intake calibration — add uncertainty instruction to intake prompt
+- S6: Employment escalation — post-process CA non-compete patterns
+- S10: Privilege detection — pre-process privilege keywords
+
+## Audit Trail
+
+Every legal inference call generates a `usage_event_id` (UUID v4). This is returned in the `trace` block and should be logged to `model_usage_events` for compliance.
+
+Current status: `model_usage_events` table exists, insert is wired in `dispatch` route. Legal endpoint `usage_event_id` is generated but not yet persisted to DB (pending implementation).
+
+## Governance in the UI
+
+The frontend must surface governance information wherever AI outputs are displayed:
+- Show `privilege_warning` prominently before any legal output
+- Show `human_review_required: true` badge on all legal outputs
+- Show `escalation_flag` with red indicator when true
+- Show `lineage` (dataset, eval run, model) in expandable detail panel
+- Never hide governance information behind a toggle or collapse by default

@@ -1,0 +1,138 @@
+---
+description: Model Forge — workspace, dataset, training job, registry, deployment, and governance pipeline
+globs: ["**/routes/forge.ts", "**/routes/onboarding.ts", "**/schema/model*.ts", "**/schema/training*.ts", "**/schema/evaluation*.ts", "**/schema/deployment*.ts", "**/pages/forge/**"]
+alwaysApply: false
+---
+
+# OpenClaw — Model Forge
+
+## What the Forge Is
+
+The Model Forge is the platform's AI training and deployment pipeline. It allows tenants to:
+1. Create workspaces (scoped to a domain/vertical)
+2. Upload and version datasets
+3. Configure and submit training jobs
+4. Register trained models with versioning
+5. Approve model versions (human-in-loop gate)
+6. Deploy approved models to live endpoints
+7. Monitor eval metrics and usage events
+
+## API Routes (all under `/api/forge/`)
+
+```
+GET    /forge/workspaces                              → List user's workspaces
+POST   /forge/workspaces                              → Create workspace (auto-provisions tenant)
+GET    /forge/workspaces/:wid                         → Get workspace
+
+GET    /forge/workspaces/:wid/datasets                → List datasets
+POST   /forge/workspaces/:wid/datasets                → Create dataset
+GET    /forge/workspaces/:wid/datasets/:did           → Get dataset + documents
+POST   /forge/workspaces/:wid/datasets/:did/documents → Add document
+DELETE /forge/workspaces/:wid/datasets/:did/documents/:docId → Remove document
+POST   /forge/workspaces/:wid/datasets/:did/version   → Snapshot dataset version
+
+GET    /forge/workspaces/:wid/jobs                    → List training jobs
+POST   /forge/workspaces/:wid/jobs                    → Create job (status: draft)
+GET    /forge/workspaces/:wid/jobs/:jid               → Get job + Kairos status
+POST   /forge/workspaces/:wid/jobs/:jid/submit        → Validate + queue job
+POST   /forge/workspaces/:wid/jobs/:jid/dispatch      → Dispatch to Kairos (status: running)
+POST   /forge/workspaces/:wid/jobs/:jid/cancel        → Cancel job
+GET    /forge/workspaces/:wid/jobs/:jid/events        → SSE stream from Kairos
+POST   /forge/workspaces/:wid/jobs/:jid/deploy        → Deploy completed job
+GET    /forge/workspaces/:wid/jobs/:jid/eval          → Get eval runs + metrics
+
+GET    /forge/workspaces/:wid/policies                → Get governance policy
+PUT    /forge/workspaces/:wid/policies                → Update policy
+
+GET    /forge/workspaces/:wid/registry                → List model registrations + versions
+POST   /forge/workspaces/:wid/registry/:rid/versions/:vid/approve → Approve model version
+GET    /forge/workspaces/:wid/registry/:rid/deployment → Get active deployment + endpoint URL
+
+GET    /forge/workspaces/:wid/deployments             → List deployments
+```
+
+## Training Job State Machine
+
+```
+draft → queued → running → completed → deployed
+                         ↘ failed
+```
+
+- `draft`: Job created, not yet submitted
+- `queued`: Passed validation (dataset ready, model allowed, concurrency OK)
+- `running`: Dispatched to Kairos, `kairos_run_id` set
+- `completed`: Kairos finished successfully
+- `failed`: Validation failed or Kairos error
+- `deployed`: Model version approved + deployment created
+
+## Training Modes
+
+| Mode | Description |
+|---|---|
+| `prompt_tuning` | Prompt engineering + few-shot examples |
+| `rag_adaptation` | FAISS retrieval augmentation (primary mode for legal vertical) |
+| `fine_tuning` | Full model fine-tuning (requires larger compute) |
+
+## Governance Policy (per tenant)
+
+Stored in `model_policies` table. Enforced at job submit time:
+
+| Field | Default | Description |
+|---|---|---|
+| `allowed_base_models` | `[]` (all allowed) | Allowlist of base model IDs |
+| `max_dataset_bytes` | 100 MB | Max dataset size |
+| `max_concurrent_jobs` | 2 | Max running+queued jobs |
+| `deployment_requires_approval` | `true` | Human approval gate before deploy |
+| `budget_limit_usd` | null | Spend cap |
+
+## Model Approval Gate
+
+Before a model version can be deployed:
+1. Job must be in `completed` status
+2. Model version must be in `candidate` status
+3. Only the tenant owner (matching `userId`) can approve
+4. Approval creates a record in `model_approvals` table
+5. Version status moves to `approved`
+6. Then `POST /jobs/:jid/deploy` creates the deployment
+
+## Onboarding Provision
+
+`POST /api/onboarding/provision` — called on first Forge visit for a new user.
+
+Seeds the starter workspace with:
+- Workspace: "Legal AI Operating Layer" (domain: legal)
+- Dataset: CUAD Legal Clause Dataset v2 (50 examples, status: ready)
+- Training job: Legal Clause Extractor v1 (mode: rag_adaptation, status: completed)
+- Model registration + approved version (eval_accuracy: 1.0)
+- Active deployment + endpoint: `/v1/legal/extract-clause`
+- Governance policy: 3 allowed models, 3 concurrent jobs, approval required
+
+Idempotent — safe to call multiple times.
+
+## DB Schema (Forge tables)
+
+| Table | Purpose |
+|---|---|
+| `model_workspaces` | Workspace per tenant (id, tenant_id, name, domain) |
+| `model_datasets` | Dataset per workspace (source_type, sensitivity, status, document_count) |
+| `dataset_versions` | Immutable snapshots of datasets |
+| `dataset_documents` | Individual files/URLs in a dataset |
+| `training_jobs` | Job config + state (mode, base_model, hyperparams, kairos_run_id) |
+| `training_job_artifacts` | Output artifacts from completed jobs |
+| `evaluation_runs` | Eval run records per job |
+| `evaluation_metrics` | Per-metric results (accuracy, f1, etc.) |
+| `model_registrations` | Named model registry entry per workspace |
+| `model_versions` | Versioned model artifacts (status: candidate → approved) |
+| `model_deployments` | Active deployments (status: pending → active) |
+| `deployment_endpoints` | Callable endpoint paths per deployment |
+| `model_usage_events` | Audit log of training_started, deployed, etc. |
+| `model_policies` | Governance policy per tenant |
+| `model_approvals` | Human approval records |
+
+## Workspace Middleware
+
+`requireWorkspaceMember` middleware (in `src/middleware/requireWorkspaceMember.ts`):
+- Resolves `:wid` to a `model_workspaces` row
+- Verifies the workspace belongs to the authenticated user's tenant
+- Attaches `req.resolvedWorkspace` and `req.resolvedTenantId` to the request
+- Returns 404 if workspace not found, 403 if tenant mismatch

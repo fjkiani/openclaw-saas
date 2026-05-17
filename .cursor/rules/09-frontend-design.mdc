@@ -1,0 +1,152 @@
+---
+description: Frontend design system, component patterns, routing, and API hook conventions
+globs: ["**/*.tsx", "**/index.css", "**/tailwind.config.*", "**/components/**"]
+alwaysApply: false
+---
+
+# OpenClaw — Frontend Design System
+
+## Stack
+
+- **Framework**: React 19 + Vite 7
+- **Styling**: Tailwind CSS v4 + shadcn/ui
+- **Auth**: Clerk (`@clerk/react`) — `<ClerkProvider>` wraps the app
+- **Routing**: Wouter v3
+- **Data fetching**: TanStack Query v5 + Orval-generated React Query hooks
+- **API communication**: `@workspace/api-client-react` (generated hooks)
+
+## Design Tokens
+
+```css
+/* Dark mode (default) */
+--background: #0a0a0f;          /* near-black base */
+--card: hsl(240 10% 8%);
+--border: hsl(240 5% 18%);
+--primary: hsl(195 100% 50%);   /* cyan accent */
+--muted-foreground: hsl(240 5% 46%);
+
+/* Light mode (.light class on :root) */
+--background: hsl(0 0% 98%);
+--card: hsl(0 0% 100%);
+--border: hsl(240 5% 84%);
+--muted-foreground: hsl(240 5% 28%);  /* bumped from 46% for WCAG AA */
+```
+
+## Typography
+
+- **Font**: JetBrains Mono (monospace throughout — `font-mono` on body)
+- **Base size**: 14px
+- **Headings**: `text-lg font-semibold` to `text-3xl font-bold`
+- **Micro badges**: `text-[10px] font-mono` with colored borders
+
+## Status Colors
+
+| Status | Color |
+|---|---|
+| running | `text-emerald-400` / `border-emerald-400/30` |
+| stopped | `text-zinc-400` |
+| provisioning | `text-amber-400` |
+| error | `text-red-400` |
+| active | `text-emerald-400` |
+| candidate | `text-amber-400` |
+| approved | `text-blue-400` |
+| deployed | `text-emerald-400` |
+
+## Page Routes
+
+| Route | File | Description |
+|---|---|---|
+| `/` | `pages/index.tsx` | Landing page — factory framework hero |
+| `/dashboard` | `pages/dashboard.tsx` | Agent stats, activity feed |
+| `/agents` | `pages/agents/index.tsx` | Agent list + provision |
+| `/agents/:id` | `pages/agents/[id].tsx` | Agent detail (5 tabs) |
+| `/skills` | `pages/skills.tsx` | Global skill catalog |
+| `/billing` | `pages/billing.tsx` | Plan + usage |
+| `/forge` | `pages/forge/workspace.tsx` | Model Forge (9 tabs) |
+
+## Forge Workspace Tabs
+
+| Tab | Component | Description |
+|---|---|---|
+| Overview | inline | Workspace info + stats |
+| Datasets | inline | Dataset CRUD + document upload |
+| Training | `TrainingTab.tsx` | Full training story, eval stages, playbook |
+| Registry | inline | Model registrations + versions |
+| Deployments | inline | Active deployments + endpoints |
+| Policies | inline | Governance policy editor |
+| Explorer | `DatasetExplorer.tsx` | Dataset schemas + field drill-down |
+| Showcase | `SaaSShowcase.tsx` | Platform verticals |
+| Journey | `JourneyTab.tsx` | Onboarding checklist |
+
+## Agent Detail Tabs
+
+| Tab | Description |
+|---|---|
+| Overview | Instance info + activity log |
+| Skills | Installed skills + install modal |
+| Chat | Live chat with agent |
+| Connectors | Install/remove connectors |
+| Knowledge | Graph CRUD + PDF upload + search |
+
+## API Hook Pattern
+
+```tsx
+import { useListTenantConnectors, getListTenantConnectorsQueryKey } from "@workspace/api-client-react";
+
+const { data, isLoading } = useListTenantConnectors(tenantId, {
+  query: { queryKey: getListTenantConnectorsQueryKey(tenantId) },
+});
+```
+
+For mutations:
+```tsx
+import { useInstallConnectorOnTenant } from "@workspace/api-client-react";
+import { useQueryClient } from "@tanstack/react-query";
+
+const queryClient = useQueryClient();
+const install = useInstallConnectorOnTenant({
+  mutation: {
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: getListTenantConnectorsQueryKey(tenantId) });
+    },
+  },
+});
+install.mutate({ id: tenantId, data: { connectorId: 1, credential: "key_abc123" } });
+```
+
+## Auth: Cross-Origin Fetch
+
+All API calls MUST include `credentials: 'include'` for Clerk session cookies to be sent:
+
+```typescript
+// lib/api-client-react/src/custom-fetch.ts
+fetch(url, {
+  ...options,
+  credentials: 'include',  // REQUIRED — do not remove
+})
+```
+
+This is already implemented. Never remove this line.
+
+## Adding a Page
+
+1. Create the file in `artifacts/openclaw-saas/src/pages/`
+2. Add a `<Route>` in `artifacts/openclaw-saas/src/App.tsx`
+3. Add a nav link in `artifacts/openclaw-saas/src/components/Layout.tsx`
+4. Use generated hooks from `@workspace/api-client-react` for data fetching
+
+## Dark/Light Toggle
+
+`Layout.tsx` manages the theme toggle:
+- Reads from `localStorage.getItem('theme')`
+- Applies `.light` class to `document.documentElement`
+- Toggle button uses `aria-label` for WCAG AA compliance
+- Default: dark mode
+
+## Copy Rules
+
+- Never use "demo" — use "live" or "production"
+- Never use "legal API" — use "AI workforce" or "factory framework"
+- Never use "law firm tool" — use "first proof-of-concept vertical"
+- Always frame the platform as the factory, not the product
+- The organization's AI workforce is the product; OpenClaw is the factory that builds it

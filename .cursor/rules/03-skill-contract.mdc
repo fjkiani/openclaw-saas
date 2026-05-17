@@ -1,0 +1,130 @@
+---
+description: Skill contract interface, categories, connector definitions, and registry rules
+globs: ["**/skill-contract/**", "**/skills/**", "**/archon-factory/**", "**/*.skill.ts"]
+alwaysApply: false
+---
+
+# OpenClaw — Skill Contract
+
+## The Skill Interface
+
+Every skill in the registry MUST conform to this interface (defined in `lib/skill-contract/src/index.ts`):
+
+```typescript
+export type SkillCategory =
+  | "RESEARCH"
+  | "GENERATE"
+  | "VALIDATE"
+  | "SEND"
+  | "ANALYZE"
+  | "TRANSFORM"
+  | "ENRICH";
+
+export interface SkillOutput {
+  success: boolean;
+  data: Record<string, unknown>;
+  metadata?: {
+    tokensUsed?: number;
+    connectorsCalled?: string[];
+    graphsQueried?: string[];
+    executionMs?: number;
+  };
+  error?: string;
+}
+
+export interface SkillContext {
+  tenantId: number;
+  userId: string;
+  connectors: Record<string, string>;  // connector slug → decrypted credential
+  graphIds: number[];
+  runId: string;
+}
+
+export interface Skill<TInput = Record<string, unknown>> {
+  id: string;                    // "ir-research-v1" — kebab-case
+  name: string;                  // "Investor Research"
+  version: string;               // "1.0.0"
+  category: SkillCategory;
+  description: string;
+  inputs: object;                // JSON Schema
+  outputs: object;               // JSON Schema
+  requiredConnectors: string[];  // ["crunchbase", "linkedin"]
+  requiredGraphs: string[];      // ["investor-profiles"]
+  execute: (input: TInput, ctx: SkillContext) => Promise<SkillOutput>;
+}
+
+export interface ConnectorDef {
+  slug: string;
+  name: string;
+  authType: "api_key" | "oauth2";
+  credentialLabel: string;
+  verify?: (credential: string) => Promise<boolean>;
+}
+```
+
+## Skill Installation Flow
+
+When a tenant installs a skill:
+1. Platform checks if required connectors are authorized (prompts OAuth/API key if not)
+2. Platform checks if required graphs exist (prompts to create if not)
+3. Benchmark gate runs (`quick` test suite via `BENCHMARK_SERVICE_URL`)
+4. If benchmark passes (CERTIFIED or CONDITIONAL), skill appears in agent's tool palette
+5. Agent can call it from any playbook
+
+## Archon-Generated Skills
+
+Skills can be auto-generated via the Zeta Skill Forge pipeline:
+
+```
+POST /archon/generate
+{ "description": "Build a skill that fetches RSS headlines for a company" }
+```
+
+Pipeline: `prompt → generate (Qwen3 Coder 480B) → L0 validate (tsc) → fix loop (max 2) → L1-L4 benchmark → catalog`
+
+Generated skills must:
+- Export `name`, `description`, `inputSchema`, `outputSchema`, `run()` as named exports
+- Be under 300 lines
+- Use only Node.js built-ins + global `fetch` (no external npm imports)
+- Handle all errors in `run()` — never throw, return `{ error: string }` on failure
+
+## Benchmark Grades
+
+| Grade | Meaning | Install allowed? |
+|---|---|---|
+| CERTIFIED | Passes all L1-L4 levels | Yes |
+| CONDITIONAL | Passes with caveats | Yes (with warning) |
+| FAILED | Below threshold | No — blocked |
+| INCONCLUSIVE | Benchmark service offline | Yes (with warning) |
+
+## Skill Categories (Archon-generated)
+
+Archon uses these categories for generated skills:
+- Data, Finance, Productivity, HR & Payroll, Operations, Legal & Compliance, Research, Communication
+
+## Vertical Skill Bundles
+
+A vertical is just a bundle of skills + graphs + connectors + playbooks:
+
+```
+IR Skill Bundle v1.0
+├── ir-research.skill.ts      → finds investors
+├── ir-outreach.skill.ts      → drafts emails
+├── ir-pitch.skill.ts         → answers diligence
+├── graphs/
+│   ├── investor-profiles.graph
+│   └── data-room.graph
+├── connectors/
+│   ├── crunchbase.connector
+│   └── gmail.connector
+└── playbooks/
+    └── full-ir-workflow.playbook
+```
+
+Any tenant installs this bundle in one click. Their data, their connectors, same infrastructure.
+
+## Skill Registry (DB)
+
+Skills are stored in the `skills` table. 791+ real skills loaded from GitHub `awesome-openclaw-skills`. 30 categories. 24hr in-process TTL cache. Manual refresh via `POST /api/skills/refresh`.
+
+Tenant-installed skills are tracked in `tenant_skills` (many-to-many).

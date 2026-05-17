@@ -1,0 +1,110 @@
+---
+description: OpenClaw system architecture — infrastructure layers, tenant model, service topology
+globs: ["**/*.ts", "**/*.tsx", "render.yaml", "pnpm-workspace.yaml"]
+alwaysApply: true
+---
+
+# OpenClaw — System Architecture
+
+## Infrastructure Layer Model
+
+```
+┌─────────────────────────────────────────────────────┐
+│                  TENANT LAYER                        │
+│   Auth (Clerk) · Billing · Permissions · Isolation   │
+├─────────────────────────────────────────────────────┤
+│                  AGENT RUNTIME                       │
+│   Start/Stop · Gateway Proxy · Chat · History        │
+├──────────────┬──────────────────────────────────────┤
+│  SKILL BUS   │         KNOWLEDGE GRAPH BUS           │
+│              │                                       │
+│  Skills are  │  Each graph is scoped to a tenant     │
+│  registered  │  and tagged to one or more skills     │
+│  in a        │                                       │
+│  registry    │  Graph A: Investor Profiles           │
+│              │  Graph B: Company Data Room           │
+│  IRResearch  │  Graph C: Brand Guidelines            │
+│  IROutreach  │  Graph D: Compliance Rules            │
+│  LegalDraft  │  Graph N: ...                         │
+│  HRScreen    │                                       │
+│  ...         │                                       │
+├──────────────┴──────────────────────────────────────┤
+│                  PLAYBOOK ENGINE                     │
+│   A playbook = ordered skill chain + graph bindings  │
+│   Tenant configures, platform executes               │
+├─────────────────────────────────────────────────────┤
+│               CONNECTOR REGISTRY                     │
+│   CRM · Email · Slack · LinkedIn · Databases · APIs  │
+│   Each skill declares which connectors it needs      │
+└─────────────────────────────────────────────────────┘
+```
+
+## Service Topology (Render.com)
+
+| Service | Name | Runtime | Plan |
+|---|---|---|---|
+| API Server | `openclaw-api` | Node.js | Starter |
+| Frontend | `openclaw-saas` | Static | Free |
+| Benchmark + ZOA + Kairos | `openclaw-benchmark` | Python (FastAPI) | Starter |
+| Archon Factory | `archon-factory` | Node.js | Starter |
+| Database | `openclaw-db` | PostgreSQL | Free |
+| Per-tenant Gateway | `openclaw-gateway-{tenantId}` | Docker | Starter (dynamic) |
+
+## Monorepo Structure
+
+```
+openclaw-saas/
+├── artifacts/
+│   ├── api-server/          # Express 5 API (Node.js)
+│   └── openclaw-saas/       # React + Vite frontend
+├── lib/
+│   ├── db/                  # Drizzle ORM + PostgreSQL schema (28 tables)
+│   ├── api-spec/            # OpenAPI spec + Orval codegen
+│   ├── api-client-react/    # Generated React Query hooks
+│   ├── api-zod/             # Generated Zod schemas
+│   ├── crypto-utils/        # AES-256-GCM credential encryption
+│   ├── gateway-provisioner/ # Render Deploy API client
+│   └── skill-contract/      # Skill interface + ConnectorDef types
+├── packages/
+│   ├── archon/              # Archon workflow config + YAML definitions
+│   └── archon-factory/      # Skill generation pipeline (Express service)
+└── scripts/                 # DB migration, seeding utilities
+```
+
+## Tenant Isolation Model
+
+- Each tenant gets their own `OPENCLAW_CONFIG_DIR=/tenants/{tenant_id}` directory
+- Per-tenant Docker volume on Render — zero cross-contamination
+- Per-tenant Gateway instance: `openclaw-gateway-{tenantId}.onrender.com`
+- All DB rows scoped by `tenant_id` — no shared data across tenants
+
+## Auth Architecture
+
+- **Frontend**: Clerk `@clerk/react` — `<ClerkProvider>` wraps the app
+- **API**: Clerk `@clerk/express` middleware — every route checks `getAuth(req).userId`
+- **Cross-origin**: `customFetch` in `lib/api-client-react/src/custom-fetch.ts` sends `credentials: 'include'` on all requests
+- **CORS**: API server configured with `cors({ credentials: true, origin: true })`
+- **Service-to-service**: Bearer token via `OPENCLAW_SERVICE_TOKEN` env var
+
+## Key Environment Variables
+
+| Variable | Service | Purpose |
+|---|---|---|
+| `DATABASE_URL` | api-server | PostgreSQL connection |
+| `CLERK_SECRET_KEY` | api-server | Clerk auth |
+| `OPENROUTER_API_KEY` | api-server, benchmark | LLM inference |
+| `RENDER_API_KEY` | api-server | Gateway provisioning |
+| `RENDER_OWNER_ID` | api-server | Render account |
+| `KAIROS_SERVICE_URL` | api-server | Kairos execution engine |
+| `BENCHMARK_SERVICE_URL` | api-server | Benchmark + ZOA service |
+| `VITE_API_URL` | frontend | API base URL |
+| `VITE_ZOA_SERVICE_URL` | frontend | ZOA agent API |
+| `VITE_ARCHON_FACTORY_URL` | frontend | Archon factory |
+
+## Adding a New Route
+
+1. Add the OpenAPI operation to `lib/api-spec/openapi.yaml`
+2. Run `pnpm --filter @workspace/api-spec run codegen` to regenerate Zod schemas and React Query hooks
+3. Create or extend a route file in `artifacts/api-server/src/routes/`
+4. Mount the router in `artifacts/api-server/src/routes/index.ts`
+5. Run `pnpm run typecheck` — must pass before committing
