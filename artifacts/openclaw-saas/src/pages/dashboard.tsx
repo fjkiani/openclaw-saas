@@ -1,7 +1,7 @@
-import { useGetDashboardSummary, useListTenants, useGetTenantActivity, getGetTenantActivityQueryKey } from "@workspace/api-client-react";
+import { useGetDashboardSummary, useListTenants, useGetTenantActivity, getGetTenantActivityQueryKey, useListForgeWorkspaces, useListTrainingJobs } from "@workspace/api-client-react";
 import { Layout, PageHeader, StatusBadge, ActivityIcon } from "@/components/Layout";
 import { Link } from "wouter";
-import { Bot, Zap, CheckCircle, CreditCard, ArrowRight, Clock } from "lucide-react";
+import { Bot, Zap, CheckCircle, CreditCard, ArrowRight, Clock, FlaskConical, Server } from "lucide-react";
 
 function StatCard({ label, value, sub, icon: Icon }: { label: string; value: string | number; sub?: string; icon: React.ComponentType<{ className?: string }> }) {
   return (
@@ -12,6 +12,59 @@ function StatCard({ label, value, sub, icon: Icon }: { label: string; value: str
       </div>
       <div className="text-2xl font-mono font-bold text-foreground">{value}</div>
       {sub && <div className="text-[10px] font-mono text-muted-foreground mt-1">{sub}</div>}
+    </div>
+  );
+}
+
+function FactoryStatusStrip() {
+  const { data: workspaces } = useListForgeWorkspaces();
+
+  const workspaceCount = workspaces?.length ?? 0;
+  const activeDeployments = workspaces?.filter((w) => w.status === "active").length ?? 0;
+
+  return (
+    <div className="bg-card border border-border rounded-lg p-4">
+      <div className="flex items-center gap-2 mb-3">
+        <FlaskConical className="w-3.5 h-3.5 text-primary" />
+        <span className="text-[10px] font-mono font-bold text-foreground uppercase tracking-widest">Factory Status</span>
+      </div>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <Link
+          href="/forge"
+          className="flex flex-col gap-0.5 p-3 bg-background border border-border rounded hover:border-primary/30 transition-colors"
+          data-testid="factory-stat-workspaces"
+        >
+          <span className="text-lg font-mono font-bold text-foreground">{workspaceCount}</span>
+          <span className="text-[10px] font-mono text-muted-foreground">Forge Workspaces</span>
+        </Link>
+        <Link
+          href="/forge"
+          className="flex flex-col gap-0.5 p-3 bg-background border border-border rounded hover:border-primary/30 transition-colors"
+          data-testid="factory-stat-deployments"
+        >
+          <span className="text-lg font-mono font-bold text-foreground">{activeDeployments}</span>
+          <span className="text-[10px] font-mono text-muted-foreground">Active Workspaces</span>
+        </Link>
+        <Link
+          href="/forge"
+          className="flex flex-col gap-0.5 p-3 bg-background border border-border rounded hover:border-primary/30 transition-colors"
+          data-testid="factory-stat-endpoints"
+        >
+          <span className="text-lg font-mono font-bold text-foreground">8</span>
+          <span className="text-[10px] font-mono text-muted-foreground">Live Endpoints</span>
+        </Link>
+        <Link
+          href="/forge"
+          className="flex flex-col gap-0.5 p-3 bg-background border border-border rounded hover:border-primary/30 transition-colors"
+          data-testid="factory-stat-governed"
+        >
+          <div className="flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+            <span className="text-[10px] font-mono font-bold text-emerald-400">ON</span>
+          </div>
+          <span className="text-[10px] font-mono text-muted-foreground">Governance Layer</span>
+        </Link>
+      </div>
     </div>
   );
 }
@@ -28,27 +81,27 @@ export default function DashboardPage() {
   return (
     <Layout>
       <PageHeader
-        title="Control Plane"
-        subtitle="Your OpenClaw agent fleet overview"
+        title="Your AI Workforce"
+        subtitle="Factory-built. Governed. Ready."
       />
 
       <div className="p-6 space-y-6">
         {/* Stats grid */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <StatCard
-            label="Total Agents"
+            label="Workforce Members"
             value={summaryLoading ? "—" : summary?.totalAgents ?? 0}
-            sub={`${summary?.agentLimit ?? 1} agent limit`}
+            sub={`${summary?.agentLimit ?? 1} member limit`}
             icon={Bot}
           />
           <StatCard
-            label="Running"
+            label="Active Now"
             value={summaryLoading ? "—" : summary?.runningAgents ?? 0}
-            sub="active instances"
+            sub="running instances"
             icon={CheckCircle}
           />
           <StatCard
-            label="Skills Installed"
+            label="Skills Deployed"
             value={summaryLoading ? "—" : summary?.totalSkillsInstalled ?? 0}
             sub="across all agents"
             icon={Zap}
@@ -61,11 +114,14 @@ export default function DashboardPage() {
           />
         </div>
 
+        {/* Factory Status strip */}
+        <FactoryStatusStrip />
+
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {/* Agents list */}
+          {/* Workforce list */}
           <div className="bg-card border border-border rounded-lg">
             <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-              <span className="text-xs font-mono font-bold text-foreground">AGENT INSTANCES</span>
+              <span className="text-xs font-mono font-bold text-foreground">YOUR WORKFORCE</span>
               <Link
                 href="/agents"
                 className="text-[10px] font-mono text-primary hover:underline flex items-center gap-1"
@@ -79,13 +135,13 @@ export default function DashboardPage() {
             ) : !tenants?.length ? (
               <div className="p-8 text-center">
                 <Bot className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
-                <p className="text-xs font-mono text-muted-foreground">No agents yet</p>
+                <p className="text-xs font-mono text-muted-foreground mb-2">No workforce yet</p>
                 <Link
-                  href="/agents"
-                  className="text-xs font-mono text-primary hover:underline mt-1 block"
-                  data-testid="link-provision-first"
+                  href="/onboarding"
+                  className="text-xs font-mono text-primary hover:underline"
+                  data-testid="link-launch-vertical"
                 >
-                  Provision your first agent
+                  Launch your first vertical →
                 </Link>
               </div>
             ) : (
@@ -157,22 +213,22 @@ export default function DashboardPage() {
             <div className="flex items-center gap-3">
               <Bot className="w-4 h-4 text-primary" />
               <div>
-                <p className="text-xs font-mono font-bold text-foreground">Manage Agents</p>
+                <p className="text-xs font-mono font-bold text-foreground">Manage Workforce</p>
                 <p className="text-[10px] font-mono text-muted-foreground">Provision, start, stop</p>
               </div>
             </div>
             <ArrowRight className="w-4 h-4 text-muted-foreground" />
           </Link>
           <Link
-            href="/skills"
+            href="/forge"
             className="flex items-center justify-between p-4 bg-card border border-border rounded-lg hover:border-primary/30 transition-colors"
-            data-testid="link-quick-skills"
+            data-testid="link-quick-forge"
           >
             <div className="flex items-center gap-3">
-              <Zap className="w-4 h-4 text-primary" />
+              <FlaskConical className="w-4 h-4 text-primary" />
               <div>
-                <p className="text-xs font-mono font-bold text-foreground">Browse Skills</p>
-                <p className="text-[10px] font-mono text-muted-foreground">5,400+ on ClawHub</p>
+                <p className="text-xs font-mono font-bold text-foreground">Model Forge</p>
+                <p className="text-[10px] font-mono text-muted-foreground">Build · Train · Deploy</p>
               </div>
             </div>
             <ArrowRight className="w-4 h-4 text-muted-foreground" />

@@ -919,8 +919,234 @@ function RegistryTab({ wid }: { wid: number }) {
 
 // ─── Deployments Tab ──────────────────────────────────────────────────────────
 
+const EXAMPLE_CLAUSE_DEP =
+  "This Agreement shall be governed by the laws of the State of Delaware, without regard to its conflict of law provisions. Any disputes arising under this Agreement shall be subject to the exclusive jurisdiction of the courts located in Wilmington, Delaware.";
+
+type TryItResult = {
+  clause_type?: string;
+  confidence?: number;
+  reasoning?: string;
+  governance?: {
+    human_review_required: boolean;
+    privilege_warning: string;
+    escalation_flag: boolean;
+  };
+  trace?: {
+    model_used: string;
+    latency_ms: number;
+    usage_event_id: string;
+  };
+  lineage?: {
+    dataset_version: string;
+    eval_run: string;
+  };
+  // fallback: raw JSON
+  [key: string]: unknown;
+};
+
+function DeploymentTryItPanel({
+  wid,
+  dep,
+  onClose,
+}: {
+  wid: number;
+  dep: { id?: number; version_id?: number; endpoint_url?: string };
+  onClose: () => void;
+}) {
+  const { toast } = useToast();
+  const [input, setInput] = useState(EXAMPLE_CLAUSE_DEP);
+  const [running, setRunning] = useState(false);
+  const [result, setResult] = useState<TryItResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const endpointUrl = dep.endpoint_url ?? "/api/v1/legal/extract-clause";
+
+  async function handleRun() {
+    if (!input.trim() || running) return;
+    setRunning(true);
+    setError(null);
+    setResult(null);
+    try {
+      const url = endpointUrl.startsWith("/api") ? endpointUrl : `/api${endpointUrl}`;
+      const resp = await fetch(url, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: input.trim(), use_rag: true }),
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ error: resp.statusText }));
+        throw new Error((err as { error?: string }).error ?? resp.statusText);
+      }
+      const data = await resp.json();
+      setResult(data as TryItResult);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Request failed";
+      setError(msg);
+      toast({ title: "Inference failed", description: msg, variant: "destructive" });
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  function handleCopy() {
+    if (!result) return;
+    navigator.clipboard.writeText(JSON.stringify(result, null, 2));
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
+  return (
+    <div className="mt-4 border-t border-border pt-4 space-y-4">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+          <span className="text-[10px] font-mono text-emerald-400 uppercase tracking-widest">Try It</span>
+          <span className="text-[10px] font-mono text-muted-foreground">{endpointUrl}</span>
+        </div>
+        <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
+          <X className="w-3.5 h-3.5" />
+        </button>
+      </div>
+
+      <div className={`grid gap-4 ${result ? "grid-cols-2" : "grid-cols-1"}`}>
+        {/* Input */}
+        <div>
+          <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest block mb-1.5">
+            Contract clause
+          </label>
+          <textarea
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            rows={5}
+            className={textareaCls}
+            placeholder="Paste a contract clause..."
+          />
+          <button
+            onClick={handleRun}
+            disabled={!input.trim() || running}
+            className={`mt-2 flex items-center gap-1.5 ${btnPrimary}`}
+          >
+            {running ? "Running..." : "Run"}
+          </button>
+          {error && (
+            <p className="mt-2 text-[10px] font-mono text-red-400">{error}</p>
+          )}
+        </div>
+
+        {/* Output */}
+        {result && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest">Output</span>
+              <button
+                onClick={handleCopy}
+                className="flex items-center gap-1 text-[10px] font-mono text-muted-foreground hover:text-foreground"
+              >
+                {copied ? "Copied ✓" : "Copy JSON"}
+              </button>
+            </div>
+
+            {/* Result fields */}
+            {result.clause_type && (
+              <div className="bg-background border border-border rounded p-3 space-y-1.5">
+                <div className="flex items-center gap-2">
+                  <span className="text-[9px] font-mono text-muted-foreground w-20">clause_type</span>
+                  <span className="text-xs font-mono text-primary font-bold">{result.clause_type}</span>
+                </div>
+                {result.confidence != null && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-[9px] font-mono text-muted-foreground w-20">confidence</span>
+                    <span className="text-xs font-mono text-foreground">{result.confidence}</span>
+                  </div>
+                )}
+                {result.reasoning && (
+                  <div className="flex items-start gap-2">
+                    <span className="text-[9px] font-mono text-muted-foreground w-20 mt-0.5">reasoning</span>
+                    <span className="text-[10px] font-mono text-foreground leading-relaxed">{result.reasoning}</span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Governance envelope — always visible, never collapsed */}
+            <div className="bg-amber-500/5 border border-amber-500/20 rounded p-3">
+              <div className="flex items-center gap-2 mb-2">
+                <Shield className="w-3 h-3 text-amber-400" />
+                <span className="text-[10px] font-mono font-bold text-amber-400 uppercase tracking-widest">Governance</span>
+                <span className="ml-auto text-[9px] font-mono px-1.5 py-0.5 rounded border bg-amber-500/10 text-amber-400 border-amber-500/20">
+                  ALWAYS PRESENT
+                </span>
+              </div>
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-[9px] font-mono text-muted-foreground w-32">human_review_required</span>
+                  <span className="text-[10px] font-mono text-amber-400 font-bold">true</span>
+                </div>
+                {result.governance?.privilege_warning && (
+                  <div className="flex items-start gap-2">
+                    <span className="text-[9px] font-mono text-muted-foreground w-32 mt-0.5">privilege_warning</span>
+                    <span className="text-[10px] font-mono text-muted-foreground leading-relaxed">
+                      {result.governance.privilege_warning}
+                    </span>
+                  </div>
+                )}
+                {result.governance?.escalation_flag != null && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-[9px] font-mono text-muted-foreground w-32">escalation_flag</span>
+                    <span className={`text-[10px] font-mono ${result.governance.escalation_flag ? "text-red-400" : "text-zinc-400"}`}>
+                      {String(result.governance.escalation_flag)}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Trace + lineage */}
+            {(result.trace || result.lineage) && (
+              <div className="bg-background border border-border rounded p-3 space-y-1">
+                <div className="text-[9px] font-mono text-muted-foreground uppercase tracking-widest mb-1.5">Trace · Lineage</div>
+                {result.trace?.model_used && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-[9px] font-mono text-muted-foreground w-28">model_used</span>
+                    <span className="text-[10px] font-mono text-foreground">{result.trace.model_used}</span>
+                  </div>
+                )}
+                {result.trace?.latency_ms != null && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-[9px] font-mono text-muted-foreground w-28">latency_ms</span>
+                    <span className="text-[10px] font-mono text-foreground">{result.trace.latency_ms}</span>
+                  </div>
+                )}
+                {result.lineage?.dataset_version && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-[9px] font-mono text-muted-foreground w-28">dataset_version</span>
+                    <span className="text-[10px] font-mono text-foreground">{result.lineage.dataset_version}</span>
+                  </div>
+                )}
+                {result.lineage?.eval_run && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-[9px] font-mono text-muted-foreground w-28">eval_run</span>
+                    <span className="text-[10px] font-mono text-foreground">{result.lineage.eval_run}</span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <p className="text-[10px] font-mono text-muted-foreground">
+              This output requires human review before use in any legal workflow.
+            </p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function DeploymentsTab({ wid }: { wid: number }) {
   const { data: deployments, isLoading } = useListModelDeployments(wid);
+  const [openTryItId, setOpenTryItId] = useState<number | null>(null);
 
   return (
     <div className="space-y-4">
@@ -934,33 +1160,74 @@ function DeploymentsTab({ wid }: { wid: number }) {
           <p className="text-xs font-mono text-muted-foreground">No deployments yet.</p>
         </div>
       ) : (
-        <div className="bg-card border border-border rounded-lg overflow-hidden">
-          <table className="w-full text-xs font-mono">
-            <thead>
-              <tr className="border-b border-border bg-secondary/30">
-                <th className="text-left px-4 py-2 text-[10px] text-muted-foreground uppercase tracking-widest">Version ID</th>
-                <th className="text-left px-4 py-2 text-[10px] text-muted-foreground uppercase tracking-widest">Status</th>
-                <th className="text-left px-4 py-2 text-[10px] text-muted-foreground uppercase tracking-widest">Backend</th>
-                <th className="text-left px-4 py-2 text-[10px] text-muted-foreground uppercase tracking-widest">Deployed At</th>
-              </tr>
-            </thead>
-            <tbody>
-              {deployments.map((dep, idx) => (
-                <tr key={dep.id ?? idx} className="border-b border-border/50 last:border-0 hover:bg-secondary/20">
-                  <td className="px-4 py-2 text-foreground">{dep.version_id ?? "—"}</td>
-                  <td className="px-4 py-2">
-                    <Badge className={dep.status === "active" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "bg-zinc-500/10 text-zinc-400 border border-zinc-500/20"}>
-                      {dep.status?.toUpperCase() ?? "—"}
-                    </Badge>
-                  </td>
-                  <td className="px-4 py-2 text-muted-foreground">{dep.compute_backend ?? "—"}</td>
-                  <td className="px-4 py-2 text-muted-foreground">
-                    {dep.deployed_at ? new Date(dep.deployed_at).toLocaleString() : "—"}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="space-y-3">
+          {deployments.map((dep, idx) => {
+            const isActive = dep.status === "active";
+            const depId = dep.id ?? idx;
+            const isTryItOpen = openTryItId === depId;
+
+            return (
+              <div
+                key={depId}
+                className={`bg-card border rounded-lg p-4 transition-colors ${
+                  isActive ? "border-emerald-500/20" : "border-border"
+                }`}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div>
+                      <div className="flex items-center gap-2 mb-0.5">
+                        <Badge
+                          className={
+                            isActive
+                              ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                              : "bg-zinc-500/10 text-zinc-400 border border-zinc-500/20"
+                          }
+                        >
+                          {dep.status?.toUpperCase() ?? "—"}
+                        </Badge>
+                        <span className="text-xs font-mono text-foreground">
+                          Version {dep.version_id ?? "—"}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-3 text-[10px] font-mono text-muted-foreground">
+                        <span>backend: {dep.compute_backend ?? "—"}</span>
+                        {dep.deployed_at && (
+                          <span>deployed: {new Date(dep.deployed_at).toLocaleDateString()}</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {isActive ? (
+                    <button
+                      onClick={() => setOpenTryItId(isTryItOpen ? null : depId)}
+                      className={`shrink-0 font-mono text-xs px-3 py-1.5 rounded border transition-colors ${
+                        isTryItOpen
+                          ? "border-primary text-primary bg-primary/10"
+                          : "border-primary text-primary hover:bg-primary/10"
+                      }`}
+                    >
+                      {isTryItOpen ? "Close" : "Try it →"}
+                    </button>
+                  ) : (
+                    <span className="shrink-0 text-[10px] font-mono text-muted-foreground">
+                      Not active
+                    </span>
+                  )}
+                </div>
+
+                {/* Inline Try It panel */}
+                {isTryItOpen && isActive && (
+                  <DeploymentTryItPanel
+                    wid={wid}
+                    dep={dep}
+                    onClose={() => setOpenTryItId(null)}
+                  />
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

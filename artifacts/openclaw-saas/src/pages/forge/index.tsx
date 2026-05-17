@@ -7,19 +7,78 @@ import {
   getListForgeWorkspacesQueryKey,
 } from "@workspace/api-client-react";
 import { Layout, PageHeader } from "@/components/Layout";
+import { Link } from "wouter";
 import { useToast } from "@/hooks/use-toast";
-import { FlaskConical, Plus, X, Loader2 } from "lucide-react";
+import {
+  FlaskConical,
+  Plus,
+  X,
+  Loader2,
+  Database,
+  Cpu,
+  CheckCircle2,
+  Server,
+  Shield,
+  ArrowRight,
+  ChevronRight,
+} from "lucide-react";
+
+// ─── Pipeline visualization ───────────────────────────────────────────────────
+
+const PIPELINE_NODES = [
+  { icon: Database, label: "Dataset",    color: "text-blue-400",    border: "border-blue-500/20",    bg: "bg-blue-500/5" },
+  { icon: Cpu,      label: "Training",   color: "text-purple-400",  border: "border-purple-500/20",  bg: "bg-purple-500/5" },
+  { icon: CheckCircle2, label: "Eval",   color: "text-amber-400",   border: "border-amber-500/20",   bg: "bg-amber-500/5" },
+  { icon: FlaskConical, label: "Registry", color: "text-primary",   border: "border-primary/20",     bg: "bg-primary/5" },
+  { icon: Server,   label: "Deployment", color: "text-emerald-400", border: "border-emerald-500/20", bg: "bg-emerald-500/5" },
+];
+
+function PipelineViz({ workspaceCount }: { workspaceCount: number }) {
+  return (
+    <div className="bg-card border border-border rounded-lg p-5 mb-6">
+      <div className="flex items-center gap-2 mb-4">
+        <FlaskConical className="w-4 h-4 text-primary" />
+        <span className="text-xs font-mono font-bold text-foreground">The Model Forge</span>
+        <span className="ml-auto text-[10px] font-mono text-muted-foreground">
+          Dataset → Training → Eval → Registry → Deployment
+        </span>
+      </div>
+
+      <div className="flex items-center gap-0 overflow-x-auto pb-1">
+        {PIPELINE_NODES.map(({ icon: Icon, label, color, border, bg }, i) => (
+          <div key={label} className="flex items-center shrink-0">
+            <div className={`flex flex-col items-center gap-1.5 px-4 py-3 rounded-lg border ${border} ${bg} min-w-[90px]`}>
+              <Icon className={`w-4 h-4 ${color}`} />
+              <span className={`text-[10px] font-mono font-bold ${color}`}>{label}</span>
+              {i === 0 && workspaceCount > 0 && (
+                <span className="text-[9px] font-mono text-muted-foreground">{workspaceCount} ready</span>
+              )}
+            </div>
+            {i < PIPELINE_NODES.length - 1 && (
+              <ChevronRight className="w-4 h-4 text-muted-foreground mx-1 shrink-0" />
+            )}
+          </div>
+        ))}
+      </div>
+
+      <p className="text-[10px] font-mono text-muted-foreground mt-3">
+        Where your AI workforce is built. Each workspace runs the full pipeline — from raw data to governed live endpoint.
+      </p>
+    </div>
+  );
+}
+
+// ─── Status helpers ───────────────────────────────────────────────────────────
 
 function statusBadgeClass(status: string): string {
   switch (status) {
-    case "active":
-      return "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20";
-    case "archived":
-      return "bg-zinc-500/10 text-zinc-400 border border-zinc-500/20";
-    default:
-      return "bg-zinc-500/10 text-zinc-400 border border-zinc-500/20";
+    case "active":   return "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20";
+    case "archived": return "bg-zinc-500/10 text-zinc-400 border border-zinc-500/20";
+    default:         return "bg-zinc-500/10 text-zinc-400 border border-zinc-500/20";
   }
 }
+
+// ─── Main ─────────────────────────────────────────────────────────────────────
 
 export default function ForgePage() {
   const [, navigate] = useLocation();
@@ -50,14 +109,11 @@ export default function ForgePage() {
       .then((data: { workspace_id: number; provisioned: boolean }) => {
         setProvisioning(false);
         if (data.provisioned) {
-          // Fresh user — redirect to the seeded workspace's registry tab
           queryClient.invalidateQueries({ queryKey: getListForgeWorkspacesQueryKey() });
           navigate(`/forge/${data.workspace_id}/registry`);
         }
-        // Existing user — stay on Forge list, workspaces will load normally
       })
       .catch(() => {
-        // Provision failed (e.g. not signed in) — stay on page, show normal list
         setProvisioning(false);
       });
   }, [navigate, queryClient]);
@@ -89,13 +145,12 @@ export default function ForgePage() {
     });
   };
 
-  // Show a brief loading state while provisioning on first visit
   if (provisioning) {
     return (
       <Layout>
         <PageHeader
-          title="Model Forge"
-          subtitle="Fine-tune and deploy domain-specific models"
+          title="The Model Forge"
+          subtitle="Where your AI workforce is built"
         />
         <div className="flex flex-col items-center justify-center py-32 text-center">
           <Loader2 className="w-8 h-8 text-primary animate-spin mb-4" />
@@ -108,8 +163,8 @@ export default function ForgePage() {
   return (
     <Layout>
       <PageHeader
-        title="Model Forge"
-        subtitle="Fine-tune and deploy domain-specific models"
+        title="The Model Forge"
+        subtitle="Where your AI workforce is built. Dataset → Training → Eval → Registry → Deployment."
         action={
           <button
             onClick={() => setShowForm((v) => !v)}
@@ -122,6 +177,9 @@ export default function ForgePage() {
       />
 
       <div className="p-6 space-y-6">
+        {/* Pipeline visualization */}
+        <PipelineViz workspaceCount={workspaces?.length ?? 0} />
+
         {/* Inline create form */}
         {showForm && (
           <div className="bg-card border border-border rounded-lg p-4 space-y-3">
@@ -200,17 +258,19 @@ export default function ForgePage() {
             <div className="w-12 h-12 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center mb-4">
               <FlaskConical className="w-6 h-6 text-primary" />
             </div>
-            <h3 className="text-sm font-mono font-bold text-foreground mb-1">No workspaces yet</h3>
+            <h3 className="text-sm font-mono font-bold text-foreground mb-1">
+              You haven't built a vertical yet.
+            </h3>
             <p className="text-xs font-mono text-muted-foreground max-w-xs mb-4">
-              Create your first model workspace to get started.
+              The factory provisions your workspace, skill bundle, data layer, and governance policy.
             </p>
-            <button
-              onClick={() => setShowForm(true)}
-              className="bg-primary text-primary-foreground hover:bg-primary/90 font-mono text-xs px-3 py-1.5 rounded flex items-center gap-1.5"
+            <Link
+              href="/onboarding"
+              className="flex items-center gap-2 bg-primary text-primary-foreground hover:bg-primary/90 font-mono text-xs px-4 py-2 rounded transition-colors"
+              data-testid="link-launch-vertical"
             >
-              <Plus className="w-3.5 h-3.5" />
-              New Workspace
-            </button>
+              Launch your first vertical <ArrowRight className="w-3.5 h-3.5" />
+            </Link>
           </div>
         ) : (
           <div className="space-y-3">

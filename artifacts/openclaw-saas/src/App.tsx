@@ -16,6 +16,8 @@ import BillingPage from "@/pages/billing";
 import ZoaPage from "@/pages/zoa";
 import ForgePage from "@/pages/forge/index";
 import ForgeWorkspacePage from "@/pages/forge/workspace";
+import VerticalPickerPage from "@/pages/onboarding/vertical-picker";
+import SetupPage from "@/pages/onboarding/setup";
 
 const queryClient = new QueryClient();
 
@@ -85,7 +87,12 @@ const clerkAppearance = {
 function SignInPage() {
   return (
     <div className="flex min-h-[100dvh] items-center justify-center bg-background px-4">
-      <SignIn routing="path" path={`${basePath}/sign-in`} signUpUrl={`${basePath}/sign-up`} />
+      <SignIn
+        routing="path"
+        path={`${basePath}/sign-in`}
+        signUpUrl={`${basePath}/sign-up`}
+        fallbackRedirectUrl={`${basePath}/dashboard`}
+      />
     </div>
   );
 }
@@ -93,7 +100,12 @@ function SignInPage() {
 function SignUpPage() {
   return (
     <div className="flex min-h-[100dvh] items-center justify-center bg-background px-4">
-      <SignUp routing="path" path={`${basePath}/sign-up`} signInUrl={`${basePath}/sign-in`} />
+      <SignUp
+        routing="path"
+        path={`${basePath}/sign-up`}
+        signInUrl={`${basePath}/sign-in`}
+        fallbackRedirectUrl={`${basePath}/onboarding`}
+      />
     </div>
   );
 }
@@ -187,6 +199,9 @@ function ClerkProviderWithRoutes() {
           <Route path="/zoa"><ProtectedRoute component={ZoaPage} /></Route>
           <Route path="/forge"><ProtectedRoute component={ForgePage} /></Route>
           <Route path="/forge/:wid/:tab?"><ProtectedRoute component={ForgeWorkspacePage} /></Route>
+          {/* Onboarding — new user green path */}
+          <Route path="/onboarding"><ProtectedRoute component={VerticalPickerPage} /></Route>
+          <Route path="/onboarding/setup"><ProtectedRoute component={SetupPage} /></Route>
           <Route component={NotFound} />
         </Switch>
       </QueryClientProvider>
