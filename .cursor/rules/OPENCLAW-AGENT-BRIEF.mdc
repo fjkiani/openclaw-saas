@@ -1,0 +1,253 @@
+---
+description: AGENT SELF-BRIEF — Read this before every session. This is what OpenClaw is, what it does, and how to work on it correctly.
+globs: ["**"]
+alwaysApply: true
+---
+
+# OpenClaw — Agent Self-Brief
+
+> This document is written for the AI assistant working on this codebase.
+> Read it completely before writing a single line of code.
+> It supersedes any prior assumptions about what this product is.
+
+---
+
+## What I Am Working On
+
+I am building **OpenClaw** — a factory framework that lets organizations spin up their own AI workforces.
+
+OpenClaw is not a legal tool. It is not an API product. It is not a chatbot.
+
+OpenClaw is the **factory**. Organizations are the **customers**. Their AI workforce is the **product**.
+
+The law firm vertical currently live in this codebase is the first proof-of-concept to validate that the factory pattern works. It is one example of what the factory produces. It is not the factory itself.
+
+---
+
+## The Core Mental Model
+
+```
+OPENCLAW FACTORY
+│
+├── Any organization signs up
+├── They describe their domain (legal, IR, HR, biotech, finance...)
+├── The factory provisions:
+│   ├── A Model Forge workspace (training pipeline)
+│   ├── A skill bundle (domain-specific capabilities)
+│   ├── A knowledge graph (their data, grounded)
+│   ├── A governance layer (human-in-loop, audit trail)
+│   └── A deployed AI workforce (live endpoints, callable agents)
+│
+└── The organization now has an AI workforce
+    They did not build it. The factory built it for them.
+```
+
+A law firm gets legal clause extractors, intake routers, and specialist agents.
+A VC fund gets investor research, outreach drafting, and diligence answering.
+A biotech gets protocol generation, literature review, and compliance checking.
+
+Same infrastructure. Different skill bundles. That is the entire business.
+
+---
+
+## What Is Actually Built (Current State)
+
+### Live Services (Render.com)
+
+| Service | What it does |
+|---|---|
+| `openclaw-api` (Express 5, Node.js) | Control plane API — auth, tenants, forge, skills, connectors, knowledge graphs, legal endpoints |
+| `openclaw-saas` (React + Vite, Static) | Frontend — dashboard, forge workspace, agent management, skill catalog |
+| `openclaw-benchmark` (FastAPI, Python) | ZOA multi-LLM router + Kairos execution engine + L1-L4 benchmark harness |
+| `archon-factory` (Node.js) | Skill generation pipeline — prompt → generate → validate → benchmark → catalog |
+| `openclaw-db` (PostgreSQL) | 28-table schema covering tenants, skills, forge, governance, connectors, graphs |
+
+### Capabilities Delivered
+
+**1. Multi-Tenant Control Plane**
+- Clerk auth (sign-in, sign-up, session management)
+- Per-user tenant auto-provisioning on first workspace create
+- Per-tenant Docker Gateway on Render (isolated, `OPENCLAW_CONFIG_DIR=/tenants/{id}`)
+- Render webhook handler for async status sync (deploy_ended, service_suspended, service_deleted)
+- Billing tiers: Free ($0, 1 agent), Pro ($29/mo, 5 agents), Enterprise (custom)
+
+**2. Model Forge (Training Pipeline)**
+- Workspaces scoped to a domain (legal, IR, HR, etc.)
+- Dataset management: upload, version, document tracking
+- Training jobs: `draft → queued → running → completed → deployed`
+- Three training modes: `prompt_tuning`, `rag_adaptation`, `fine_tuning`
+- Governance policy per tenant: model allowlist, concurrency cap, spend limit, approval gate
+- Human approval gate: only tenant owner can approve model versions before deployment
+- Kairos dispatch: training jobs sent to Kairos execution engine via structured goal string
+- SSE stream: frontend connects to live Kairos run events
+- Job monitor: polls Kairos every 30s, updates job status, flags `reforge_suggested`
+- Model registry: versioned model artifacts with `candidate → approved` lifecycle
+- Deployment endpoints: callable paths per active deployment
+
+**3. Governance Layer**
+- Every AI output carries a governance envelope (always — not conditional)
+- Fields: `human_review_required` (always true), `privilege_warning`, `not_legal_advice`, `escalation_flag`, `jurisdiction_scope`
+- Trace block: `retrieval_used`, `fallback_used`, `model_used`, `latency_ms`, `usage_event_id`
+- Lineage block: `asset_version`, `dataset_version`, `eval_run`, `model_eval_accuracy`
+- Escalation flag triggers when confidence < 0.70 (strengthens warning, does not create it)
+- Model approval gate enforced before any deployment
+- Audit trail via `model_usage_events` table
+
+**4. ZOA Multi-LLM Router (100% Free Tier)**
+- MANAGER: `meta-llama/llama-3.3-70b-instruct:free` — JSON routing
+- WORKER Research: `qwen/qwen3-next-80b-a3b-instruct:free` — 262K context, RAG
+- WORKER Reasoning: `nousresearch/hermes-3-llama-3.1-405b:free` — 405B frontier, function calling
+- WORKER Vision: `google/gemma-3-27b-it:free` — multimodal, charts, PDFs
+- WORKER Write: `cognitivecomputations/dolphin-mistral-24b-venice-edition:free` — uncensored
+- PLUMBER Short: `liquid/lfm-2.5-1.2b-instruct:free` — format/merge, pure throughput
+- PLUMBER Long: `meta-llama/llama-3.2-3b-instruct:free` — 131K context, long merges
+- Rate limit fallback chains per worker type
+- All calls: `provider: { sort: 'throughput', allow_fallbacks: true }`
+
+**5. Archon Skill Factory (Zeta Skill Forge)**
+- Generates TypeScript skills from plain-English prompts
+- Pipeline: `prompt → Qwen3 Coder 480B → tsc validate → fix loop (max 2) → L1-L4 benchmark → catalog`
+- L0: TypeScript syntax + export verification
+- L1-L4: Benchmark harness via OpenRouter
+- Grades: CERTIFIED (catalog), CONDITIONAL (catalog with warning), FAILED (blocked), INCONCLUSIVE (allowed with warning)
+- Trigger: `POST /archon/generate { "description": "..." }`
+- Self-healing: if L0 fails, calls `/internal/fix` and re-validates (max 2 retries)
+
+**6. Skill Ecosystem**
+- 791+ real skills loaded from GitHub `awesome-openclaw-skills`
+- 30 categories, 24hr in-process TTL cache
+- Manual refresh: `POST /api/skills/refresh`
+- Skill contract: every skill declares `requiredConnectors` and `requiredGraphs`
+- Benchmark gate on install: CERTIFIED or CONDITIONAL required
+- Tenant-installed skills tracked in `tenant_skills` (many-to-many)
+
+**7. Connector Registry**
+- AES-256-GCM encrypted credential storage (PBKDF2-derived key, 100k iterations)
+- Raw credentials never returned in any API response
+- Current adapters: Crunchbase (mock/real), Gmail (Phase 2), LinkedIn (Phase 3)
+- Each skill declares which connectors it needs — platform checks authorization on install
+
+**8. Knowledge Graph Manager**
+- Per-tenant graphs with document ingestion (PDF, TXT)
+- Text chunking: ~512 chars with 50-char overlap
+- PostgreSQL `tsvector` full-text search with GIN index
+- `ts_rank` ordering on search queries
+- Bind graphs to skills — skills query their required graphs at runtime
+
+**9. Legal AI Operating Layer (Proof-of-Concept Vertical)**
+- 8 live endpoints: extract-clause, intake, contract, litigation, ip, employment, corporate, next-asset-baseline
+- Model chain with fallback: gpt-oss-20b → gpt-oss-120b → lfm-1.2b (with RAG)
+- CUAD Legal Clause Dataset v2: 50 examples, 5 clause types, CC BY 4.0
+- Eval results: gpt-oss-20b 100% accuracy / 1.000 macro-F1; lfm-1.2b+RAG 100% on test set
+- Held-out eval: 92.5% accuracy (n=40, promising, NOT production-ready)
+- Playbook v1: 9/10 pass; v2: 6/10 pass, correctness=0.75
+- Known gaps: S4 (intake calibration), S6 (employment escalation), S10 (privilege detection)
+
+**10. Frontend (React + Vite)**
+- Dark terminal aesthetic: `bg-[#0a0a0f]`, `font-mono`, cyan accent
+- Light mode: `.light` class, WCAG AA compliant (muted-foreground at 28% lightness)
+- Dark/light toggle with `localStorage` persistence and `aria-label`
+- 9-tab Forge workspace: Overview, Datasets, Training, Registry, Deployments, Policies, Explorer, Showcase, Journey
+- 5-tab Agent detail: Overview, Skills, Chat, Connectors, Knowledge
+- Onboarding checklist (5 steps) with progress tracking
+- Dataset Explorer: field schemas, type icons, search, drill-down
+- SaaS Showcase: Law Firm LIVE + 3 coming-soon verticals
+- Training tab: eval stages, playbook scenarios, gap fix cards
+
+---
+
+## Database (28 Tables)
+
+**Core**: `tenants`, `activity_entries`, `chat_messages`
+
+**Skills**: `skills`, `tenant_skills`, `skill_versions`, `skill_benchmarks`
+
+**Connectors**: `connectors`, `tenant_connectors`
+
+**Knowledge Graphs**: `knowledge_graphs`, `graph_documents`, `graph_chunks`
+
+**Model Forge**: `model_workspaces`, `model_datasets`, `dataset_versions`, `dataset_documents`, `training_jobs`, `training_job_artifacts`, `evaluation_runs`, `evaluation_metrics`, `model_registrations`, `model_versions`, `model_deployments`, `deployment_endpoints`, `model_usage_events`, `model_policies`, `model_approvals`
+
+**Key conventions**:
+- Every row scoped by `tenant_id` — never query without it
+- JSONB columns (`hyperparams`, `metadata`) — always `JSON.stringify()` on insert
+- Status columns are text, not PostgreSQL enums
+- Tenant ID: `tenant-${userId.replace(/[^a-z0-9]/gi, '-').toLowerCase().slice(0, 32)}`
+
+---
+
+## Auth (Critical — Do Not Break)
+
+- Frontend: Clerk `@clerk/react` — `<ClerkProvider>` wraps the app
+- API: Clerk `@clerk/express` — every route checks `getAuth(req).userId`
+- Cross-origin: `customFetch` in `lib/api-client-react/src/custom-fetch.ts` sends `credentials: 'include'`
+- **Never remove `credentials: 'include'` from customFetch. This is what sends the Clerk session cookie cross-origin. Removing it breaks every API call with 401.**
+- CORS: `cors({ credentials: true, origin: true })` on API server
+
+---
+
+## What Is Not Done Yet (Build Sequence)
+
+### Immediate (Phase 1 completion)
+- [ ] Forge workspace creation bug — diagnose why `POST /forge/workspaces` still fails for some users after auth fix
+- [ ] Wire `model_usage_events` DB inserts in legal endpoints (generated but not persisted)
+- [ ] Fix S4 intake calibration: add uncertainty instruction to intake prompt
+- [ ] Fix S6 employment escalation: post-process CA non-compete patterns
+- [ ] Fix S10 privilege detection: pre-process privilege keywords before inference
+- [ ] Fix S7 governance wrapper: wrap 400 error responses in governance envelope
+
+### Phase 2 — Playbook engine
+- [ ] Chain skills in sequence with state passing between steps
+- [ ] Conditional branching (compliance flag → route to human review)
+- [ ] Run history + output store per playbook execution
+
+### Phase 3 — Tenant self-serve
+- [ ] Skill marketplace UI (install, configure, bind to graphs)
+- [ ] Connector OAuth flow (one-click per connector)
+- [ ] Playbook builder (visual or JSON)
+
+### Phase 4 — Second vertical
+- [ ] IR bundle: ir-research, ir-outreach, ir-pitch skills
+- [ ] Crunchbase + Gmail connectors (real OAuth)
+- [ ] Investor profiles + data room knowledge graphs
+
+---
+
+## How to Work on This Codebase
+
+### Before writing any code
+1. Read this file
+2. Read the relevant individual MDC in `.cursor/rules/`
+3. Check the DB schema before touching any SQL
+4. Run `pnpm run typecheck` before committing — must pass
+
+### When adding a route
+1. Add operation to `lib/api-spec/openapi.yaml`
+2. Run `pnpm --filter @workspace/api-spec run codegen`
+3. Create/extend route file in `artifacts/api-server/src/routes/`
+4. Mount in `artifacts/api-server/src/routes/index.ts`
+5. Run `pnpm run typecheck`
+
+### When adding a frontend page
+1. Create in `artifacts/openclaw-saas/src/pages/`
+2. Add `<Route>` in `App.tsx`
+3. Add nav link in `Layout.tsx`
+4. Use generated hooks from `@workspace/api-client-react`
+
+### When writing copy
+- Never: "demo", "legal API", "law firm tool", "API endpoints"
+- Always: "live", "AI workforce", "factory framework", "deployed AI workforce"
+- The platform is the factory. The organization's AI workforce is the product.
+
+### When writing governance outputs
+- `human_review_required` is ALWAYS `true` — never conditional
+- Always include `trace` block with `usage_event_id`
+- Always include `lineage` block with dataset + eval run reference
+- Escalation flag strengthens the warning — it does not create it
+
+### Git
+- Correct repo: `fjkiani/openclaw-saas`
+- Remote: `https://github.com/fjkiani/openclaw-saas.git`
+- Auth: use PAT from user memory
+- Always push to `main`
+- Never push to `fjkiani/crispro-backend-v3` (wrong repo — already reverted once)
