@@ -79,8 +79,15 @@ const INTAKE_MODEL_CHAIN = [
 ] as const;
 
 const SPECIALIST_MODEL_CHAIN = [
-  { id: "meta-llama/llama-3.3-70b-instruct:free", eval_accuracy: 1.0, eval_macro_f1: 1.0, eval_latency_s: 5.0, use_rag: false },
-  { id: "openai/gpt-oss-120b:free",               eval_accuracy: 1.0, eval_macro_f1: 1.0, eval_latency_s: 3.45, use_rag: false },
+  // Primary: Llama 3.3 70B — best free model for structured JSON extraction
+  { id: "meta-llama/llama-3.3-70b-instruct:free", eval_accuracy: 1.0, eval_macro_f1: 1.0, eval_latency_s: 5.0,  use_rag: false },
+  // Fallback 1: Gemma 4 31B — Google provider, separate rate limit pool from Meta/OpenAI
+  { id: "google/gemma-4-31b-it:free",             eval_accuracy: 0.9, eval_macro_f1: 0.9, eval_latency_s: 4.0,  use_rag: false },
+  // Fallback 2: DeepSeek V4 Flash — different provider, 1M context, good instruction following
+  { id: "deepseek/deepseek-v4-flash:free",        eval_accuracy: 0.85, eval_macro_f1: 0.85, eval_latency_s: 3.0, use_rag: false },
+  // Fallback 3: gpt-oss-120b — same provider as primary but larger model
+  { id: "openai/gpt-oss-120b:free",               eval_accuracy: 0.8, eval_macro_f1: 0.8, eval_latency_s: 3.45, use_rag: false },
+  // Last resort: gpt-oss-20b — original primary, known to fail ~30% on complex schemas
   { id: "openai/gpt-oss-20b:free",                eval_accuracy: 0.7, eval_macro_f1: 0.7, eval_latency_s: 3.44, use_rag: false },
 ] as const;
 
