@@ -102,9 +102,11 @@ export default function ForgePage() {
 
     setProvisioning(true);
     fetch("/api/onboarding/provision", { method: "POST", credentials: "include" })
-      .then((r) => {
+      .then(async (r) => {
         if (!r.ok) throw new Error(`${r.status}`);
-        return r.json();
+        const raw = await r.text();
+        if (!raw || !raw.trim()) throw new Error("Service is warming up — please try again in a few seconds.");
+        try { return JSON.parse(raw); } catch { throw new Error("Invalid response from server. Please retry."); }
       })
       .then((data: { workspace_id: number; provisioned: boolean }) => {
         setProvisioning(false);

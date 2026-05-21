@@ -90,9 +90,11 @@ export default function VerticalPickerPage() {
     setError(null);
 
     fetch("/api/onboarding/provision", { method: "POST", credentials: "include" })
-      .then((r) => {
+      .then(async (r) => {
         if (!r.ok) throw new Error(`Provision failed: ${r.status}`);
-        return r.json() as Promise<{ workspace_id: number; provisioned: boolean }>;
+        const raw = await r.text();
+        if (!raw || !raw.trim()) throw new Error("Service is warming up — please try again in a few seconds.");
+        try { return JSON.parse(raw) as { workspace_id: number; provisioned: boolean }; } catch { throw new Error("Invalid response from server. Please retry."); }
       })
       .then((data) => {
         // Store workspace_id in sessionStorage so setup page can read it
@@ -121,9 +123,11 @@ export default function VerticalPickerPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: customDomain.trim(), domain: "custom", description: "" }),
     })
-      .then((r) => {
+      .then(async (r) => {
         if (!r.ok) throw new Error(`${r.status}`);
-        return r.json() as Promise<{ id: number }>;
+        const raw = await r.text();
+        if (!raw || !raw.trim()) throw new Error("Service is warming up — please try again in a few seconds.");
+        try { return JSON.parse(raw) as { id: number }; } catch { throw new Error("Invalid response from server. Please retry."); }
       })
       .then((ws) => {
         sessionStorage.setItem("oc_onboarding_wid", String(ws.id));

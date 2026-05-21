@@ -278,9 +278,11 @@ function StepTraining({ workspaceId, onNext }: { workspaceId: number | null; onN
 
     // Fetch registry to get registration + version IDs
     fetch(`/api/forge/workspaces/${workspaceId}/registry`, { credentials: "include" })
-      .then((r) => {
+      .then(async (r) => {
         if (!r.ok) throw new Error(`Registry fetch failed: ${r.status}`);
-        return r.json() as Promise<Array<{ registration: { id: number }; versions: Array<{ id: number; status: string }> }>>;
+        const raw = await r.text();
+        if (!raw || !raw.trim()) throw new Error("Registry unavailable — please try again.");
+        try { return JSON.parse(raw) as Array<{ registration: { id: number }; versions: Array<{ id: number; status: string }> }>; } catch { throw new Error("Invalid registry response."); }
       })
       .then((registry) => {
         const reg = registry[0];
@@ -456,9 +458,11 @@ function StepTry({ workspaceId, onFinish }: { workspaceId: number | null; onFini
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text: input.trim(), use_rag: true }),
     })
-      .then((r) => {
+      .then(async (r) => {
         if (!r.ok) throw new Error(`Endpoint returned ${r.status}`);
-        return r.json() as Promise<EndpointResult>;
+        const raw = await r.text();
+        if (!raw || !raw.trim()) throw new Error("Service is warming up — please try again in a few seconds.");
+        try { return JSON.parse(raw) as EndpointResult; } catch { throw new Error("Service returned an invalid response. Please retry."); }
       })
       .then((data) => {
         setResult(data);

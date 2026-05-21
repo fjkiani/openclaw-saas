@@ -48,7 +48,9 @@ export default function SkillsPage() {
       // Trigger async benchmark run
       const runRes = await fetch(`/api/skills/${skill.id}/benchmark?suite=standard`, { method: "POST" });
       if (!runRes.ok) throw new Error("Failed to start benchmark");
-      const { benchmark_id } = await runRes.json();
+      const rawRun = await runRes.text();
+      if (!rawRun || !rawRun.trim()) throw new Error("Benchmark service unavailable — please retry.");
+      const { benchmark_id } = JSON.parse(rawRun);
 
       // Poll for result (max 90s)
       let attempts = 0;
@@ -64,7 +66,9 @@ export default function SkillsPage() {
         try {
           const res = await fetch(`/api/benchmark/${benchmark_id}`);
           if (res.ok) {
-            const result = await res.json();
+            const rawResult = await res.text();
+            if (!rawResult || !rawResult.trim()) return; // still warming, retry on next poll
+            const result = JSON.parse(rawResult);
             if (result.status === "completed" || result.status === "failed") {
               setBenchmarkResults(prev => ({ ...prev, [skill.id]: result }));
               setRunningBenchmarks(prev => { const s = new Set(prev); s.delete(skill.id); return s; });
