@@ -695,7 +695,15 @@ function UseModelPanel({
         const err = await resp.json().catch(() => ({ error: resp.statusText }));
         throw new Error(err.error ?? resp.statusText);
       }
-      const data: InvokeResult = await resp.json();
+      // Guard against empty body (Render cold-start)
+      const rawText = await resp.text();
+      if (!rawText || !rawText.trim()) {
+        throw new Error("Service is warming up — please try again in a few seconds.");
+      }
+      let data: InvokeResult;
+      try { data = JSON.parse(rawText); } catch {
+        throw new Error("Service returned an invalid response. It may still be warming up — please retry.");
+      }
       setResult(data);
     } catch (e: any) {
       setInvokeError(e.message);
@@ -979,8 +987,16 @@ function DeploymentTryItPanel({
         const err = await resp.json().catch(() => ({ error: resp.statusText }));
         throw new Error((err as { error?: string }).error ?? resp.statusText);
       }
-      const data = await resp.json();
-      setResult(data as TryItResult);
+      // Guard against empty body (Render cold-start returns 200 with empty body on first wake)
+      const text = await resp.text();
+      if (!text || !text.trim()) {
+        throw new Error("Service is warming up — please try again in a few seconds.");
+      }
+      let data: TryItResult;
+      try { data = JSON.parse(text); } catch {
+        throw new Error("Service returned an invalid response. It may still be warming up — please retry.");
+      }
+      setResult(data);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Request failed";
       setError(msg);

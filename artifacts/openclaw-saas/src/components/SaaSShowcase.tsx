@@ -215,8 +215,9 @@ export function SaaSShowcaseTab() {
           <span className="text-xs font-mono font-bold text-foreground">API Access</span>
         </div>
         <p className="text-[10px] font-mono text-muted-foreground">All endpoints are live at <span className="text-primary font-mono">https://openclaw-api-k30t.onrender.com</span>. Authentication via Clerk JWT. Rate limits apply.</p>
+        <p className="text-[10px] font-mono text-amber-400/80">Free tier: service may take 20–30s to respond after inactivity. First request warms the instance.</p>
         <div className="flex flex-wrap gap-1.5 pt-1">
-          {["/v1/legal/intake","/v1/legal/extract-clause","/v1/legal/contract/analyze","/v1/legal/litigation/analyze","/v1/legal/ip/analyze","/v1/legal/employment/analyze","/v1/legal/corporate/analyze"].map((ep) => (
+          {["/v1/legal/matter","/v1/legal/intake","/v1/legal/extract-clause","/v1/legal/contract/analyze","/v1/legal/litigation/analyze","/v1/legal/ip/analyze","/v1/legal/employment/analyze","/v1/legal/corporate/analyze"].map((ep) => (
             <span key={ep} className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-secondary border border-border text-muted-foreground">{ep}</span>
           ))}
         </div>
