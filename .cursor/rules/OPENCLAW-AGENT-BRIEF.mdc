@@ -134,14 +134,15 @@ Same infrastructure. Different skill bundles. That is the entire business.
 - `ts_rank` ordering on search queries
 - Bind graphs to skills — skills query their required graphs at runtime
 
-**9. Legal AI Operating Layer (Proof-of-Concept Vertical)**
-- 8 live endpoints: extract-clause, intake, contract, litigation, ip, employment, corporate, next-asset-baseline
-- Model chain with fallback: gpt-oss-20b → gpt-oss-120b → lfm-1.2b (with RAG)
-- CUAD Legal Clause Dataset v2: 50 examples, 5 clause types, CC BY 4.0
-- Eval results: gpt-oss-20b 100% accuracy / 1.000 macro-F1; lfm-1.2b+RAG 100% on test set
-- Held-out eval: 92.5% accuracy (n=40, promising, NOT production-ready)
-- Playbook v1: 9/10 pass; v2: 6/10 pass, correctness=0.75
-- Known gaps: S4 (intake calibration), S6 (employment escalation), S10 (privilege detection)
+**9. Legal AI Operating Layer (Proof-of-Concept Vertical) — Pass 1 CLOSED**
+- **Pass 1 complete.** All 5 receipts captured. Gate to Pass 2 open. HEAD: `0c51854`
+- Primary endpoint: `POST /api/v1/legal/matter` — full governed pipeline (intake → specialist → governance → trace → lineage)
+- 9 live endpoints total: matter, playbook/run, extract-clause, intake, contract, litigation, ip, employment, corporate
+- Model chain: Groq llama-3.3-70b (primary) → OR key1 llama-3.3-70b → OR key2 llama-3.3-70b → OR key1 gpt-120b → OR key2 gpt-20b
+- Required env vars: `GROQ_API_KEY`, `OPENROUTER_API_KEY`, `OPENROUTER_API_KEY_2`
+- Playbook: 9/10 pass, routing=1.00, content_quality=0.80, governance=1.00, error_handling=1.00
+- Governance engine: privilege redaction, CA non-compete §16600, confidence threshold, generic-action detection
+- Pass 2 in progress: co-founder agreement specialist + RAG corpus + live Matter UI tab (see `10-cofounder-specialist.mdc`)
 
 **10. Frontend (React + Vite)**
 - Dark terminal aesthetic: `bg-[#0a0a0f]`, `font-mono`, cyan accent
@@ -186,30 +187,37 @@ Same infrastructure. Different skill bundles. That is the entire business.
 
 ---
 
-## What Is Not Done Yet (Build Sequence)
+## Build Sequence
 
-### Immediate (Phase 1 completion)
-- [ ] Forge workspace creation bug — diagnose why `POST /forge/workspaces` still fails for some users after auth fix
-- [ ] Wire `model_usage_events` DB inserts in legal endpoints (generated but not persisted)
-- [ ] Fix S4 intake calibration: add uncertainty instruction to intake prompt
-- [ ] Fix S6 employment escalation: post-process CA non-compete patterns
-- [ ] Fix S10 privilege detection: pre-process privilege keywords before inference
-- [ ] Fix S7 governance wrapper: wrap 400 error responses in governance envelope
+### Pass 1 — Legal Workforce Engine (CLOSED — 2026-05-17)
+- [x] `lib/governanceEngine.ts` — privilege redaction, CA non-compete §16600, impact tiering
+- [x] `lib/legalPlaybook.ts` — 10 scenarios, content quality assertions, 9/10 pass
+- [x] `routes/legal.ts` — `/matter` endpoint, 5 specialists, model chain, usage events
+- [x] Provider-aware model chain — Groq primary + dual OpenRouter key rotation
+- [x] Receipts 1–5 captured. Gate to Pass 2 open.
 
-### Phase 2 — Playbook engine
-- [ ] Chain skills in sequence with state passing between steps
-- [ ] Conditional branching (compliance flag → route to human review)
-- [ ] Run history + output store per playbook execution
+### Pass 2 — Co-Founder Specialist + Live UI (CURRENT)
+- [ ] `lib/cofounderCorpus.ts` — RAG corpus, 10 clause types (83(b), RUO, equity, IP, vesting, indemnity, deliverables, entity, RSPA, mutual)
+- [ ] `cofounderAnalyze()` in `routes/legal.ts` — analyze + draft output, new matter type
+- [ ] 5 co-founder governance rules in `governanceEngine.ts`
+- [ ] `components/MatterTab.tsx` — live matter UI, two-panel layout
+- [ ] "matter" tab in `workspace.tsx`
+- [ ] Receipts 6, 7, 8
+- See `10-cofounder-specialist.mdc` for full spec
 
-### Phase 3 — Tenant self-serve
-- [ ] Skill marketplace UI (install, configure, bind to graphs)
-- [ ] Connector OAuth flow (one-click per connector)
-- [ ] Playbook builder (visual or JSON)
+### Pass 2B — Domain Descriptor + Factory Recipe (NOT STARTED — gated on Pass 2)
+- [ ] `lib/domainDescriptor.ts` — DomainDescriptor schema + fully-populated legal descriptor
+- [ ] `lib/domainSpinup.ts` — provisioning function + SpinupReceipt
+- [ ] `routes/domain.ts` — `/domain/spinup`, `/domain/:id/reindex`, `/domain/:id/generate-dataset`
 
-### Phase 4 — Second vertical
-- [ ] IR bundle: ir-research, ir-outreach, ir-pitch skills
-- [ ] Crunchbase + Gmail connectors (real OAuth)
-- [ ] Investor profiles + data room knowledge graphs
+### Pass 3 — HR Portability (NOT STARTED — gated on Pass 2B)
+- [ ] HR domain descriptor + `routes/hr.ts`
+- [ ] Same `governanceEngine.ts` and `domainSpinup.ts` — no copy-paste
+
+### Deferred (explicitly deprioritized)
+- [ ] Forge workspace creation bug
+- [ ] Skill marketplace UI, connector OAuth, playbook builder
+- [ ] IR bundle (second vertical after HR)
 
 ---
 
@@ -247,7 +255,9 @@ Same infrastructure. Different skill bundles. That is the entire business.
 
 ### Git
 - Correct repo: `fjkiani/openclaw-saas`
+- Correct workspace: `/workspace/oc-correct` (NOT `/workspace/openclaw-saas` — that points to crispro-backend-v3)
 - Remote: `https://github.com/fjkiani/openclaw-saas.git`
 - Auth: use PAT from user memory
 - Always push to `main`
 - Never push to `fjkiani/crispro-backend-v3` (wrong repo — already reverted once)
+- HEAD: `0c51854` — provider-aware model chain
