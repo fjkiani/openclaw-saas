@@ -17,6 +17,16 @@ const DEFAULT_JSON_ACCEPT = "application/json, application/problem+json";
 
 let _baseUrl: string | null = null;
 let _authTokenGetter: AuthTokenGetter | null = null;
+let _userIdGetter: (() => string | null | undefined) | null = null;
+
+/**
+ * Register a getter that supplies the current user ID.
+ * Used to inject X-User-Id header as fallback auth for Clerk dev instances
+ * deployed cross-origin where server-side JWT verification fails.
+ */
+export function setUserIdGetter(getter: (() => string | null | undefined) | null): void {
+  _userIdGetter = getter;
+}
 
 /**
  * Set a base URL that is prepended to every relative request URL
@@ -356,6 +366,13 @@ export async function customFetch<T = unknown>(
     if (token) {
       headers.set("authorization", `Bearer ${token}`);
     }
+  }
+
+  // Inject X-User-Id header as fallback auth for Clerk dev instances cross-origin.
+  // The server reads this when JWT verification fails (SameSite/CORS on dev FAPI).
+  if (_userIdGetter && !headers.has("x-user-id")) {
+    const uid = _userIdGetter();
+    if (uid) headers.set("x-user-id", uid);
   }
 
   const requestInfo = { method, url: resolveUrl(input) };

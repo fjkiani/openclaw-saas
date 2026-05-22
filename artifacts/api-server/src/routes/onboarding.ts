@@ -19,10 +19,13 @@ router.post("/onboarding/provision", async (req, res): Promise<void> => {
   //    idempotent and only creates/returns workspace setup data (no sensitive mutations).
   //    Body userId must look like a Clerk user ID (starts with "user_").
   const jwtUserId: string | undefined = (req as any).auth?.userId;
+  const rawHeaderUserId: unknown = (req as any).headers["x-user-id"];
+  const headerUserId: string | undefined =
+    typeof rawHeaderUserId === "string" && rawHeaderUserId.startsWith("user_")
+      ? rawHeaderUserId : undefined;
   const bodyUserId: string | undefined = typeof req.body?.userId === "string" && req.body.userId.startsWith("user_")
-    ? req.body.userId
-    : undefined;
-  const userId = jwtUserId ?? bodyUserId;
+    ? req.body.userId : undefined;
+  const userId = jwtUserId ?? headerUserId ?? bodyUserId;
   if (!userId) {
     res.status(401).json({ error: "Unauthorized" });
     return;

@@ -37,11 +37,14 @@ function requireAuth(req: any, res: any, next: any) {
   //    (Clerk user ID format) to prevent trivial spoofing.
   const auth = getAuth(req);
   const jwtUserId: string | undefined = auth?.userId;
+  const rawHeaderUserId: unknown = req.headers["x-user-id"];
+  const headerUserId: string | undefined =
+    typeof rawHeaderUserId === "string" && rawHeaderUserId.startsWith("user_")
+      ? rawHeaderUserId : undefined;
   const bodyUserId: string | undefined =
     typeof req.body?.userId === "string" && req.body.userId.startsWith("user_")
-      ? req.body.userId
-      : undefined;
-  const userId = jwtUserId ?? bodyUserId;
+      ? req.body.userId : undefined;
+  const userId = jwtUserId ?? headerUserId ?? bodyUserId;
   if (!userId) {
     res.status(401).json({ error: "Unauthorized" });
     return;

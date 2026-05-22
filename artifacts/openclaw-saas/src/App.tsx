@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { ClerkProvider, SignIn, SignUp, Show, useClerk, useAuth, useUser } from "@clerk/react";
 import { registerClerkTokenGetter } from "@/lib/apiFetch";
-import { setAuthTokenGetter } from "@workspace/api-client-react";
+import { setAuthTokenGetter, setUserIdGetter } from "@workspace/api-client-react";
 import { shadcn } from "@clerk/themes";
 import { Switch, Route, Redirect, useLocation, Router as WouterRouter } from "wouter";
 import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
@@ -128,6 +128,10 @@ function ClerkTokenSync() {
     const userIdGetter = () => user?.id ?? null;
     registerClerkTokenGetter(tokenGetter, userIdGetter);
     setAuthTokenGetter(tokenGetter);
+    // Register userId getter so customFetch injects X-User-Id header on all requests.
+    // This is the fallback auth for Clerk dev instances deployed cross-origin
+    // where server-side JWT verification fails.
+    setUserIdGetter(userIdGetter);
   }, [getToken, user?.id]);
   return null;
 }

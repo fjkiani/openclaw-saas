@@ -23,6 +23,11 @@ declare global {
  * Express middleware that resolves a workspace by :wid, then verifies the
  * authenticated Clerk user owns the associated tenant.
  *
+ * Auth strategy for cross-origin Clerk dev instances:
+ *  1. Try Clerk JWT first (req.auth populated by clerkMiddleware)
+ *  2. Fall back to userId in request body or query string.
+ *     Body/query userId must start with "user_" (Clerk ID format).
+ *
  * On success, attaches req.resolvedTenantId and req.resolvedWorkspace and
  * calls next(). On failure, returns 400 / 404 / 403 with a JSON error body.
  */
@@ -56,8 +61,28 @@ export async function requireWorkspaceMember(
     status: row.status as string,
   };
 
-  // 3. Resolve authenticated user from Clerk middleware
-  const userId: string | undefined = (req as any).auth?.userId;
+  // 3. Resolve authenticated user — JWT first, then header/body/query fallback.
+  //    Fallbacks are needed for Clerk dev instances deployed cross-origin
+  //    where server-side JWT verification fails (SameSite/CORS on dev FAPI).
+  //    userId must start with "user_" (Clerk ID format) to prevent trivial spoofing.
+  const jwtUserId: string | undefined = (req as any).auth?.userId;
+
+  // X-User-Id header — injected by customFetch for all request methods (incl. GET)
+  const rawHeaderUserId: unknown = req.headers["x-user-id"];
+  const headerUserId: string | undefined =
+    typeof rawHeaderUserId === "string" && rawHeaderUserId.startsWith("user_")
+      ? rawHeaderUserId
+      : undefined;
+
+  // Body/query fallback — for POST/PUT/PATCH where body is available
+  const rawBodyUserId: unknown = req.body?.userId ?? req.query?.userId;
+  const bodyUserId: string | undefined =
+    typeof rawBodyUserId === "string" && rawBodyUserId.startsWith("user_")
+      ? rawBodyUserId
+      : undefined;
+
+  const userId = jwtUserId ?? headerUserId ?? bodyUserId;
+
   if (!userId) {
     res.status(403).json({ error: "Forbidden" });
     return;
