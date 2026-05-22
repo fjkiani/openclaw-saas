@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useUser } from "@clerk/react";
 import { useParams, useLocation } from "wouter";
 import { apiFetch } from "@/lib/apiFetch";
 import { useQueryClient } from "@tanstack/react-query";
@@ -850,7 +851,11 @@ function UseModelPanel({
 }
 
 function RegistryTab({ wid }: { wid: number }) {
-  const { data: registry, isLoading, error } = useListModelRegistry(wid);
+  const { user } = useUser();
+  // Gate on user?.id — prevents 403 on first render before Clerk loads
+  const { data: registry, isLoading, error } = useListModelRegistry(wid, {
+    query: { enabled: !!user?.id },
+  });
   const [openPanelId, setOpenPanelId] = useState<number | null>(null);
   const [, navigate] = useLocation();
 
@@ -1570,7 +1575,13 @@ export default function ForgeWorkspacePage() {
   const wid = Number(params.wid);
   const tab: TabKey = (params.tab as TabKey) ?? "datasets";
 
-  const { data: workspace, isLoading, error: workspaceError } = useGetForgeWorkspace(wid);
+  const { user } = useUser();
+  // Gate on user?.id — Clerk loads async; without this the query fires before
+  // X-User-Id is set, the server returns 403, and we redirect to /onboarding
+  // before the user even has a chance to load.
+  const { data: workspace, isLoading, error: workspaceError } = useGetForgeWorkspace(wid, {
+    query: { enabled: !!user?.id },
+  });
 
   // Auto-redirect to onboarding if this workspace is not accessible (403 = wrong user session)
   useEffect(() => {

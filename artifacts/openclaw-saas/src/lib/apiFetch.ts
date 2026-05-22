@@ -32,8 +32,15 @@ export async function apiFetch(path: string, init: RequestInit = {}): Promise<Re
       const token = await _tokenGetter();
       if (token) headers.set("authorization", `Bearer ${token}`);
     } catch {
-      // Token fetch failed (CORS on dev instance) — fall through to userId body injection
+      // Token fetch failed (CORS on dev instance) — fall through to userId header/body injection
     }
+  }
+
+  // Inject X-User-Id header on ALL requests (including GET) as fallback auth.
+  // The server reads this when JWT verification fails (SameSite/CORS on dev FAPI).
+  if (_userIdGetter && !headers.has("x-user-id")) {
+    const userId = _userIdGetter();
+    if (userId) headers.set("x-user-id", userId);
   }
 
   // Always inject userId into JSON POST/PUT/PATCH bodies.

@@ -123,16 +123,19 @@ function SignUpPage() {
 function ClerkTokenSync() {
   const { getToken } = useAuth();
   const { user } = useUser();
-  useEffect(() => {
-    const tokenGetter = () => getToken();
-    const userIdGetter = () => user?.id ?? null;
-    registerClerkTokenGetter(tokenGetter, userIdGetter);
-    setAuthTokenGetter(tokenGetter);
-    // Register userId getter so customFetch injects X-User-Id header on all requests.
-    // This is the fallback auth for Clerk dev instances deployed cross-origin
-    // where server-side JWT verification fails.
-    setUserIdGetter(userIdGetter);
-  }, [getToken, user?.id]);
+
+  // IMPORTANT: Register getters synchronously during render — NOT in useEffect.
+  // useEffect runs after the first render, so any queries that fire on mount
+  // (useListForgeWorkspaces, useGetForgeWorkspace, etc.) would have no userId
+  // on the first call, causing 403s. Calling these synchronously ensures the
+  // getters are set before any child component queries fire.
+  // These are pure module-level variable assignments — safe to call during render.
+  const tokenGetter = () => getToken();
+  const userIdGetter = () => user?.id ?? null;
+  registerClerkTokenGetter(tokenGetter, userIdGetter);
+  setAuthTokenGetter(tokenGetter);
+  setUserIdGetter(userIdGetter);
+
   return null;
 }
 

@@ -95,7 +95,11 @@ export default function ForgePage() {
   const provisionedRef = useRef(false);
 
   const { user } = useUser();
-  const { data: workspaces, isLoading } = useListForgeWorkspaces();
+  // Gate query on user?.id — Clerk loads async; without this guard the query fires
+  // before X-User-Id is set, returns empty [], and the workspace list never populates.
+  const { data: workspaces, isLoading } = useListForgeWorkspaces({
+    query: { enabled: !!user?.id },
+  });
 
   // On first load: call provision endpoint to ensure tenant + starter workspace exist.
   // IMPORTANT: gate on user?.id — Clerk loads asynchronously, so user is undefined
