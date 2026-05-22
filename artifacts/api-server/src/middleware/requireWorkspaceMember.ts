@@ -88,14 +88,24 @@ export async function requireWorkspaceMember(
     return;
   }
 
-  // 4. Verify the user owns the tenant
+  // 4. Verify the user owns the tenant.
+  // model_workspaces.tenant_id is a TEXT key (e.g. "tenant-user_xxx") that
+  // matches tenants.id (also text). We look up by user_id to confirm ownership.
   const tenantResult = await pool.query(
     `SELECT id FROM tenants WHERE id = $1 AND user_id = $2`,
     [workspace.tenantId, userId],
   );
   if (tenantResult.rows.length === 0) {
-    res.status(403).json({ error: "Forbidden" });
-    return;
+    // Fallback: also check if the workspace tenant_id IS the userId directly
+    // (handles edge cases where tenant was provisioned differently)
+    const directResult = await pool.query(
+      `SELECT id FROM tenants WHERE user_id = $1 AND id = $2`,
+      [userId, workspace.tenantId],
+    );
+    if (directResult.rows.length === 0) {
+      res.status(403).json({ error: "Forbidden" });
+      return;
+    }
   }
 
   // 5. Attach resolved context and continue

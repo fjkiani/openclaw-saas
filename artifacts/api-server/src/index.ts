@@ -26,10 +26,12 @@ async function runMigrations(): Promise<void> {
 
     // ── Core tables ───────────────────────────────────────────────────────────
 
-    // tenants: id serial (integer), matches tenantsTable in schema/tenants.ts
+    // tenants: id TEXT (matches onboarding.ts which inserts tenant-<userId> strings).
+    // NOTE: The Drizzle ORM schema uses serial, but the actual data layer uses text IDs.
+    // The raw SQL in onboarding.ts is the source of truth for tenant creation.
     await client.query(`
       CREATE TABLE IF NOT EXISTS "tenants" (
-        "id" serial PRIMARY KEY NOT NULL,
+        "id" text PRIMARY KEY NOT NULL,
         "user_id" text NOT NULL,
         "name" text NOT NULL,
         "description" text,
@@ -45,7 +47,7 @@ async function runMigrations(): Promise<void> {
       )
     `);
 
-    // Idempotent column additions for tenants (in case table existed with old schema)
+    // Idempotent column additions for tenants
     await client.query(`
       ALTER TABLE "tenants"
         ADD COLUMN IF NOT EXISTS "description" text,

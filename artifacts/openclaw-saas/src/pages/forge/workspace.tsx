@@ -850,8 +850,25 @@ function UseModelPanel({
 }
 
 function RegistryTab({ wid }: { wid: number }) {
-  const { data: registry, isLoading } = useListModelRegistry(wid);
+  const { data: registry, isLoading, error } = useListModelRegistry(wid);
   const [openPanelId, setOpenPanelId] = useState<number | null>(null);
+  const [, navigate] = useLocation();
+
+  // 403 means this workspace belongs to a different user session (stale workspace ID).
+  // Redirect to /onboarding so the user gets a fresh workspace tied to their account.
+  if ((error as any)?.status === 403) {
+    return (
+      <div className="flex flex-col items-center justify-center py-12 text-center space-y-3">
+        <p className="text-xs font-mono text-muted-foreground">This workspace is not accessible in your current session.</p>
+        <button
+          onClick={() => navigate("/onboarding")}
+          className="text-xs font-mono text-primary underline"
+        >
+          Re-provision workspace
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">

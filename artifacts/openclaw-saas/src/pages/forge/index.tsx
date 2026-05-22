@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { useUser } from "@clerk/react";
 import { useLocation } from "wouter";
 import { apiFetch } from "@/lib/apiFetch";
 import { useQueryClient } from "@tanstack/react-query";
@@ -93,6 +94,7 @@ export default function ForgePage() {
   const [provisioning, setProvisioning] = useState(false);
   const provisionedRef = useRef(false);
 
+  const { user } = useUser();
   const { data: workspaces, isLoading } = useListForgeWorkspaces();
 
   // On first load: call provision endpoint to ensure tenant + starter workspace exist.
@@ -105,7 +107,7 @@ export default function ForgePage() {
     apiFetch("/api/onboarding/provision", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({}),
+      body: JSON.stringify({ userId: user?.id }),
     })
       .then(async (r) => {
         if (!r.ok) throw new Error(`${r.status}`);
