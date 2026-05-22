@@ -24,7 +24,11 @@ import SetupPage from "@/pages/onboarding/setup";
 const queryClient = new QueryClient();
 
 const clerkPubKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY as string | undefined;
-const clerkProxyUrl = import.meta.env.VITE_CLERK_PROXY_URL as string | undefined;
+// Clerk proxy only works with production instances (pk_live_).
+// Dev instances (pk_test_) use a direct __dev_browser cookie flow that cannot be proxied.
+const clerkProxyUrl = clerkPubKey?.startsWith('pk_live_')
+  ? (import.meta.env.VITE_CLERK_PROXY_URL as string | undefined)
+  : undefined;
 const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
 
 // Auth is optional — app runs in demo mode when Clerk key is not configured.
