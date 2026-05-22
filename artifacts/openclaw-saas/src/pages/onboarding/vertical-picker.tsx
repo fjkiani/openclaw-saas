@@ -1,5 +1,6 @@
 import { useState, useRef } from "react";
 import { useLocation } from "wouter";
+import { apiFetch } from "@/lib/apiFetch";
 import {
   Scale,
   TrendingUp,
@@ -89,7 +90,7 @@ export default function VerticalPickerPage() {
     setProvisioning(true);
     setError(null);
 
-    fetch("/api/onboarding/provision", { method: "POST", credentials: "include" })
+    apiFetch("/api/onboarding/provision", { method: "POST" })
       .then(async (r) => {
         if (!r.ok) throw new Error(`Provision failed: ${r.status}`);
         const raw = await r.text();
@@ -117,9 +118,8 @@ export default function VerticalPickerPage() {
   function handleCustom() {
     if (!customDomain.trim()) return;
     setCustomSubmitting(true);
-    fetch("/api/forge/workspaces", {
+    apiFetch("/api/forge/workspaces", {
       method: "POST",
-      credentials: "include",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: customDomain.trim(), domain: "custom", description: "" }),
     })

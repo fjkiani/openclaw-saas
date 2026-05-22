@@ -12,7 +12,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { Database, Plus, Trash2, Upload, Search, FileText, ChevronDown, ChevronRight } from "lucide-react";
 
-const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+const BASE = ((import.meta.env.VITE_API_URL as string | undefined) ?? import.meta.env.BASE_URL ?? "").replace(/\/+$/, "");
 
 function statusColor(status: string) {
   if (status === "ready") return "text-emerald-400 border-emerald-500/20";

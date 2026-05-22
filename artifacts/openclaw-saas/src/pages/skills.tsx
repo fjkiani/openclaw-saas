@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { apiFetch } from "@/lib/apiFetch";
 import {
   useListSkills,
   useListFeaturedSkills,
@@ -46,7 +47,7 @@ export default function SkillsPage() {
     setRunningBenchmarks(prev => new Set(prev).add(skill.id));
     try {
       // Trigger async benchmark run
-      const runRes = await fetch(`/api/skills/${skill.id}/benchmark?suite=standard`, { method: "POST" });
+      const runRes = await apiFetch(`/api/skills/${skill.id}/benchmark?suite=standard`, { method: "POST" });
       if (!runRes.ok) throw new Error("Failed to start benchmark");
       const rawRun = await runRes.text();
       if (!rawRun || !rawRun.trim()) throw new Error("Benchmark service unavailable — please retry.");
@@ -64,7 +65,7 @@ export default function SkillsPage() {
           return;
         }
         try {
-          const res = await fetch(`/api/benchmark/${benchmark_id}`);
+          const res = await apiFetch(`/api/benchmark/${benchmark_id}`);
           if (res.ok) {
             const rawResult = await res.text();
             if (!rawResult || !rawResult.trim()) return; // still warming, retry on next poll

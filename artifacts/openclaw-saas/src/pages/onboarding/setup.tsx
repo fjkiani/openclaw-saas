@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useLocation } from "wouter";
+import { apiFetch } from "@/lib/apiFetch";
 import {
   CheckCircle2,
   Circle,
@@ -277,7 +278,7 @@ function StepTraining({ workspaceId, onNext }: { workspaceId: number | null; onN
     setError(null);
 
     // Fetch registry to get registration + version IDs
-    fetch(`/api/forge/workspaces/${workspaceId}/registry`, { credentials: "include" })
+    apiFetch(`/api/forge/workspaces/${workspaceId}/registry`)
       .then(async (r) => {
         if (!r.ok) throw new Error(`Registry fetch failed: ${r.status}`);
         const raw = await r.text();
@@ -297,9 +298,9 @@ function StepTraining({ workspaceId, onNext }: { workspaceId: number | null; onN
           return;
         }
 
-        return fetch(
+        return apiFetch(
           `/api/forge/workspaces/${workspaceId}/registry/${reg.registration.id}/versions/${version.id}/approve`,
-          { method: "POST", credentials: "include" }
+          { method: "POST" }
         ).then((r) => {
           if (!r.ok) throw new Error(`Approve failed: ${r.status}`);
           setApproved(true);
@@ -452,7 +453,7 @@ function StepTry({ workspaceId, onFinish }: { workspaceId: number | null; onFini
     setError(null);
     setResult(null);
 
-    fetch("/api/v1/legal/extract-clause", {
+    apiFetch("/api/v1/legal/extract-clause", {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },

@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useLocation } from "wouter";
+import { apiFetch } from "@/lib/apiFetch";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useListForgeWorkspaces,
@@ -101,7 +102,7 @@ export default function ForgePage() {
     provisionedRef.current = true;
 
     setProvisioning(true);
-    fetch("/api/onboarding/provision", { method: "POST", credentials: "include" })
+    apiFetch("/api/onboarding/provision", { method: "POST" })
       .then(async (r) => {
         if (!r.ok) throw new Error(`${r.status}`);
         const raw = await r.text();

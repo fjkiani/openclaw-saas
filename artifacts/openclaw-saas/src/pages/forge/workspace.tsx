@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useParams, useLocation } from "wouter";
+import { apiFetch } from "@/lib/apiFetch";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useGetForgeWorkspace,
@@ -659,7 +660,7 @@ function UseModelPanel({
   // Fetch deployment info on mount
   useEffect(() => {
     setDeployLoading(true);
-    fetch(`/api/forge/workspaces/${wid}/registry/${registrationId}/deployment`)
+    apiFetch(`/api/forge/workspaces/${wid}/registry/${registrationId}/deployment`)
       .then((r) => {
         if (!r.ok) throw new Error(`${r.status}`);
         return r.json();
@@ -687,7 +688,7 @@ function UseModelPanel({
     setResult(null);
     setInvokeError(null);
     try {
-      const resp = await fetch(`/api${deployment.endpoint_url}`, {
+      const resp = await apiFetch(`/api${deployment.endpoint_url}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: text.trim(), use_rag: true }),
