@@ -36,6 +36,7 @@ import { OnboardingChecklist } from "@/components/OnboardingChecklist";
 import { DatasetExplorerTab } from "@/components/DatasetExplorer";
 import { SaaSShowcaseTab } from "@/components/SaaSShowcase";
 import { TrainingTab } from "@/components/TrainingTab";
+import MatterTab from "@/components/MatterTab";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -1532,6 +1533,7 @@ const TABS = [
   { key: "jobs",        label: "Jobs" },
   { key: "registry",   label: "Registry" },
   { key: "deployments", label: "Deployments" },
+  { key: "matter",     label: "Matter" },
   { key: "policies",   label: "Policies" },
   { key: "explorer",   label: "Explorer" },
   { key: "showcase",   label: "Showcase" },
@@ -1595,6 +1597,7 @@ export default function ForgeWorkspacePage() {
           {tab === "jobs"        && <JobsTab wid={wid} />}
           {tab === "registry"    && <RegistryTab wid={wid} />}
           {tab === "deployments" && <DeploymentsTab wid={wid} />}
+          {tab === "matter"      && <MatterTab wid={String(wid)} />}
           {tab === "policies"    && <PoliciesTab wid={wid} />}
           {tab === "journey"     && <JourneyTab wid={wid} />}
           {tab === "explorer"    && <DatasetExplorerTab />}

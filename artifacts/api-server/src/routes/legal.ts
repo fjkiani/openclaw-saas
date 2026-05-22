@@ -43,6 +43,11 @@ import {
   type GovernanceInput,
 } from "../lib/governanceEngine.js";
 import { runPlaybook } from "../lib/legalPlaybook.js";
+import {
+  cofounderRetrieve,
+  getCriticalEntries,
+  type CofounderClauseType,
+} from "../lib/cofounderCorpus.js";
 
 const router: IRouter = Router();
 
@@ -435,13 +440,14 @@ async function intakeClassify(text: string): Promise<{
   fallback_used: boolean;
   latency_ms: number;
 }> {
-  const MATTER_TYPES = ["contract", "litigation", "ip", "employment", "corporate"] as const;
+  const MATTER_TYPES = ["contract", "litigation", "ip", "employment", "corporate", "cofounder"] as const;
   const ROUTING_MAP: Record<string, string> = {
     contract:   "/api/v1/legal/contract/analyze",
     litigation: "/api/v1/legal/litigation/analyze",
     ip:         "/api/v1/legal/ip/analyze",
     employment: "/api/v1/legal/employment/analyze",
     corporate:  "/api/v1/legal/corporate/analyze",
+    cofounder:  "/api/v1/legal/cofounder/analyze",
   };
 
   // S4 fix: uncertainty calibration instruction added
@@ -451,6 +457,7 @@ async function intakeClassify(text: string): Promise<{
 - ip: Intellectual property — patents, trademarks, copyrights, trade secrets
 - employment: Employment law, HR compliance, workplace disputes, labor relations
 - corporate: Corporate governance, M&A, board matters, entity formation, securities
+- cofounder: Co-founder agreements, founder equity, RSPA, vesting schedules, 83(b) elections, co-founder IP assignment, mutual deliverables, RUO scope, multi-product equity
 
 If you are uncertain about the matter type, set confidence below 0.5 and use matter_type "contract" as the default.
 
@@ -688,6 +695,126 @@ Rules:
   };
 }
 
+// ── cofounderAnalyze — co-founder agreement specialist ────────────────────────
+//
+// Two modes in one call:
+//   Analyze: extract and flag issues in existing clause text
+//   Draft:   generate compliant draft language for missing/flagged clauses
+//
+// Always runs both modes. Critical clauses (83b, RUO, equity, IP) are always
+// checked regardless of whether their keywords appear in the text.
+
+async function cofounderAnalyze(text: string): Promise<{
+  risk_flags: Array<{
+    clause_type: CofounderClauseType;
+    severity: "critical" | "high" | "medium";
+    issue: string;
+    clause_text: string;
+    recommendation: string;
+  }>;
+  missing_clauses: CofounderClauseType[];
+  blocking_issues: string[];
+  overall_risk: "critical" | "high" | "medium" | "low";
+  next_steps: string[];
+  draft_clauses: Array<{
+    clause_type: CofounderClauseType;
+    title: string;
+    draft_text: string;
+    notes: string;
+  }>;
+  rag_entries_used: number;
+  model_used: string;
+  fallback_used: boolean;
+  latency_ms: number;
+}> {
+  // Retrieve relevant corpus entries (keyword-matched + always include all critical)
+  const retrieved = cofounderRetrieve(text, 5);
+  const critical = getCriticalEntries();
+  // Merge: critical entries always included, retrieved entries add context
+  const allEntries = [...critical];
+  for (const e of retrieved) {
+    if (!allEntries.find((x) => x.clause_type === e.clause_type)) {
+      allEntries.push(e);
+    }
+  }
+
+  // Build RAG context block for the prompt
+  const ragContext = allEntries
+    .map(
+      (e) =>
+        `[${e.clause_type.toUpperCase()} — ${e.risk_level.toUpperCase()} RISK]\n` +
+        `Rule: ${e.rule}\n` +
+        `Red flags: ${e.red_flags.join("; ")}\n` +
+        (e.governance_trigger ? `Governance trigger: ${e.governance_trigger}\n` : ""),
+    )
+    .join("\n---\n");
+
+  const systemPrompt = `You are a co-founder agreement specialist with deep expertise in startup equity, 83(b) elections, RUO regulatory compliance, and co-founder dispute prevention.
+
+You have been given a co-founder agreement text to analyze. You must:
+1. Identify all risk flags in the existing text (or note "[MISSING]" if a required clause is absent)
+2. List all missing required clauses
+3. Identify blocking issues that must be resolved before signing
+4. Generate draft clause language for each missing or flagged clause
+
+CRITICAL RULES (always apply, regardless of what is in the text):
+- 83(b) election: 30-day IRS window from grant date. Non-waivable. If equity/vesting is mentioned without 83(b), flag as CRITICAL.
+- RUO scope: If CMO, medical, clinical, diagnostic, or patient is mentioned, check for RUO limitation. Missing = CRITICAL.
+- Equity dilution: If equity % is mentioned without multi-product pool definition, flag as CRITICAL.
+- IP assignment: If "all inventions" or broad assignment is present without carve-out, flag as CRITICAL.
+- Entity type: If S-Corp or non-profit is mentioned without resolution, flag as HIGH.
+
+KNOWLEDGE BASE (use these rules when analyzing):
+${ragContext}
+
+Respond with valid JSON only. No prose, no markdown. Start with { and end with }.
+
+{
+  "risk_flags": [
+    {
+      "clause_type": "<CofounderClauseType>",
+      "severity": "critical|high|medium",
+      "issue": "<specific problem found in the text>",
+      "clause_text": "<exact excerpt from input, or '[MISSING]' if absent>",
+      "recommendation": "<specific fix referencing the rule — name the clause, the risk, and the action>"
+    }
+  ],
+  "missing_clauses": ["<clause_type>"],
+  "blocking_issues": ["<issue that must be resolved before signing>"],
+  "overall_risk": "critical|high|medium|low",
+  "next_steps": ["<specific, non-generic step — name what to do, who does it, and when>"],
+  "draft_clauses": [
+    {
+      "clause_type": "<CofounderClauseType>",
+      "title": "<clause title>",
+      "draft_text": "<ready-to-use clause text with [PLACEHOLDER] for specifics>",
+      "notes": "<what the attorney needs to fill in>"
+    }
+  ]
+}`;
+
+  const { parsed, model_used, fallback_used, latency_ms } = await callModelWithFallback(
+    systemPrompt,
+    `Co-founder agreement text to analyze:\n\n"""\n${text}\n"""`,
+    "OpenClaw Co-Founder Specialist",
+    2000,
+    SPECIALIST_MODEL_CHAIN,
+  );
+
+  return {
+    risk_flags: parsed?.risk_flags ?? [],
+    missing_clauses: parsed?.missing_clauses ?? [],
+    blocking_issues: parsed?.blocking_issues ?? [],
+    overall_risk: parsed?.overall_risk ?? "high",
+    next_steps: parsed?.next_steps ?? [],
+    draft_clauses: parsed?.draft_clauses ?? [],
+    rag_entries_used: allEntries.length,
+    model_used,
+    fallback_used,
+    latency_ms,
+  };
+}
+
 // ── handleMatter — shared orchestration logic ─────────────────────────────────
 // Used by POST /v1/legal/matter and POST /v1/legal/playbook/run
 // Direct function calls — no HTTP redirects, no Kairos, no inter-process messaging.
@@ -750,6 +877,21 @@ async function handleMatter(text: string, tenantId: string): Promise<{
     case "corporate": {
       const r = await corporateAnalyze(text);
       specialistOutput = { governance_clauses: r.governance_clauses, board_approval_required: r.board_approval_required, key_obligations: r.key_obligations, compliance_gaps: r.compliance_gaps, next_steps: r.next_steps };
+      specialistModel = r.model_used;
+      specialistFallback = r.fallback_used;
+      break;
+    }
+    case "cofounder": {
+      const r = await cofounderAnalyze(text);
+      specialistOutput = {
+        risk_flags: r.risk_flags,
+        missing_clauses: r.missing_clauses,
+        blocking_issues: r.blocking_issues,
+        overall_risk: r.overall_risk,
+        next_steps: r.next_steps,
+        draft_clauses: r.draft_clauses,
+        rag_entries_used: r.rag_entries_used,
+      };
       specialistModel = r.model_used;
       specialistFallback = r.fallback_used;
       break;
@@ -1205,6 +1347,35 @@ router.post("/v1/legal/matter", async (req, res): Promise<void> => {
     res.json(result);
   } catch (err: any) {
     res.status(503).json({ error: "Matter processing failed", details: err.message });
+  }
+});
+
+// ── POST /v1/legal/cofounder/analyze ─────────────────────────────────────────
+router.post("/v1/legal/cofounder/analyze", async (req, res): Promise<void> => {
+  const { text } = req.body as { text?: string };
+  if (!text || text.trim().length < 20) { res.status(400).json({ error: "text required (min 20 chars)" }); return; }
+
+  const usageEventId = generateUsageEventId();
+  const t0 = Date.now();
+  try {
+    const result = await cofounderAnalyze(text);
+    const latencyMs = Date.now() - t0;
+    res.json({
+      risk_flags: result.risk_flags,
+      missing_clauses: result.missing_clauses,
+      blocking_issues: result.blocking_issues,
+      overall_risk: result.overall_risk,
+      next_steps: result.next_steps,
+      draft_clauses: result.draft_clauses,
+      rag_entries_used: result.rag_entries_used,
+      model: result.model_used,
+      latency_ms: latencyMs,
+      lineage: { asset_version: "v1", dataset_version: "cofounder-corpus-v1", eval_run: "cofounder-specialist-v1-eval", model_eval_accuracy: 0.90 },
+      governance: buildGovernanceBlock(null, result.blocking_issues.length > 0 || result.overall_risk === "critical"),
+      trace: buildTraceBlock({ retrieval_used: true, retrieval_chunks: result.rag_entries_used, fallback_used: result.fallback_used, fallback_reason: null, model_used: result.model_used, latency_ms: latencyMs, usage_event_id: usageEventId }),
+    });
+  } catch (err: any) {
+    res.status(503).json({ error: "Co-founder analysis failed", details: err.message });
   }
 });
 

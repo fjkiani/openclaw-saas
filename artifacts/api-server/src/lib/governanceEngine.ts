@@ -310,6 +310,30 @@ export function evaluateGovernance(input: GovernanceInput): GovernanceDecision {
     }
   }
 
+  // 6. Co-founder governance rules (specialist === "cofounder")
+  if (specialist === "cofounder") {
+    const cfTriggered = evaluateCofounderGovernance(raw_text);
+    for (const { reason } of cfTriggered) {
+      if (!escalationReasons.includes(reason)) {
+        escalationReasons.push(reason);
+        action = "escalate";
+      }
+    }
+    // Also escalate if specialist output has blocking_issues or critical overall_risk
+    if (output["overall_risk"] === "critical") {
+      if (!escalationReasons.some(r => r.includes("critical"))) {
+        escalationReasons.push("co-founder agreement has critical risk — attorney review required before signing");
+        action = "escalate";
+      }
+    }
+    if (Array.isArray(output["blocking_issues"]) && (output["blocking_issues"] as unknown[]).length > 0) {
+      if (!escalationReasons.some(r => r.includes("blocking"))) {
+        escalationReasons.push(`blocking issues present — ${(output["blocking_issues"] as string[]).length} issue(s) must be resolved before signing`);
+        action = "escalate";
+      }
+    }
+  }
+
   const escalationRequired = action !== "pass";
 
   // Apply redactions
@@ -342,6 +366,58 @@ export function evaluateGovernance(input: GovernanceInput): GovernanceDecision {
   };
 }
 
+// ── Co-founder governance trigger detection ───────────────────────────────────
+
+/**
+ * Detect 83(b) window risk: equity/vesting mentioned but no 83(b) reference.
+ * The 30-day IRS window is non-waivable — missing = permanent tax disaster.
+ */
+export function detect83bWindowRisk(text: string): boolean {
+  const hasEquityOrVesting = /\b(vest|vesting|equity|restricted stock|rspa|shares|stock grant|founder shares)\b/i.test(text);
+  const has83b = /83\s*\(?\s*b\s*\)?|section\s+83/i.test(text);
+  return hasEquityOrVesting && !has83b;
+}
+
+/**
+ * Detect RUO clinical risk: RUO materials mentioned alongside clinical/diagnostic/patient context.
+ */
+export function detectRuoClinicalRisk(text: string): boolean {
+  const hasRuo = /\b(ruo|research use only)\b/i.test(text);
+  const hasClinical = /\b(clinical|diagnostic|patient|therapeutic|treatment|diagnosis|fda clearance|510k|pma)\b/i.test(text);
+  // Also flag if CMO/medical role present without RUO disclaimer
+  const hasCmoRole = /\b(cmo|chief medical|medical officer|physician|doctor)\b/i.test(text);
+  const hasRuoDisclaimer = /\b(not.*clinical|not.*diagnostic|research.*only|ruo.*limitation|scope.*limitation)\b/i.test(text);
+  return (hasRuo && hasClinical) || (hasCmoRole && !hasRuoDisclaimer);
+}
+
+/**
+ * Detect equity dilution risk: equity % mentioned without multi-product pool or anti-dilution.
+ */
+export function detectEquityDilutionRisk(text: string): boolean {
+  const hasEquityPct = /\b\d+\s*%\s*(equity|ownership|interest|shares)\b|\b(equity|ownership|interest)\s+of\s+\d+\s*%/i.test(text);
+  const hasMultiProduct = /\b(vetonce|longevity|deepcrispr|product entity|subsidiary|spinout|anti.?dilution|dilution protection|pro.?rata)\b/i.test(text);
+  return hasEquityPct && !hasMultiProduct;
+}
+
+/**
+ * Detect broad IP assignment: "all inventions" or "all works" without carve-out.
+ */
+export function detectBroadIpAssignment(text: string): boolean {
+  const hasBroadAssignment = /\b(all\s+inventions|all\s+works|all\s+intellectual\s+property|all\s+ip|all\s+right.*title.*interest)\b/i.test(text);
+  const hasCarveOut = /\b(prior\s+invention|background\s+ip|retained|carve.?out|exhibit\s+[a-z]|schedule\s+[a-z]|except.*prior)\b/i.test(text);
+  return hasBroadAssignment && !hasCarveOut;
+}
+
+/**
+ * Detect unresolved incorporation: S-Corp or non-profit mentioned without resolution.
+ */
+export function detectIncorporationUnresolved(text: string): boolean {
+  const hasSCorp = /\b(s.?corp|subchapter\s+s)\b/i.test(text);
+  const hasNonProfit = /\b(non.?profit|nonprofit|501\s*\(?\s*c\s*\)?\s*\(?\s*3\s*\)?)\b/i.test(text);
+  const hasResolution = /\b(shall\s+be\s+incorporated|is\s+incorporated|entity\s+type\s+is|resolved\s+as|confirmed\s+as)\b/i.test(text);
+  return (hasSCorp || hasNonProfit) && !hasResolution;
+}
+
 // ── Default legal governance policy ──────────────────────────────────────────
 
 export const LEGAL_GOVERNANCE_POLICY: GovernancePolicy = {
@@ -353,6 +429,12 @@ export const LEGAL_GOVERNANCE_POLICY: GovernancePolicy = {
     { trigger: "confidence_below_threshold", action: "escalate", reason: "low_confidence" },
     { trigger: "incomplete_output", action: "escalate", reason: "incomplete_output" },
     { trigger: "non_specific_output", action: "escalate", reason: "non_specific_output" },
+    // Co-founder governance rules (Pass 2)
+    { trigger: "83b_window_risk", action: "escalate", reason: "83(b) election window — 30-day IRS deadline from grant date. Missing from agreement." },
+    { trigger: "ruo_clinical_risk", action: "escalate", reason: "RUO materials in clinical context — FDA violation risk. Scope must be explicitly limited." },
+    { trigger: "equity_no_dilution_protection", action: "escalate", reason: "Equity dilution undefined across multi-product structure — 30% may not be protected." },
+    { trigger: "ip_broad_assignment", action: "escalate", reason: "Broad IP assignment may capture pre-existing CMO medical IP — carve-out required." },
+    { trigger: "incorporation_unresolved", action: "escalate", reason: "Entity type unresolved — S-Corp vs. non-profit affects 83(b) validity and equity structure." },
   ],
   redaction_rules: [
     { trigger: "privilege_keywords_in_text", field: "clause_text", replacement: "[REDACTED — privilege review required]" },
@@ -360,3 +442,31 @@ export const LEGAL_GOVERNANCE_POLICY: GovernancePolicy = {
   audit_required: true,
   default_impact_tier: "decision_support",
 };
+
+// ── Co-founder governance evaluation (called from evaluateGovernance for cofounder specialist) ──
+
+/**
+ * Run co-founder-specific governance checks against raw text.
+ * Returns triggered rule IDs and reasons.
+ */
+export function evaluateCofounderGovernance(rawText: string): Array<{ trigger: string; reason: string }> {
+  const triggered: Array<{ trigger: string; reason: string }> = [];
+
+  if (detect83bWindowRisk(rawText)) {
+    triggered.push({ trigger: "83b_window_risk", reason: "83(b) election window — 30-day IRS deadline from grant date. Missing from agreement." });
+  }
+  if (detectRuoClinicalRisk(rawText)) {
+    triggered.push({ trigger: "ruo_clinical_risk", reason: "RUO materials in clinical context — FDA violation risk. Scope must be explicitly limited." });
+  }
+  if (detectEquityDilutionRisk(rawText)) {
+    triggered.push({ trigger: "equity_no_dilution_protection", reason: "Equity dilution undefined across multi-product structure — 30% may not be protected." });
+  }
+  if (detectBroadIpAssignment(rawText)) {
+    triggered.push({ trigger: "ip_broad_assignment", reason: "Broad IP assignment may capture pre-existing CMO medical IP — carve-out required." });
+  }
+  if (detectIncorporationUnresolved(rawText)) {
+    triggered.push({ trigger: "incorporation_unresolved", reason: "Entity type unresolved — S-Corp vs. non-profit affects 83(b) validity and equity structure." });
+  }
+
+  return triggered;
+}
