@@ -17,22 +17,46 @@ if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
 
-// Run DB migrations on startup (idempotent CREATE TABLE IF NOT EXISTS)
+// Run DB migrations on startup (idempotent CREATE TABLE IF NOT EXISTS).
+// Schema matches Drizzle ORM definitions in lib/db/src/schema/*.ts exactly.
 async function runMigrations(): Promise<void> {
   const client = await pool.connect();
   try {
     logger.info("Running DB migrations...");
 
+    // ── Core tables ───────────────────────────────────────────────────────────
+
+    // tenants: id serial (integer), matches tenantsTable in schema/tenants.ts
     await client.query(`
       CREATE TABLE IF NOT EXISTS "tenants" (
-        "id" text PRIMARY KEY NOT NULL,
-        "name" text NOT NULL,
+        "id" serial PRIMARY KEY NOT NULL,
         "user_id" text NOT NULL,
-        "plan" text DEFAULT 'free' NOT NULL,
-        "stripe_customer_id" text,
-        "stripe_subscription_id" text,
-        "created_at" timestamp with time zone DEFAULT now() NOT NULL
+        "name" text NOT NULL,
+        "description" text,
+        "status" text NOT NULL DEFAULT 'stopped',
+        "skill_pack" text,
+        "agent_count" integer NOT NULL DEFAULT 1,
+        "memory_used_kb" integer NOT NULL DEFAULT 0,
+        "ws_endpoint" text,
+        "gateway_token" text,
+        "render_service_id" text,
+        "created_at" timestamp with time zone NOT NULL DEFAULT now(),
+        "updated_at" timestamp with time zone NOT NULL DEFAULT now()
       )
+    `);
+
+    // Idempotent column additions for tenants (in case table existed with old schema)
+    await client.query(`
+      ALTER TABLE "tenants"
+        ADD COLUMN IF NOT EXISTS "description" text,
+        ADD COLUMN IF NOT EXISTS "status" text NOT NULL DEFAULT 'stopped',
+        ADD COLUMN IF NOT EXISTS "skill_pack" text,
+        ADD COLUMN IF NOT EXISTS "agent_count" integer NOT NULL DEFAULT 1,
+        ADD COLUMN IF NOT EXISTS "memory_used_kb" integer NOT NULL DEFAULT 0,
+        ADD COLUMN IF NOT EXISTS "ws_endpoint" text,
+        ADD COLUMN IF NOT EXISTS "gateway_token" text,
+        ADD COLUMN IF NOT EXISTS "render_service_id" text,
+        ADD COLUMN IF NOT EXISTS "updated_at" timestamp with time zone NOT NULL DEFAULT now()
     `);
 
     await client.query(`
@@ -42,15 +66,15 @@ async function runMigrations(): Promise<void> {
         "slug" text NOT NULL UNIQUE,
         "description" text NOT NULL,
         "category" text NOT NULL,
-        "stars" integer DEFAULT 0 NOT NULL,
-        "installs" integer DEFAULT 0 NOT NULL,
-        "featured" boolean DEFAULT false NOT NULL,
-        "tags" text[] DEFAULT '{}' NOT NULL,
-        "source" text DEFAULT 'manual' NOT NULL,
-        "current_version" integer DEFAULT 1 NOT NULL,
+        "stars" integer NOT NULL DEFAULT 0,
+        "installs" integer NOT NULL DEFAULT 0,
+        "featured" boolean NOT NULL DEFAULT false,
+        "tags" text[] NOT NULL DEFAULT '{}',
+        "source" text NOT NULL DEFAULT 'manual',
+        "current_version" integer NOT NULL DEFAULT 1,
         "archon_run_id" text,
         "implementation" text,
-        "created_at" timestamp with time zone DEFAULT now() NOT NULL
+        "created_at" timestamp with time zone NOT NULL DEFAULT now()
       )
     `);
 
@@ -59,54 +83,65 @@ async function runMigrations(): Promise<void> {
         "id" serial PRIMARY KEY NOT NULL,
         "skill_id" integer NOT NULL REFERENCES "skills"("id") ON DELETE CASCADE,
         "benchmark_id" text NOT NULL,
-        "status" text DEFAULT 'pending' NOT NULL,
-        "overall_score" real,
-        "level_scores" jsonb,
         "grade" text,
-        "result_json" jsonb,
-        "created_at" timestamp with time zone DEFAULT now() NOT NULL,
-        "updated_at" timestamp with time zone DEFAULT now() NOT NULL
+        "overall_score" integer,
+        "level_scores" jsonb,
+        "llm_results" jsonb,
+        "test_suite" text NOT NULL DEFAULT 'standard',
+        "ran_at" timestamp with time zone NOT NULL DEFAULT now(),
+        "duration_ms" integer,
+        "error" text
       )
     `);
 
-    // Add columns required by Drizzle ORM schema (idempotent via ADD COLUMN IF NOT EXISTS)
+    // Idempotent column additions for skill_benchmarks (old schema had different columns)
     await client.query(`
       ALTER TABLE "skill_benchmarks"
-        ADD COLUMN IF NOT EXISTS "ran_at" timestamp with time zone DEFAULT now() NOT NULL,
-        ADD COLUMN IF NOT EXISTS "test_suite" text NOT NULL DEFAULT 'standard',
+        ADD COLUMN IF NOT EXISTS "grade" text,
+        ADD COLUMN IF NOT EXISTS "overall_score" integer,
+        ADD COLUMN IF NOT EXISTS "level_scores" jsonb,
         ADD COLUMN IF NOT EXISTS "llm_results" jsonb,
+        ADD COLUMN IF NOT EXISTS "test_suite" text NOT NULL DEFAULT 'standard',
+        ADD COLUMN IF NOT EXISTS "ran_at" timestamp with time zone NOT NULL DEFAULT now(),
         ADD COLUMN IF NOT EXISTS "duration_ms" integer,
         ADD COLUMN IF NOT EXISTS "error" text
     `);
 
+    // tenant_skills: tenant_id integer (matches Drizzle schema)
     await client.query(`
       CREATE TABLE IF NOT EXISTS "tenant_skills" (
         "id" serial PRIMARY KEY NOT NULL,
-        "tenant_id" text NOT NULL REFERENCES "tenants"("id"),
-        "skill_id" integer NOT NULL REFERENCES "skills"("id"),
-        "installed_at" timestamp with time zone DEFAULT now() NOT NULL,
-        "enabled" boolean DEFAULT true NOT NULL
+        "tenant_id" integer NOT NULL REFERENCES "tenants"("id") ON DELETE CASCADE,
+        "skill_id" integer NOT NULL REFERENCES "skills"("id") ON DELETE CASCADE,
+        "installed_at" timestamp with time zone NOT NULL DEFAULT now()
       )
     `);
 
+    // activity_entries: uses "type" and "message" columns (matches Drizzle schema)
     await client.query(`
       CREATE TABLE IF NOT EXISTS "activity_entries" (
         "id" serial PRIMARY KEY NOT NULL,
-        "tenant_id" text NOT NULL REFERENCES "tenants"("id"),
-        "skill_id" integer REFERENCES "skills"("id"),
-        "event_type" text NOT NULL,
-        "payload" jsonb,
-        "created_at" timestamp with time zone DEFAULT now() NOT NULL
+        "tenant_id" integer NOT NULL REFERENCES "tenants"("id") ON DELETE CASCADE,
+        "type" text NOT NULL,
+        "message" text NOT NULL,
+        "created_at" timestamp with time zone NOT NULL DEFAULT now()
       )
+    `);
+
+    // Idempotent column additions for activity_entries (old schema had event_type/payload)
+    await client.query(`
+      ALTER TABLE "activity_entries"
+        ADD COLUMN IF NOT EXISTS "type" text,
+        ADD COLUMN IF NOT EXISTS "message" text
     `);
 
     await client.query(`
       CREATE TABLE IF NOT EXISTS "chat_messages" (
         "id" serial PRIMARY KEY NOT NULL,
-        "tenant_id" text NOT NULL REFERENCES "tenants"("id"),
+        "tenant_id" integer NOT NULL REFERENCES "tenants"("id") ON DELETE CASCADE,
         "role" text NOT NULL,
         "content" text NOT NULL,
-        "created_at" timestamp with time zone DEFAULT now() NOT NULL
+        "created_at" timestamp with time zone NOT NULL DEFAULT now()
       )
     `);
 
@@ -117,61 +152,61 @@ async function runMigrations(): Promise<void> {
         "slug" text NOT NULL UNIQUE,
         "description" text NOT NULL,
         "icon_url" text,
-        "created_at" timestamp with time zone DEFAULT now() NOT NULL
+        "created_at" timestamp with time zone NOT NULL DEFAULT now()
       )
     `);
 
     await client.query(`
       CREATE TABLE IF NOT EXISTS "tenant_connectors" (
         "id" serial PRIMARY KEY NOT NULL,
-        "tenant_id" text NOT NULL REFERENCES "tenants"("id"),
-        "connector_id" integer NOT NULL REFERENCES "connectors"("id"),
+        "tenant_id" integer NOT NULL REFERENCES "tenants"("id") ON DELETE CASCADE,
+        "connector_id" integer NOT NULL REFERENCES "connectors"("id") ON DELETE CASCADE,
         "encrypted_credential" text,
-        "verified" boolean DEFAULT false NOT NULL,
-        "created_at" timestamp with time zone DEFAULT now() NOT NULL
+        "verified" boolean NOT NULL DEFAULT false,
+        "created_at" timestamp with time zone NOT NULL DEFAULT now()
       )
     `);
 
     await client.query(`
       CREATE TABLE IF NOT EXISTS "knowledge_graphs" (
         "id" serial PRIMARY KEY NOT NULL,
-        "tenant_id" text NOT NULL REFERENCES "tenants"("id"),
+        "tenant_id" integer NOT NULL REFERENCES "tenants"("id") ON DELETE CASCADE,
         "name" text NOT NULL,
         "description" text,
-        "created_at" timestamp with time zone DEFAULT now() NOT NULL
+        "created_at" timestamp with time zone NOT NULL DEFAULT now()
       )
     `);
 
     await client.query(`
       CREATE TABLE IF NOT EXISTS "graph_documents" (
         "id" serial PRIMARY KEY NOT NULL,
-        "graph_id" integer NOT NULL REFERENCES "knowledge_graphs"("id"),
+        "graph_id" integer NOT NULL REFERENCES "knowledge_graphs"("id") ON DELETE CASCADE,
         "title" text NOT NULL,
         "content" text NOT NULL,
         "source_url" text,
-        "created_at" timestamp with time zone DEFAULT now() NOT NULL
+        "created_at" timestamp with time zone NOT NULL DEFAULT now()
       )
     `);
 
     await client.query(`
       CREATE TABLE IF NOT EXISTS "graph_chunks" (
         "id" serial PRIMARY KEY NOT NULL,
-        "document_id" integer NOT NULL REFERENCES "graph_documents"("id"),
+        "document_id" integer NOT NULL REFERENCES "graph_documents"("id") ON DELETE CASCADE,
         "content" text NOT NULL,
         "embedding" real[],
         "metadata" jsonb,
-        "created_at" timestamp with time zone DEFAULT now() NOT NULL
+        "created_at" timestamp with time zone NOT NULL DEFAULT now()
       )
     `);
 
     await client.query(`
       CREATE TABLE IF NOT EXISTS "skill_versions" (
         "id" serial PRIMARY KEY NOT NULL,
-        "skill_id" integer NOT NULL REFERENCES "skills"("id"),
+        "skill_id" integer NOT NULL REFERENCES "skills"("id") ON DELETE CASCADE,
         "version" integer NOT NULL,
         "implementation" text NOT NULL,
         "archon_run_id" text,
-        "created_at" timestamp with time zone DEFAULT now() NOT NULL
+        "created_at" timestamp with time zone NOT NULL DEFAULT now()
       )
     `);
 
@@ -184,12 +219,11 @@ async function runMigrations(): Promise<void> {
         "name" text NOT NULL,
         "domain" text NOT NULL DEFAULT '',
         "description" text,
-        "status" text DEFAULT 'active' NOT NULL,
-        "created_at" timestamptz DEFAULT now() NOT NULL
+        "status" text NOT NULL DEFAULT 'active',
+        "created_at" timestamptz NOT NULL DEFAULT now()
       )
     `);
 
-    // Backfill: set default on domain column for existing rows/schema
     await client.query(`
       ALTER TABLE "model_workspaces"
         ALTER COLUMN "domain" SET DEFAULT ''
@@ -203,12 +237,12 @@ async function runMigrations(): Promise<void> {
         "name" text NOT NULL,
         "description" text,
         "source_type" text NOT NULL,
-        "sensitivity" text DEFAULT 'internal' NOT NULL,
-        "status" text DEFAULT 'pending' NOT NULL,
-        "document_count" integer DEFAULT 0 NOT NULL,
-        "total_bytes" bigint DEFAULT 0 NOT NULL,
-        "created_at" timestamptz DEFAULT now() NOT NULL,
-        "updated_at" timestamptz DEFAULT now() NOT NULL
+        "sensitivity" text NOT NULL DEFAULT 'internal',
+        "status" text NOT NULL DEFAULT 'pending',
+        "document_count" integer NOT NULL DEFAULT 0,
+        "total_bytes" bigint NOT NULL DEFAULT 0,
+        "created_at" timestamptz NOT NULL DEFAULT now(),
+        "updated_at" timestamptz NOT NULL DEFAULT now()
       )
     `);
 
@@ -219,10 +253,10 @@ async function runMigrations(): Promise<void> {
         "dataset_id" integer NOT NULL REFERENCES "model_datasets"("id"),
         "version" integer NOT NULL,
         "checksum" text,
-        "document_count" integer DEFAULT 0 NOT NULL,
-        "total_bytes" bigint DEFAULT 0 NOT NULL,
+        "document_count" integer NOT NULL DEFAULT 0,
+        "total_bytes" bigint NOT NULL DEFAULT 0,
         "notes" text,
-        "created_at" timestamptz DEFAULT now() NOT NULL,
+        "created_at" timestamptz NOT NULL DEFAULT now(),
         UNIQUE ("dataset_id", "version")
       )
     `);
@@ -236,12 +270,12 @@ async function runMigrations(): Promise<void> {
         "filename" text NOT NULL,
         "source_url" text,
         "mime_type" text,
-        "size_bytes" bigint DEFAULT 0 NOT NULL,
+        "size_bytes" bigint NOT NULL DEFAULT 0,
         "checksum" text,
         "storage_key" text,
-        "status" text DEFAULT 'pending' NOT NULL,
+        "status" text NOT NULL DEFAULT 'pending',
         "error" text,
-        "created_at" timestamptz DEFAULT now() NOT NULL
+        "created_at" timestamptz NOT NULL DEFAULT now()
       )
     `);
 
@@ -255,14 +289,14 @@ async function runMigrations(): Promise<void> {
         "name" text NOT NULL,
         "mode" text NOT NULL,
         "base_model" text NOT NULL,
-        "hyperparams" jsonb DEFAULT '{}' NOT NULL,
-        "status" text DEFAULT 'draft' NOT NULL,
+        "hyperparams" jsonb NOT NULL DEFAULT '{}',
+        "status" text NOT NULL DEFAULT 'draft',
         "kairos_run_id" text,
-        "compute_backend" text DEFAULT 'stub' NOT NULL,
-        "reforge_suggested" boolean DEFAULT false NOT NULL,
+        "compute_backend" text NOT NULL DEFAULT 'stub',
+        "reforge_suggested" boolean NOT NULL DEFAULT false,
         "error" text,
-        "created_at" timestamptz DEFAULT now() NOT NULL,
-        "updated_at" timestamptz DEFAULT now() NOT NULL
+        "created_at" timestamptz NOT NULL DEFAULT now(),
+        "updated_at" timestamptz NOT NULL DEFAULT now()
       )
     `);
 
@@ -273,8 +307,8 @@ async function runMigrations(): Promise<void> {
         "job_id" integer NOT NULL REFERENCES "training_jobs"("id"),
         "artifact_type" text NOT NULL,
         "storage_key" text,
-        "size_bytes" bigint DEFAULT 0 NOT NULL,
-        "created_at" timestamptz DEFAULT now() NOT NULL
+        "size_bytes" bigint NOT NULL DEFAULT 0,
+        "created_at" timestamptz NOT NULL DEFAULT now()
       )
     `);
 
@@ -284,8 +318,8 @@ async function runMigrations(): Promise<void> {
         "tenant_id" text NOT NULL,
         "job_id" integer NOT NULL REFERENCES "training_jobs"("id"),
         "rubric_id" text,
-        "status" text DEFAULT 'pending' NOT NULL,
-        "created_at" timestamptz DEFAULT now() NOT NULL,
+        "status" text NOT NULL DEFAULT 'pending',
+        "created_at" timestamptz NOT NULL DEFAULT now(),
         "completed_at" timestamptz
       )
     `);
@@ -299,7 +333,7 @@ async function runMigrations(): Promise<void> {
         "value" real NOT NULL,
         "threshold" real,
         "passed" boolean,
-        "created_at" timestamptz DEFAULT now() NOT NULL
+        "created_at" timestamptz NOT NULL DEFAULT now()
       )
     `);
 
@@ -310,7 +344,7 @@ async function runMigrations(): Promise<void> {
         "workspace_id" integer NOT NULL REFERENCES "model_workspaces"("id"),
         "job_id" integer NOT NULL REFERENCES "training_jobs"("id"),
         "name" text NOT NULL,
-        "created_at" timestamptz DEFAULT now() NOT NULL
+        "created_at" timestamptz NOT NULL DEFAULT now()
       )
     `);
 
@@ -320,12 +354,12 @@ async function runMigrations(): Promise<void> {
         "tenant_id" text NOT NULL,
         "registration_id" integer NOT NULL REFERENCES "model_registrations"("id"),
         "version" integer NOT NULL,
-        "status" text DEFAULT 'candidate' NOT NULL,
+        "status" text NOT NULL DEFAULT 'candidate',
         "approved_by" text,
         "approved_at" timestamptz,
         "notes" text,
         "artifact_key" text,
-        "created_at" timestamptz DEFAULT now() NOT NULL,
+        "created_at" timestamptz NOT NULL DEFAULT now(),
         UNIQUE ("registration_id", "version")
       )
     `);
@@ -336,11 +370,11 @@ async function runMigrations(): Promise<void> {
         "tenant_id" text NOT NULL,
         "version_id" integer NOT NULL REFERENCES "model_versions"("id"),
         "endpoint_url" text,
-        "status" text DEFAULT 'pending' NOT NULL,
-        "compute_backend" text DEFAULT 'stub' NOT NULL,
+        "status" text NOT NULL DEFAULT 'pending',
+        "compute_backend" text NOT NULL DEFAULT 'stub',
         "deployed_at" timestamptz,
         "retired_at" timestamptz,
-        "created_at" timestamptz DEFAULT now() NOT NULL
+        "created_at" timestamptz NOT NULL DEFAULT now()
       )
     `);
 
@@ -350,8 +384,8 @@ async function runMigrations(): Promise<void> {
         "tenant_id" text NOT NULL,
         "deployment_id" integer NOT NULL REFERENCES "model_deployments"("id"),
         "path" text NOT NULL,
-        "auth_required" boolean DEFAULT true NOT NULL,
-        "created_at" timestamptz DEFAULT now() NOT NULL
+        "auth_required" boolean NOT NULL DEFAULT true,
+        "created_at" timestamptz NOT NULL DEFAULT now()
       )
     `);
 
@@ -366,7 +400,7 @@ async function runMigrations(): Promise<void> {
         "output_tokens" integer,
         "cost_usd" real,
         "metadata" jsonb,
-        "created_at" timestamptz DEFAULT now() NOT NULL
+        "created_at" timestamptz NOT NULL DEFAULT now()
       )
     `);
 
@@ -374,13 +408,13 @@ async function runMigrations(): Promise<void> {
       CREATE TABLE IF NOT EXISTS "model_policies" (
         "id" serial PRIMARY KEY NOT NULL,
         "tenant_id" text NOT NULL UNIQUE,
-        "allowed_base_models" text[] DEFAULT '{}' NOT NULL,
-        "max_dataset_bytes" bigint DEFAULT 104857600 NOT NULL,
-        "max_concurrent_jobs" integer DEFAULT 2 NOT NULL,
-        "deployment_requires_approval" boolean DEFAULT true NOT NULL,
+        "allowed_base_models" text[] NOT NULL DEFAULT '{}',
+        "max_dataset_bytes" bigint NOT NULL DEFAULT 104857600,
+        "max_concurrent_jobs" integer NOT NULL DEFAULT 2,
+        "deployment_requires_approval" boolean NOT NULL DEFAULT true,
         "budget_limit_usd" real,
-        "created_at" timestamptz DEFAULT now() NOT NULL,
-        "updated_at" timestamptz DEFAULT now() NOT NULL
+        "created_at" timestamptz NOT NULL DEFAULT now(),
+        "updated_at" timestamptz NOT NULL DEFAULT now()
       )
     `);
 
@@ -392,7 +426,7 @@ async function runMigrations(): Promise<void> {
         "action" text NOT NULL,
         "actor_id" text NOT NULL,
         "reason" text,
-        "created_at" timestamptz DEFAULT now() NOT NULL
+        "created_at" timestamptz NOT NULL DEFAULT now()
       )
     `);
 
@@ -420,8 +454,6 @@ app.listen(port, (err) => {
     })
     .catch((err) => {
       // Soft-fail: log the error but do NOT crash the server.
-      // Legal endpoints (/api/v1/legal/*) work without DB.
-      // DB-dependent endpoints will return 503 until DB is available.
-      logger.error({ err }, "DB migrations/seed failed — server continues without DB. Legal endpoints still available.");
+      logger.error({ err }, "DB migrations/seed failed — server continues without DB.");
     });
 });

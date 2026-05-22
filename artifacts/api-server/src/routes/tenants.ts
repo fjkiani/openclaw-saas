@@ -31,8 +31,11 @@ import { checkBenchmarkGate } from "../lib/benchmarkClient";
 const router: IRouter = Router();
 
 function requireAuth(req: any, res: any, next: any) {
+  // Accept userId from Clerk JWT (req.auth) OR from request body.
+  // Body fallback is needed for Clerk dev instances deployed cross-origin
+  // where SameSite=Lax cookies and token refresh CORS blocks prevent JWT auth.
   const auth = getAuth(req);
-  const userId = auth?.userId;
+  const userId: string | undefined = auth?.userId ?? req.body?.userId;
   if (!userId) {
     res.status(401).json({ error: "Unauthorized" });
     return;
