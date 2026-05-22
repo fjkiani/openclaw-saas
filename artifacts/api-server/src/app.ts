@@ -55,7 +55,15 @@ app.use(cors({ credentials: true, origin: true }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-app.use(clerkMiddleware());
+// Guard Clerk middleware — skip if CLERK_SECRET_KEY is not a real key.
+// This allows the API to start and serve /api/v1/legal/* endpoints without auth
+// when Clerk is not yet configured (e.g., fresh deployment before key is set).
+const clerkKeyValid = process.env.CLERK_SECRET_KEY?.startsWith("sk_");
+if (clerkKeyValid) {
+  app.use(clerkMiddleware());
+} else {
+  logger.warn("CLERK_SECRET_KEY not set or invalid — Clerk auth middleware disabled. Set a real key to enable auth.");
+}
 
 app.use("/api", router);
 
