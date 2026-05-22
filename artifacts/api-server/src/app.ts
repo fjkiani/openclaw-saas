@@ -49,14 +49,28 @@ app.get("/dbz", async (_req, res) => {
   }
 });
 
+// Clerk proxy MUST be mounted before express.json() and before CORS
+// so that Clerk FAPI calls are forwarded without body-parsing interference.
 app.use(CLERK_PROXY_PATH, clerkProxyMiddleware());
 
-// CORS — allow the Render frontend and any localhost dev origin
-const ALLOWED_ORIGINS = [
-  "https://openclaw-saas-z2j8.onrender.com",
+// CORS — allow the Render frontend (read from env so it works across deploys)
+// and any localhost dev origin.
+// FRONTEND_URL env var should be set to the full Render static site URL,
+// e.g. https://openclaw-saas-z2j8.onrender.com
+const frontendUrl = process.env.FRONTEND_URL;
+const ALLOWED_ORIGINS: (string | RegExp)[] = [
   /^http:\/\/localhost(:\d+)?$/,
   /^http:\/\/127\.0\.0\.1(:\d+)?$/,
 ];
+if (frontendUrl) {
+  ALLOWED_ORIGINS.push(frontendUrl);
+} else {
+  // Fallback: allow all *.onrender.com origins so the app works even if
+  // FRONTEND_URL is not explicitly set (less strict, fine for staging).
+  ALLOWED_ORIGINS.push(/^https:\/\/[a-z0-9-]+\.onrender\.com$/);
+  logger.warn("FRONTEND_URL not set — allowing all *.onrender.com origins for CORS.");
+}
+
 app.use(cors({
   credentials: true,
   origin: (origin, cb) => {

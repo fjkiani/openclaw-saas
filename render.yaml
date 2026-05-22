@@ -30,6 +30,9 @@ services:
         value: "true"
       - key: KAIROS_SERVICE_URL
         value: https://openclaw-benchmark.onrender.com
+      # CORS: set to the exact URL of the openclaw-saas static site on Render
+      - key: FRONTEND_URL
+        value: https://openclaw-saas-z2j8.onrender.com
 
   - type: web
     name: openclaw-saas
@@ -40,8 +43,14 @@ services:
     envVars:
       - key: VITE_CLERK_PUBLISHABLE_KEY
         sync: false
+      # Proxy URL must point to the actual deployed API service URL + /api/__clerk
+      # This tells ClerkProvider to route all FAPI calls through your own backend,
+      # which forwards them to Clerk with the correct Clerk-Proxy-Url header.
+      # IMPORTANT: replace the hostname below with your actual openclaw-api Render URL.
+      - key: VITE_CLERK_PROXY_URL
+        value: https://openclaw-api-8j2z.onrender.com/api/__clerk
       - key: VITE_API_URL
-        value: https://openclaw-api.onrender.com
+        value: https://openclaw-api-8j2z.onrender.com
       - key: VITE_ZOA_SERVICE_URL
         value: https://openclaw-benchmark.onrender.com/api/v1/zoa
       - key: VITE_ARCHON_FACTORY_URL
@@ -91,7 +100,7 @@ services:
       - key: BENCHMARK_SERVICE_URL
         value: https://openclaw-benchmark.onrender.com
       - key: OPENCLAW_API_URL
-        value: https://openclaw-api.onrender.com
+        value: https://openclaw-api-8j2z.onrender.com
       - key: ARCHON_SERVICE_URL
         value: https://archon-zeta.onrender.com
 
