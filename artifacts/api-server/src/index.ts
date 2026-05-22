@@ -402,19 +402,26 @@ async function runMigrations(): Promise<void> {
   }
 }
 
-// Run migrations + seed, then start server
-runMigrations()
-  .then(() => runSeed())
-  .then(() => {
-    app.listen(port, (err) => {
-      if (err) {
-        logger.error({ err }, "Error listening on port");
-        process.exit(1);
-      }
-      logger.info({ port }, "Server listening");
-    });
-  })
-  .catch((err) => {
-    logger.error({ err }, "Startup failed — aborting");
+// Start server immediately, run migrations + seed in background (soft-fail).
+// This ensures the server starts and serves /healthz even if the DB is temporarily
+// unreachable (e.g., cold start, network delay, or DB not yet provisioned).
+app.listen(port, (err) => {
+  if (err) {
+    logger.error({ err }, "Error listening on port");
     process.exit(1);
-  });
+  }
+  logger.info({ port }, "Server listening");
+
+  // Run migrations + seed after server is up (non-blocking)
+  runMigrations()
+    .then(() => runSeed())
+    .then(() => {
+      logger.info("DB migrations and seed complete.");
+    })
+    .catch((err) => {
+      // Soft-fail: log the error but do NOT crash the server.
+      // Legal endpoints (/api/v1/legal/*) work without DB.
+      // DB-dependent endpoints will return 503 until DB is available.
+      logger.error({ err }, "DB migrations/seed failed — server continues without DB. Legal endpoints still available.");
+    });
+});
