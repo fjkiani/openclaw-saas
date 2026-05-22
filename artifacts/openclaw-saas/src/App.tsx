@@ -21,18 +21,18 @@ import SetupPage from "@/pages/onboarding/setup";
 
 const queryClient = new QueryClient();
 
-const clerkPubKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
-const clerkProxyUrl = import.meta.env.VITE_CLERK_PROXY_URL;
+const clerkPubKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY as string | undefined;
+const clerkProxyUrl = import.meta.env.VITE_CLERK_PROXY_URL as string | undefined;
 const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
+
+// Auth is optional — app runs in demo mode when Clerk key is not configured.
+// Set VITE_CLERK_PUBLISHABLE_KEY=pk_live_... to enable full auth.
+const clerkEnabled = typeof clerkPubKey === "string" && clerkPubKey.startsWith("pk_");
 
 function stripBase(path: string): string {
   return basePath && path.startsWith(basePath)
     ? path.slice(basePath.length) || "/"
     : path;
-}
-
-if (!clerkPubKey) {
-  throw new Error("Missing VITE_CLERK_PUBLISHABLE_KEY in .env file");
 }
 
 const clerkAppearance = {
@@ -132,7 +132,30 @@ function ClerkQueryClientCacheInvalidator() {
   return null;
 }
 
+// ── Demo-mode stub shown when Clerk is not configured ────────────────────────
+function DemoAuthNotice() {
+  return (
+    <div className="flex min-h-[100dvh] items-center justify-center bg-background px-4">
+      <div className="max-w-md w-full border border-border rounded-lg p-8 text-center space-y-4">
+        <div className="text-2xl font-mono font-bold text-primary">OpenClaw</div>
+        <p className="text-muted-foreground text-sm">
+          Auth is not yet configured. Set{" "}
+          <code className="bg-muted px-1 rounded text-xs">VITE_CLERK_PUBLISHABLE_KEY</code>{" "}
+          in the Render dashboard to enable sign-in.
+        </p>
+        <p className="text-muted-foreground text-xs">
+          Legal analysis tools are available without auth — navigate directly to{" "}
+          <a href="/forge" className="text-primary underline">/forge</a>.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ── Auth-aware wrappers ───────────────────────────────────────────────────────
+
 function HomeRedirect() {
+  if (!clerkEnabled) return <LandingPage />;
   return (
     <>
       <Show when="signed-in">
@@ -146,6 +169,8 @@ function HomeRedirect() {
 }
 
 function ProtectedRoute({ component: Component }: { component: React.ComponentType }) {
+  // No Clerk — render the component directly (demo mode, no auth gate)
+  if (!clerkEnabled) return <Component />;
   return (
     <>
       <Show when="signed-in">
@@ -158,12 +183,43 @@ function ProtectedRoute({ component: Component }: { component: React.ComponentTy
   );
 }
 
+// ── Routes (shared between Clerk and no-Clerk modes) ─────────────────────────
+
+function AppRoutes() {
+  return (
+    <QueryClientProvider client={queryClient}>
+      {clerkEnabled && <ClerkQueryClientCacheInvalidator />}
+      <Switch>
+        <Route path="/" component={HomeRedirect} />
+        <Route path="/sign-in/*?">{clerkEnabled ? <SignInPage /> : <DemoAuthNotice />}</Route>
+        <Route path="/sign-up/*?">{clerkEnabled ? <SignUpPage /> : <DemoAuthNotice />}</Route>
+        <Route path="/dashboard"><ProtectedRoute component={DashboardPage} /></Route>
+        <Route path="/agents"><ProtectedRoute component={AgentsPage} /></Route>
+        <Route path="/agents/:id"><ProtectedRoute component={AgentDetailPage} /></Route>
+        <Route path="/skills"><ProtectedRoute component={SkillsPage} /></Route>
+        <Route path="/billing"><ProtectedRoute component={BillingPage} /></Route>
+        <Route path="/zoa"><ProtectedRoute component={ZoaPage} /></Route>
+        <Route path="/forge"><ProtectedRoute component={ForgePage} /></Route>
+        <Route path="/forge/:wid/:tab?"><ProtectedRoute component={ForgeWorkspacePage} /></Route>
+        <Route path="/onboarding"><ProtectedRoute component={VerticalPickerPage} /></Route>
+        <Route path="/onboarding/setup"><ProtectedRoute component={SetupPage} /></Route>
+        <Route component={NotFound} />
+      </Switch>
+    </QueryClientProvider>
+  );
+}
+
 function ClerkProviderWithRoutes() {
   const [, setLocation] = useLocation();
 
+  if (!clerkEnabled) {
+    // No valid Clerk key — render without ClerkProvider
+    return <AppRoutes />;
+  }
+
   return (
     <ClerkProvider
-      publishableKey={clerkPubKey}
+      publishableKey={clerkPubKey!}
       proxyUrl={clerkProxyUrl}
       appearance={clerkAppearance}
       signInUrl={`${basePath}/sign-in`}
@@ -185,26 +241,7 @@ function ClerkProviderWithRoutes() {
       routerPush={(to) => setLocation(stripBase(to))}
       routerReplace={(to) => setLocation(stripBase(to), { replace: true })}
     >
-      <QueryClientProvider client={queryClient}>
-        <ClerkQueryClientCacheInvalidator />
-        <Switch>
-          <Route path="/" component={HomeRedirect} />
-          <Route path="/sign-in/*?" component={SignInPage} />
-          <Route path="/sign-up/*?" component={SignUpPage} />
-          <Route path="/dashboard"><ProtectedRoute component={DashboardPage} /></Route>
-          <Route path="/agents"><ProtectedRoute component={AgentsPage} /></Route>
-          <Route path="/agents/:id"><ProtectedRoute component={AgentDetailPage} /></Route>
-          <Route path="/skills"><ProtectedRoute component={SkillsPage} /></Route>
-          <Route path="/billing"><ProtectedRoute component={BillingPage} /></Route>
-          <Route path="/zoa"><ProtectedRoute component={ZoaPage} /></Route>
-          <Route path="/forge"><ProtectedRoute component={ForgePage} /></Route>
-          <Route path="/forge/:wid/:tab?"><ProtectedRoute component={ForgeWorkspacePage} /></Route>
-          {/* Onboarding — new user green path */}
-          <Route path="/onboarding"><ProtectedRoute component={VerticalPickerPage} /></Route>
-          <Route path="/onboarding/setup"><ProtectedRoute component={SetupPage} /></Route>
-          <Route component={NotFound} />
-        </Switch>
-      </QueryClientProvider>
+      <AppRoutes />
     </ClerkProvider>
   );
 }
