@@ -1,6 +1,7 @@
 import express, { type Express, type Request, type Response, type NextFunction } from "express";
 import cors from "cors";
 import pinoHttp from "pino-http";
+import { clerkMiddleware } from "@clerk/express";
 import {
   CLERK_PROXY_PATH,
   clerkProxyMiddleware,
@@ -35,7 +36,7 @@ app.get("/healthz", (_req, res) => {
   res.json({ status: "ok" });
 });
 
-// DB connectivity probe — no auth required, useful for diagnosing startup issues
+// DB connectivity probe — no auth required
 app.get("/dbz", async (_req, res) => {
   try {
     const { pool } = await import("@workspace/db");
@@ -50,30 +51,40 @@ app.get("/dbz", async (_req, res) => {
 
 app.use(CLERK_PROXY_PATH, clerkProxyMiddleware());
 
-app.use(cors({ credentials: true, origin: true }));
+// CORS — allow the Render frontend and any localhost dev origin
+const ALLOWED_ORIGINS = [
+  "https://openclaw-saas-z2j8.onrender.com",
+  /^http:\/\/localhost(:\d+)?$/,
+  /^http:\/\/127\.0\.0\.1(:\d+)?$/,
+];
+app.use(cors({
+  credentials: true,
+  origin: (origin, cb) => {
+    // Allow requests with no origin (curl, Postman, server-to-server)
+    if (!origin) return cb(null, true);
+    const allowed = ALLOWED_ORIGINS.some((o) =>
+      typeof o === "string" ? o === origin : o.test(origin)
+    );
+    cb(allowed ? null : new Error(`CORS: origin ${origin} not allowed`), allowed);
+  },
+}));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Guard Clerk middleware — lazy-import so the module doesn't throw at startup
-// when CLERK_SECRET_KEY is not yet set (fresh deployment).
-// Legal endpoints (/api/v1/legal/*) work without auth.
-// Set CLERK_SECRET_KEY=sk_... in Render dashboard to enable full auth.
+// Clerk auth middleware — synchronous registration so req.auth is always
+// populated before any route handler runs.
+// clerkMiddleware() is safe to call even when CLERK_SECRET_KEY is missing:
+// it will simply leave req.auth undefined (no throw).
 if (process.env.CLERK_SECRET_KEY?.startsWith("sk_")) {
-  // Dynamic import to avoid @clerk/express SDK throwing at module load time
-  // when the key is missing or invalid.
-  import("@clerk/express").then(({ clerkMiddleware }) => {
-    app.use(clerkMiddleware());
-    logger.info("Clerk auth middleware enabled.");
-  }).catch((err) => {
-    logger.warn({ err }, "Clerk middleware failed to load — auth disabled.");
-  });
+  app.use(clerkMiddleware());
+  logger.info("Clerk auth middleware enabled.");
 } else {
-  logger.warn("CLERK_SECRET_KEY not set or invalid — Clerk auth middleware disabled. Set a real key to enable auth.");
+  logger.warn("CLERK_SECRET_KEY not set or invalid — Clerk auth disabled. Legal endpoints still work.");
 }
 
 app.use("/api", router);
 
-// Global error handler — catches unhandled errors from async route handlers
+// Global error handler
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 app.use((err: Error & { cause?: Error; query?: string }, _req: Request, res: Response, _next: NextFunction) => {
   logger.error({ err }, "Unhandled route error");

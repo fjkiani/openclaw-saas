@@ -1,5 +1,7 @@
 import { useEffect, useRef } from "react";
-import { ClerkProvider, SignIn, SignUp, Show, useClerk } from "@clerk/react";
+import { ClerkProvider, SignIn, SignUp, Show, useClerk, useAuth } from "@clerk/react";
+import { registerClerkTokenGetter } from "@/lib/apiFetch";
+import { setAuthTokenGetter } from "@workspace/api-client-react";
 import { shadcn } from "@clerk/themes";
 import { Switch, Route, Redirect, useLocation, Router as WouterRouter } from "wouter";
 import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
@@ -110,6 +112,18 @@ function SignUpPage() {
   );
 }
 
+// Registers Clerk's getToken() as the Bearer token supplier for all apiFetch
+// and generated API client calls. Must be rendered inside <ClerkProvider>.
+function ClerkTokenSync() {
+  const { getToken } = useAuth();
+  useEffect(() => {
+    const getter = () => getToken();
+    registerClerkTokenGetter(getter);
+    setAuthTokenGetter(getter);
+  }, [getToken]);
+  return null;
+}
+
 function ClerkQueryClientCacheInvalidator() {
   const { addListener } = useClerk();
   const queryClient = useQueryClient();
@@ -188,6 +202,7 @@ function ProtectedRoute({ component: Component }: { component: React.ComponentTy
 function AppRoutes() {
   return (
     <QueryClientProvider client={queryClient}>
+      {clerkEnabled && <ClerkTokenSync />}
       {clerkEnabled && <ClerkQueryClientCacheInvalidator />}
       <Switch>
         <Route path="/" component={HomeRedirect} />
