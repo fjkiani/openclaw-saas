@@ -138,23 +138,28 @@ router.post("/onboarding/provision", async (req, res): Promise<void> => {
     await client.query(
       `INSERT INTO model_versions (
          tenant_id, registration_id, version, artifact_key,
-         base_model, dataset_version_id, eval_accuracy, status, notes
+         status, notes
        )
-       VALUES ($1, $2, 1, $3, 'liquid/lfm-2.5-1.2b-instruct', $4, 1.0, 'approved',
+       VALUES ($1, $2, 1, $3, 'approved',
          'RAG-augmented. Eval: acc=1.0, macro_f1=1.0 on 10 test examples. Internal regression only. Not production-ready.')`,
       [
         tenantId, regId,
         `legal-clause-extractor-v1-${tenantId}`,
-        datasetVersionId,
       ],
     );
 
-    // 8. Seed deployment
+    // 8. Seed deployment — get the version id we just inserted
+    const versionRes2 = await client.query(
+      `SELECT id FROM model_versions WHERE registration_id = $1 AND version = 1`,
+      [regId],
+    );
+    const versionId: number = versionRes2.rows[0].id;
+
     const deployRes = await client.query(
-      `INSERT INTO model_deployments (tenant_id, workspace_id, registration_id, version, status)
-       VALUES ($1, $2, $3, 1, 'active')
+      `INSERT INTO model_deployments (tenant_id, version_id, status, compute_backend)
+       VALUES ($1, $2, 'active', 'stub')
        RETURNING id`,
-      [tenantId, workspaceId, regId],
+      [tenantId, versionId],
     );
     const deployId: number = deployRes.rows[0].id;
 
