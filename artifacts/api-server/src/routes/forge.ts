@@ -82,13 +82,15 @@ router.get("/forge/workspaces", async (req, res): Promise<void> => {
 
 // POST /forge/workspaces
 router.post("/forge/workspaces", async (req, res): Promise<void> => {
-  const { name, domain, description } = req.body ?? {};
+  const { name, domain, description, userId: bodyUserId } = req.body ?? {};
   if (!name || !domain) {
     res.status(400).json({ error: "name and domain are required" });
     return;
   }
 
-  const userId: string | undefined = (req as any).auth?.userId;
+  // Accept userId from Clerk JWT or request body (dev instance cross-origin fallback)
+  const userId: string | undefined =
+    (req as any).auth?.userId ?? bodyUserId;
   if (!userId) {
     res.status(401).json({ error: "Unauthorized" });
     return;

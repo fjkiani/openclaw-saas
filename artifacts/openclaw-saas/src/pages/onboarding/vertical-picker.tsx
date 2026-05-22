@@ -90,7 +90,11 @@ export default function VerticalPickerPage() {
     setProvisioning(true);
     setError(null);
 
-    apiFetch("/api/onboarding/provision", { method: "POST" })
+    apiFetch("/api/onboarding/provision", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    })
       .then(async (r) => {
         if (!r.ok) throw new Error(`Provision failed: ${r.status}`);
         const raw = await r.text();

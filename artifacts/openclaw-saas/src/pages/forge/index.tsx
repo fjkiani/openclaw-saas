@@ -102,7 +102,11 @@ export default function ForgePage() {
     provisionedRef.current = true;
 
     setProvisioning(true);
-    apiFetch("/api/onboarding/provision", { method: "POST" })
+    apiFetch("/api/onboarding/provision", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    })
       .then(async (r) => {
         if (!r.ok) throw new Error(`${r.status}`);
         const raw = await r.text();

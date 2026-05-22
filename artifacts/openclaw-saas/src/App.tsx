@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { ClerkProvider, SignIn, SignUp, Show, useClerk, useAuth } from "@clerk/react";
+import { ClerkProvider, SignIn, SignUp, Show, useClerk, useAuth, useUser } from "@clerk/react";
 import { registerClerkTokenGetter } from "@/lib/apiFetch";
 import { setAuthTokenGetter } from "@workspace/api-client-react";
 import { shadcn } from "@clerk/themes";
@@ -112,15 +112,19 @@ function SignUpPage() {
   );
 }
 
-// Registers Clerk's getToken() as the Bearer token supplier for all apiFetch
-// and generated API client calls. Must be rendered inside <ClerkProvider>.
+// Registers Clerk's getToken() + userId as auth suppliers for all apiFetch calls.
+// Must be rendered inside <ClerkProvider>.
+// userId is injected into request bodies as a fallback for dev instances
+// deployed cross-origin where token refresh CORS blocks Bearer auth.
 function ClerkTokenSync() {
   const { getToken } = useAuth();
+  const { user } = useUser();
   useEffect(() => {
-    const getter = () => getToken();
-    registerClerkTokenGetter(getter);
-    setAuthTokenGetter(getter);
-  }, [getToken]);
+    const tokenGetter = () => getToken();
+    const userIdGetter = () => user?.id ?? null;
+    registerClerkTokenGetter(tokenGetter, userIdGetter);
+    setAuthTokenGetter(tokenGetter);
+  }, [getToken, user?.id]);
   return null;
 }
 

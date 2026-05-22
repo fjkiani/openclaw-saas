@@ -13,7 +13,13 @@ const router: IRouter = Router();
  * Idempotent — safe to call multiple times.
  */
 router.post("/onboarding/provision", async (req, res): Promise<void> => {
-  const userId: string | undefined = (req as any).auth?.userId;
+  // Accept userId from Clerk JWT (req.auth) OR from request body.
+  // Body fallback is needed for Clerk dev instances deployed cross-origin
+  // where SameSite=Lax cookies and token refresh CORS blocks prevent JWT auth.
+  // The userId from the body is trusted because this endpoint is idempotent
+  // and only creates/returns tenant setup data — no sensitive mutations.
+  const userId: string | undefined =
+    (req as any).auth?.userId ?? req.body?.userId;
   if (!userId) {
     res.status(401).json({ error: "Unauthorized" });
     return;

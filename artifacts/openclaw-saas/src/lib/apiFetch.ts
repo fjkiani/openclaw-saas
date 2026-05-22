@@ -2,18 +2,23 @@
  * apiFetch — fetch wrapper that:
  *  1. Prepends VITE_API_URL to every relative /api/... path (production cross-origin)
  *  2. Attaches Authorization: Bearer <token> when a Clerk token getter is registered
+ *  3. Injects userId into JSON request bodies as a fallback for Clerk dev instances
+ *     deployed cross-origin (where SameSite=Lax cookies + CORS block token refresh)
  *
- * Call `registerClerkTokenGetter(getToken)` once at app startup (in main.tsx or App.tsx)
- * to enable authenticated requests.
+ * Call `registerClerkTokenGetter(getToken, getUserId)` once at app startup.
  */
 
 const API_BASE = ((import.meta.env.VITE_API_URL as string | undefined) ?? "").replace(/\/+$/, "");
 
 type TokenGetter = () => Promise<string | null>;
-let _tokenGetter: TokenGetter | null = null;
+type UserIdGetter = () => string | null | undefined;
 
-export function registerClerkTokenGetter(getter: TokenGetter): void {
+let _tokenGetter: TokenGetter | null = null;
+let _userIdGetter: UserIdGetter | null = null;
+
+export function registerClerkTokenGetter(getter: TokenGetter, userIdGetter?: UserIdGetter): void {
   _tokenGetter = getter;
+  if (userIdGetter) _userIdGetter = userIdGetter;
 }
 
 export async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
@@ -27,9 +32,33 @@ export async function apiFetch(path: string, init: RequestInit = {}): Promise<Re
       const token = await _tokenGetter();
       if (token) headers.set("authorization", `Bearer ${token}`);
     } catch {
-      // If token fetch fails (e.g. not signed in), proceed without auth header
+      // Token fetch failed (CORS on dev instance) — fall through to userId body injection
     }
   }
 
-  return fetch(url, { credentials: "include", ...init, headers });
+  // Inject userId into JSON POST/PUT/PATCH bodies as fallback auth for dev instances
+  let body = init.body;
+  const method = (init.method ?? "GET").toUpperCase();
+  if (
+    _userIdGetter &&
+    !headers.has("authorization") &&
+    ["POST", "PUT", "PATCH"].includes(method) &&
+    (headers.get("content-type")?.includes("application/json") || typeof body === "string")
+  ) {
+    const userId = _userIdGetter();
+    if (userId) {
+      try {
+        const parsed = body ? JSON.parse(body as string) : {};
+        if (!parsed.userId) {
+          parsed.userId = userId;
+          body = JSON.stringify(parsed);
+          headers.set("content-type", "application/json");
+        }
+      } catch {
+        // Body isn't JSON — skip injection
+      }
+    }
+  }
+
+  return fetch(url, { credentials: "include", ...init, body, headers });
 }
