@@ -1,7 +1,6 @@
 import express, { type Express, type Request, type Response, type NextFunction } from "express";
 import cors from "cors";
 import pinoHttp from "pino-http";
-import { clerkMiddleware } from "@clerk/express";
 import {
   CLERK_PROXY_PATH,
   clerkProxyMiddleware,
@@ -55,12 +54,19 @@ app.use(cors({ credentials: true, origin: true }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Guard Clerk middleware — skip if CLERK_SECRET_KEY is not a real key.
-// This allows the API to start and serve /api/v1/legal/* endpoints without auth
-// when Clerk is not yet configured (e.g., fresh deployment before key is set).
-const clerkKeyValid = process.env.CLERK_SECRET_KEY?.startsWith("sk_");
-if (clerkKeyValid) {
-  app.use(clerkMiddleware());
+// Guard Clerk middleware — lazy-import so the module doesn't throw at startup
+// when CLERK_SECRET_KEY is not yet set (fresh deployment).
+// Legal endpoints (/api/v1/legal/*) work without auth.
+// Set CLERK_SECRET_KEY=sk_... in Render dashboard to enable full auth.
+if (process.env.CLERK_SECRET_KEY?.startsWith("sk_")) {
+  // Dynamic import to avoid @clerk/express SDK throwing at module load time
+  // when the key is missing or invalid.
+  import("@clerk/express").then(({ clerkMiddleware }) => {
+    app.use(clerkMiddleware());
+    logger.info("Clerk auth middleware enabled.");
+  }).catch((err) => {
+    logger.warn({ err }, "Clerk middleware failed to load — auth disabled.");
+  });
 } else {
   logger.warn("CLERK_SECRET_KEY not set or invalid — Clerk auth middleware disabled. Set a real key to enable auth.");
 }
