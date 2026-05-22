@@ -1570,7 +1570,14 @@ export default function ForgeWorkspacePage() {
   const wid = Number(params.wid);
   const tab: TabKey = (params.tab as TabKey) ?? "datasets";
 
-  const { data: workspace, isLoading } = useGetForgeWorkspace(wid);
+  const { data: workspace, isLoading, error: workspaceError } = useGetForgeWorkspace(wid);
+
+  // Auto-redirect to onboarding if this workspace is not accessible (403 = wrong user session)
+  useEffect(() => {
+    if ((workspaceError as any)?.status === 403) {
+      navigate("/onboarding");
+    }
+  }, [workspaceError, navigate]);
 
   const handleTabChange = (key: TabKey) => {
     navigate(`/forge/${wid}/${key}`);

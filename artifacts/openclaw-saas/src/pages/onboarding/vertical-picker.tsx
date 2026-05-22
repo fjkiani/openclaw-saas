@@ -88,6 +88,10 @@ export default function VerticalPickerPage() {
 
   function handleLive() {
     if (provisionedRef.current || provisioning) return;
+    if (!user?.id) {
+      setError("Still loading your account — please try again in a moment.");
+      return;
+    }
     provisionedRef.current = true;
     setProvisioning(true);
     setError(null);
@@ -95,9 +99,7 @@ export default function VerticalPickerPage() {
     apiFetch("/api/onboarding/provision", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      // Pass userId explicitly — fallback for Clerk dev instances cross-origin
-      // where server-side JWT verification fails (SameSite/CORS on dev FAPI).
-      body: JSON.stringify({ userId: user?.id }),
+      body: JSON.stringify({ userId: user.id }),
     })
       .then(async (r) => {
         if (!r.ok) throw new Error(`Provision failed: ${r.status}`);

@@ -98,8 +98,11 @@ export default function ForgePage() {
   const { data: workspaces, isLoading } = useListForgeWorkspaces();
 
   // On first load: call provision endpoint to ensure tenant + starter workspace exist.
-  // If a new workspace was provisioned, redirect directly to its registry tab.
+  // IMPORTANT: gate on user?.id — Clerk loads asynchronously, so user is undefined
+  // on the first render. Without this guard, provision fires with userId=undefined
+  // and the server returns 401, which shows the "warming up" error.
   useEffect(() => {
+    if (!user?.id) return;           // wait for Clerk to load the user
     if (provisionedRef.current) return;
     provisionedRef.current = true;
 
@@ -107,7 +110,7 @@ export default function ForgePage() {
     apiFetch("/api/onboarding/provision", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ userId: user?.id }),
+      body: JSON.stringify({ userId: user.id }),
     })
       .then(async (r) => {
         if (!r.ok) throw new Error(`${r.status}`);
@@ -125,7 +128,7 @@ export default function ForgePage() {
       .catch(() => {
         setProvisioning(false);
       });
-  }, [navigate, queryClient]);
+  }, [user?.id, navigate, queryClient]);
 
   const createWorkspace = useCreateForgeWorkspace({
     mutation: {
