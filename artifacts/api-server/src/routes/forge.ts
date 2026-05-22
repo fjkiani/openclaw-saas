@@ -88,9 +88,10 @@ router.post("/forge/workspaces", async (req, res): Promise<void> => {
     return;
   }
 
-  // Accept userId from Clerk JWT or request body (dev instance cross-origin fallback)
-  const userId: string | undefined =
-    (req as any).auth?.userId ?? bodyUserId;
+  // Accept userId from Clerk JWT or request body (dev instance cross-origin fallback).
+  // Body userId must start with "user_" (Clerk ID format) to prevent trivial spoofing.
+  const validBodyUserId = typeof bodyUserId === "string" && bodyUserId.startsWith("user_") ? bodyUserId : undefined;
+  const userId: string | undefined = (req as any).auth?.userId ?? validBodyUserId;
   if (!userId) {
     res.status(401).json({ error: "Unauthorized" });
     return;

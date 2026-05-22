@@ -1,4 +1,5 @@
 import { useState, useRef } from "react";
+import { useUser } from "@clerk/react";
 import { useLocation } from "wouter";
 import { apiFetch } from "@/lib/apiFetch";
 import {
@@ -83,6 +84,7 @@ export default function VerticalPickerPage() {
   const [customDomain, setCustomDomain] = useState("");
   const [customSubmitting, setCustomSubmitting] = useState(false);
   const provisionedRef = useRef(false);
+  const { user } = useUser();
 
   function handleLive() {
     if (provisionedRef.current || provisioning) return;
@@ -93,7 +95,9 @@ export default function VerticalPickerPage() {
     apiFetch("/api/onboarding/provision", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({}),
+      // Pass userId explicitly — fallback for Clerk dev instances cross-origin
+      // where server-side JWT verification fails (SameSite/CORS on dev FAPI).
+      body: JSON.stringify({ userId: user?.id }),
     })
       .then(async (r) => {
         if (!r.ok) throw new Error(`Provision failed: ${r.status}`);

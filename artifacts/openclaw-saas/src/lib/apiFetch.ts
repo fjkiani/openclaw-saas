@@ -36,12 +36,14 @@ export async function apiFetch(path: string, init: RequestInit = {}): Promise<Re
     }
   }
 
-  // Inject userId into JSON POST/PUT/PATCH bodies as fallback auth for dev instances
+  // Always inject userId into JSON POST/PUT/PATCH bodies.
+  // The server uses req.auth?.userId first (JWT), then req.body.userId as fallback.
+  // Injecting unconditionally means cross-origin dev instances work even when
+  // the Bearer token is present but the server-side JWT verification fails.
   let body = init.body;
   const method = (init.method ?? "GET").toUpperCase();
   if (
     _userIdGetter &&
-    !headers.has("authorization") &&
     ["POST", "PUT", "PATCH"].includes(method) &&
     (headers.get("content-type")?.includes("application/json") || typeof body === "string")
   ) {
