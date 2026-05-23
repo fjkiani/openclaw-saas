@@ -1576,6 +1576,9 @@ router.post("/v1/legal/action", async (req, res): Promise<void> => {
       if (verification.unresolved_issues.includes(issue.id)) {
         return { issue_id: issue.id, status: "unresolved", evidence: "Not addressed in draft" };
       }
+      if (verification.partially_addressed_issues.includes(issue.id)) {
+        return { issue_id: issue.id, status: "partially_addressed", evidence: "Partially addressed in draft per verifier" };
+      }
       return { issue_id: issue.id, status: "addressed", evidence: "Addressed in draft per verifier" };
     });
     const issueResolutionMap = buildIssueResolutionMap(issues, coverageForMap);
@@ -1632,6 +1635,7 @@ router.post("/v1/legal/action", async (req, res): Promise<void> => {
       verification: {
         passed: verification.passed,
         unresolved_issues: verification.unresolved_issues,
+        partially_addressed_issues: verification.partially_addressed_issues,
         new_risks_detected: verification.new_risks_detected,
         human_only_blockers: verification.human_only_blockers,
       },

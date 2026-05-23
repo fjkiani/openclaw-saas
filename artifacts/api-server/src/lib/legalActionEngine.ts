@@ -50,6 +50,7 @@ export interface IssueResolution {
 export interface VerificationResult {
   passed: boolean;
   unresolved_issues: string[];
+  partially_addressed_issues: string[];
   new_risks_detected: string[];
   human_only_blockers: string[];
   contradiction_notes: string[];
@@ -444,6 +445,10 @@ Set "passed" to true only if:
     .filter((c) => c.status === "unresolved")
     .map((c) => c.issue_id);
 
+  const partiallyAddressed = coverage
+    .filter((c) => c.status === "partially_addressed")
+    .map((c) => c.issue_id);
+
   const humanOnly = coverage
     .filter((c) => c.status === "human_only_blocker")
     .map((c) => c.issue_id);
@@ -470,6 +475,7 @@ Set "passed" to true only if:
   return {
     passed,
     unresolved_issues: unresolved,
+    partially_addressed_issues: partiallyAddressed,
     new_risks_detected: newRisks,
     human_only_blockers: humanOnly,
     contradiction_notes: contradictions,
