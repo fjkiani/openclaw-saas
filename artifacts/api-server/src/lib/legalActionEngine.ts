@@ -22,6 +22,12 @@
  */
 
 import { createHmac, createHash, randomUUID } from "crypto";
+import {
+  DRAFT_PROMPT_VERSION,
+  VERIFY_PROMPT_VERSION,
+  ACTION_POLICY_VERSION,
+  CORPUS_VERSION,
+} from "../prompts/versions.js";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -107,12 +113,10 @@ export interface ActionInput {
  *  against replay risk. Adjust via RECEIPT_TTL_HOURS env var if needed. */
 const RECEIPT_TTL_MS = (parseInt(process.env.RECEIPT_TTL_HOURS ?? "4", 10) || 4) * 60 * 60 * 1000;
 
-/** Prompt and policy version constants — bump these when prompts or policy change.
- *  These are embedded in every action trace and action_run log for reproducibility. */
-export const DRAFT_PROMPT_VERSION = "2a.1";
-export const VERIFY_PROMPT_VERSION = "2a.1";
-export const ACTION_POLICY_VERSION = "legal-action-v1";
-export const CORPUS_VERSION = "cofounder-corpus-v1";
+// Version constants are imported from ../prompts/versions.ts — the single source
+// of truth. Re-exported here so callers that import from legalActionEngine.ts
+// continue to work without changes.
+export { DRAFT_PROMPT_VERSION, VERIFY_PROMPT_VERSION, ACTION_POLICY_VERSION, CORPUS_VERSION };
 
 const PRIVILEGE_WARNING =
   "This output is not legal advice. It is a draft artifact for attorney review only. " +
