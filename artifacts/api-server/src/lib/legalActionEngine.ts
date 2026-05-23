@@ -623,3 +623,320 @@ export function buildActionGovernance(
 // ── Internal helper: extract issues (re-exported for route use) ───────────────
 export { extractIssues };
 export type { NormalizedIssue };
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Phase 2B: generate_revision_plan
+//
+// Semantics: a structured plan of proposed edits derived from verified issues
+// and the original source text. NOT a diff against the prior Phase 2A draft —
+// the server does not have the prior draft body, only its hash. The name
+// "revision plan" is intentionally honest about this constraint.
+//
+// Trust chain: MatterReceipt → ActionReceipt → RevisionPlanArtifact
+// The ActionReceipt (from Commit C) is the trust anchor. The route verifies
+// both tokens and confirms lineage before any model call.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+import { REDLINE_PROMPT_VERSION } from "../prompts/versions.js";
+
+// ── Phase 2B types ────────────────────────────────────────────────────────────
+
+export type RevisionEditType = "insert" | "replace" | "delete" | "flag_for_attorney";
+
+export interface RevisionEdit {
+  issue_id: string;
+  issue_status: IssueStatus;       // from Phase 2A issue_resolution_map
+  edit_type: RevisionEditType;
+  location_hint: string;           // e.g. "paragraph 3, sentence 2" or "equity clause"
+  proposed_text: string;           // new language to insert or replace with; "" for delete
+  rationale: string;               // why this edit addresses the issue
+  requires_attorney: boolean;      // true iff edit_type === "flag_for_attorney"
+}
+
+export interface RevisionPlanArtifact {
+  summary: string;                 // 1–3 sentence plain-language summary of proposed changes
+  edits: RevisionEdit[];
+  unaddressable_issues: string[];  // issue_ids with human_only_blocker status — no edit generated
+  total_edits: number;
+}
+
+export interface RevisionVerificationResult {
+  passed: boolean;
+  missing_edits: string[];         // issue_ids (unresolved/partially_addressed) with no edit
+  invented_facts: string[];        // edits that introduce facts not in original text
+  misrouted_blockers: string[];    // human_only_blocker issues that appeared in edits (not unaddressable)
+  model_used: string;
+  fallback_used: boolean;
+  latency_ms: number;
+}
+
+export interface RevisionActionInput {
+  matterReceipt: MatterReceipt;
+  actionReceipt: ActionReceipt;
+  originalText: string;
+  userInstruction?: string;
+  callModelWithFallback: (
+    systemPrompt: string,
+    userContent: string,
+    title: string,
+    maxTokens: number,
+    chain: unknown[],
+  ) => Promise<{ parsed: any; model_used: string; fallback_used: boolean; latency_ms: number }>;
+  modelChain: unknown[];
+}
+
+// ── generateRevisionPlan ──────────────────────────────────────────────────────
+
+/**
+ * Generate a structured revision plan from verified Phase 2A artifacts.
+ *
+ * The model receives:
+ *   - The original source text (re-verified against ActionReceipt.original_text_hash)
+ *   - The list of unresolved/partially_addressed issues from Phase 2A
+ *   - The artifact_status from Phase 2A (context for severity)
+ *
+ * The model does NOT receive the prior draft body — only its hash is in the
+ * ActionReceipt. Edits are generated from first principles against the source
+ * text and issue list, not as a diff of the prior draft.
+ */
+export async function generateRevisionPlan(input: RevisionActionInput): Promise<{
+  artifact: RevisionPlanArtifact;
+  model_used: string;
+  fallback_used: boolean;
+  latency_ms: number;
+}> {
+  const issues = extractIssues(input.matterReceipt.specialist_output);
+
+  // Separate issues by Phase 2A status (from ActionReceipt metadata context).
+  // We re-extract from specialist_output because the ActionReceipt carries only
+  // the hash of the issue_resolution_map, not its content. The specialist_output
+  // is trusted (it's inside the signed MatterReceipt).
+  // The revision plan targets unresolved and partially_addressed issues.
+  // human_only_blocker issues go into unaddressable_issues.
+  const actionableIssues = issues.filter((i) =>
+    // We don't know per-issue status from the ActionReceipt alone (only the map hash).
+    // Generate edits for all issues; the verifier will flag misrouted blockers.
+    // This is conservative: better to generate an edit the verifier rejects than
+    // to silently omit an issue.
+    true,
+  );
+
+  const issueList = actionableIssues
+    .map((i, idx) => `${idx + 1}. [${i.source.toUpperCase()}] ${i.id}: ${i.description}`)
+    .join("\n");
+
+  const systemPrompt = `You are a legal revision planner. You produce structured revision plans for attorney review only.
+
+A prior analysis identified issues in a legal document. A draft artifact was generated and verified (Phase 2A).
+Your task is to produce a structured plan of proposed edits to address the identified issues.
+
+IMPORTANT CONSTRAINTS:
+1. You do NOT have the prior draft. Generate edits based on the ORIGINAL SOURCE TEXT and ISSUE LIST below.
+2. For each issue, produce one RevisionEdit entry.
+3. If an issue CANNOT be addressed by a document edit (requires attorney action, court filing, regulatory approval, etc.),
+   set edit_type to "flag_for_attorney" and add the issue_id to unaddressable_issues.
+4. Do NOT invent specific facts (names, dates, amounts, entity names) not present in the source text.
+   Use descriptive placeholders like "[INSERT: vesting schedule terms]" instead.
+5. location_hint should reference the relevant section of the source text (e.g. "equity clause", "termination section").
+6. proposed_text should be specific, actionable language — not generic boilerplate.
+7. The plan is for attorney review. Include only edits you can ground in the source text and issue list.
+
+ARTIFACT STATUS FROM PRIOR ANALYSIS: ${input.actionReceipt.artifact_status}
+(draft_pending_approval = clean pass; needs_revision = unresolved issues; blocked = human-only blockers present)
+
+ISSUE LIST:
+${issueList}
+
+${input.userInstruction ? `ADDITIONAL INSTRUCTION FROM USER (max 500 chars): ${input.userInstruction.slice(0, 500)}` : ""}
+
+Respond with valid JSON only:
+{
+  "summary": "string — 1-3 sentence plain-language summary of proposed changes",
+  "edits": [
+    {
+      "issue_id": "string",
+      "issue_status": "unresolved|partially_addressed|addressed|human_only_blocker",
+      "edit_type": "insert|replace|delete|flag_for_attorney",
+      "location_hint": "string — where in the document this edit applies",
+      "proposed_text": "string — new language (empty string for delete or flag_for_attorney)",
+      "rationale": "string — why this edit addresses the issue",
+      "requires_attorney": true|false
+    }
+  ],
+  "unaddressable_issues": ["issue_id — issues that require attorney action, not document edits"]
+}`;
+
+  const userContent = `ORIGINAL SOURCE TEXT:\n${input.originalText}`;
+
+  const result = await input.callModelWithFallback(
+    systemPrompt,
+    userContent,
+    "OpenClaw Revision Plan",
+    1400,
+    input.modelChain,
+  );
+
+  const parsed = result.parsed ?? {};
+  const summary: string = typeof parsed.summary === "string" ? parsed.summary : "Revision plan generated.";
+  const rawEdits: unknown[] = Array.isArray(parsed.edits) ? parsed.edits : [];
+  const unaddressable: string[] = Array.isArray(parsed.unaddressable_issues)
+    ? parsed.unaddressable_issues.filter((x: unknown) => typeof x === "string")
+    : [];
+
+  const edits: RevisionEdit[] = rawEdits
+    .filter((e): e is Record<string, unknown> => typeof e === "object" && e !== null)
+    .map((e) => ({
+      issue_id: typeof e.issue_id === "string" ? e.issue_id : "UNKNOWN",
+      issue_status: (["addressed", "partially_addressed", "unresolved", "human_only_blocker"].includes(e.issue_status as string)
+        ? e.issue_status
+        : "unresolved") as IssueStatus,
+      edit_type: (["insert", "replace", "delete", "flag_for_attorney"].includes(e.edit_type as string)
+        ? e.edit_type
+        : "flag_for_attorney") as RevisionEditType,
+      location_hint: typeof e.location_hint === "string" ? e.location_hint : "",
+      proposed_text: typeof e.proposed_text === "string" ? e.proposed_text : "",
+      rationale: typeof e.rationale === "string" ? e.rationale : "",
+      requires_attorney: e.edit_type === "flag_for_attorney" || e.requires_attorney === true,
+    }));
+
+  return {
+    artifact: {
+      summary,
+      edits,
+      unaddressable_issues: unaddressable,
+      total_edits: edits.length,
+    },
+    model_used: result.model_used,
+    fallback_used: result.fallback_used,
+    latency_ms: result.latency_ms,
+  };
+}
+
+// ── verifyRevisionPlan ────────────────────────────────────────────────────────
+
+/**
+ * Verify a revision plan artifact. Distinct contract from verifyDraft().
+ *
+ * Checks:
+ *   1. Every issue has a corresponding edit OR appears in unaddressable_issues.
+ *   2. No edit introduces facts not present in the original text.
+ *   3. human_only_blocker issues appear in unaddressable_issues, not in edits.
+ *
+ * Does NOT check prose coverage (that's verifyDraft's job).
+ * Does NOT check contradictions with a prior draft (no prior draft available).
+ */
+export async function verifyRevisionPlan(
+  artifact: RevisionPlanArtifact,
+  originalText: string,
+  issues: NormalizedIssue[],
+  callModelWithFallback: RevisionActionInput["callModelWithFallback"],
+  modelChain: unknown[],
+): Promise<RevisionVerificationResult> {
+  const editIssueIds = new Set(artifact.edits.map((e) => e.issue_id));
+  const unaddressableSet = new Set(artifact.unaddressable_issues);
+
+  // Structural check (no model needed): every issue must be in edits OR unaddressable
+  const missingEdits: string[] = issues
+    .filter((i) => !editIssueIds.has(i.id) && !unaddressableSet.has(i.id))
+    .map((i) => i.id);
+
+  // Structural check: flag_for_attorney edits should be in unaddressable_issues
+  const misroutedBlockers: string[] = artifact.edits
+    .filter((e) => e.edit_type === "flag_for_attorney" && !unaddressableSet.has(e.issue_id))
+    .map((e) => e.issue_id);
+
+  // Model check: invented facts in proposed_text
+  const editSummary = artifact.edits
+    .filter((e) => e.proposed_text.length > 0)
+    .map((e, idx) => `${idx + 1}. [${e.issue_id}] ${e.edit_type} at "${e.location_hint}": ${e.proposed_text.slice(0, 200)}`)
+    .join("\n");
+
+  let inventedFacts: string[] = [];
+  let modelUsed = "structural-only";
+  let fallbackUsed = false;
+  let latencyMs = 0;
+
+  if (editSummary.length > 0) {
+    const systemPrompt = `You are a legal document verifier checking a revision plan for invented facts.
+
+A revision plan proposes edits to a legal document. Your task:
+For each proposed edit, check whether it introduces specific facts (names, dates, amounts, entity names, jurisdiction-specific rules)
+that are NOT present in the original source text.
+
+Respond with valid JSON only:
+{
+  "invented_facts": ["string — describe each invented fact with the issue_id it came from"]
+}
+
+If no invented facts are found, return: { "invented_facts": [] }`;
+
+    const userContent = `PROPOSED EDITS:\n${editSummary}\n\n---\n\nORIGINAL SOURCE TEXT:\n${originalText}`;
+
+    const t0 = Date.now();
+    const result = await callModelWithFallback(
+      systemPrompt,
+      userContent,
+      "OpenClaw Revision Verifier",
+      400,
+      modelChain,
+    );
+    latencyMs = Date.now() - t0;
+    modelUsed = result.model_used;
+    fallbackUsed = result.fallback_used;
+
+    const parsed = result.parsed ?? {};
+    inventedFacts = Array.isArray(parsed.invented_facts)
+      ? parsed.invented_facts.filter((x: unknown) => typeof x === "string")
+      : [];
+  }
+
+  const passed =
+    missingEdits.length === 0 &&
+    misroutedBlockers.length === 0 &&
+    inventedFacts.length === 0;
+
+  return {
+    passed,
+    missing_edits: missingEdits,
+    invented_facts: inventedFacts,
+    misrouted_blockers: misroutedBlockers,
+    model_used: modelUsed,
+    fallback_used: fallbackUsed,
+    latency_ms: latencyMs,
+  };
+}
+
+// ── Governance for revision plan ──────────────────────────────────────────────
+
+/**
+ * Governance state machine for revision plans.
+ * Same priority order as buildActionGovernance, adapted for RevisionVerificationResult.
+ */
+export function buildRevisionGovernance(
+  verification: RevisionVerificationResult,
+  privilegeDetected: boolean,
+): ActionGovernance {
+  let artifactStatus: ArtifactStatus;
+  let escalationRequired: boolean;
+
+  if (privilegeDetected || verification.misrouted_blockers.length > 0) {
+    artifactStatus = "blocked";
+    escalationRequired = true;
+  } else if (!verification.passed) {
+    artifactStatus = "needs_revision";
+    escalationRequired = true;
+  } else {
+    artifactStatus = "draft_pending_approval";
+    escalationRequired = false;
+  }
+
+  return {
+    artifact_status: artifactStatus,
+    impact_tier: "action_triggering",  // revision plans always action_triggering
+    approval_required: true,
+    escalation_required: escalationRequired,
+    human_review_required: true,
+    not_legal_advice: true,
+    privilege_warning: PRIVILEGE_WARNING,
+  };
+}

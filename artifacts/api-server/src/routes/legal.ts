@@ -53,10 +53,14 @@ import {
   verifyReceiptToken,
   hashText,
   signActionReceipt,
+  verifyActionReceiptToken,
   draftLetter,
   generateClausePack,
   verifyDraft,
+  generateRevisionPlan,
+  verifyRevisionPlan,
   buildActionGovernance,
+  buildRevisionGovernance,
   buildIssueResolutionMap,
   extractIssues,
   DRAFT_PROMPT_VERSION,
@@ -66,6 +70,7 @@ import {
   type MatterReceipt,
   type ActionReceipt,
   type ActionType,
+  type RevisionActionInput,
 } from "../lib/legalActionEngine.js";
 
 const router: IRouter = Router();
@@ -1449,11 +1454,13 @@ router.post("/v1/legal/playbook/run", async (_req, res): Promise<void> => {
 router.post("/v1/legal/action", async (req, res): Promise<void> => {
   const {
     receipt_token,
+    action_receipt_token,
     original_text,
     action_type,
     user_instruction,
   } = req.body as {
     receipt_token?: string;
+    action_receipt_token?: string;
     original_text?: string;
     action_type?: string;
     user_instruction?: string;
@@ -1472,9 +1479,17 @@ router.post("/v1/legal/action", async (req, res): Promise<void> => {
     res.status(400).json({ error: "original_text must be 20–16000 characters" });
     return;
   }
-  if (!action_type || (action_type !== "draft_letter" && action_type !== "generate_clause_pack")) {
-    res.status(400).json({ error: "action_type must be 'draft_letter' or 'generate_clause_pack'" });
+  const VALID_ACTION_TYPES = ["draft_letter", "generate_clause_pack", "generate_revision_plan"];
+  if (!action_type || !VALID_ACTION_TYPES.includes(action_type)) {
+    res.status(400).json({ error: "action_type must be 'draft_letter', 'generate_clause_pack', or 'generate_revision_plan'" });
     return;
+  }
+  // generate_revision_plan requires action_receipt_token from a prior /action call
+  if (action_type === "generate_revision_plan") {
+    if (!action_receipt_token || typeof action_receipt_token !== "string") {
+      res.status(400).json({ error: "action_receipt_token (string) is required for generate_revision_plan" });
+      return;
+    }
   }
   if (user_instruction !== undefined && user_instruction.length > 500) {
     res.status(400).json({ error: "user_instruction must be <= 500 characters" });
@@ -1496,25 +1511,58 @@ router.post("/v1/legal/action", async (req, res): Promise<void> => {
     return;
   }
 
+  // ── generate_revision_plan: verify action receipt chain ──────────────────
+  // Must happen BEFORE nonce consumption so a bad action receipt doesn't burn
+  // the matter receipt nonce.
+  let verifiedActionReceipt: ActionReceipt | null = null;
+  if (action_type === "generate_revision_plan") {
+    verifiedActionReceipt = verifyActionReceiptToken(action_receipt_token!, secret);
+    if (!verifiedActionReceipt) {
+      res.status(401).json({ error: "Invalid or tampered action_receipt_token" });
+      return;
+    }
+    // Lineage: action receipt must belong to the same matter
+    if (verifiedActionReceipt.matter_id !== receipt.matter_id) {
+      res.status(400).json({ error: "action_receipt_token matter_id does not match receipt_token matter_id" });
+      return;
+    }
+    // Lineage: original_text hash must match through the chain
+    if (verifiedActionReceipt.original_text_hash !== receipt.original_text_hash) {
+      res.status(400).json({ error: "action_receipt_token original_text_hash lineage mismatch" });
+      return;
+    }
+    // Cannot revise a blocked artifact — blockers must be resolved first
+    if (verifiedActionReceipt.artifact_status === "blocked") {
+      res.status(400).json({ error: "cannot generate revision plan for a blocked artifact — resolve blockers first" });
+      return;
+    }
+  }
+
   const t0 = Date.now();
   const usageEventId = generateUsageEventId();
   const actionTyped = action_type as ActionType;
 
-  // ── Replay prevention — consume nonce atomically before any model call ────
-  // INSERT fails with unique_violation (23505) if receipt_id was already used.
+  // ── Replay prevention — consume nonce(s) atomically before any model call ──
+  // For draft_letter / generate_clause_pack: consume matter receipt_id.
+  // For generate_revision_plan: consume action_receipt_id (the Phase 2A nonce).
+  // INSERT fails with unique_violation (23505) if the nonce was already used.
   // This is a hard-fail: a replay attempt returns 409, not 500.
+  const nonceId = actionTyped === "generate_revision_plan"
+    ? verifiedActionReceipt!.action_receipt_id
+    : receipt.receipt_id;
   try {
     await pool.query(
       `INSERT INTO legal_receipt_nonces (receipt_id, matter_id, action_type, tenant_id)
        VALUES ($1, $2, $3, $4)`,
-      [receipt.receipt_id, receipt.matter_id, actionTyped, "anonymous"],
+      [nonceId, receipt.matter_id, actionTyped, "anonymous"],
     );
   } catch (nonceErr: any) {
     if (nonceErr.code === "23505") {
       // unique_violation — receipt already consumed
-      res.status(409).json({
-        error: "receipt already consumed — request a new receipt from /matter",
-      });
+      const msg = actionTyped === "generate_revision_plan"
+        ? "action_receipt_token already consumed — request a new action receipt from /action"
+        : "receipt already consumed — request a new receipt from /matter";
+      res.status(409).json({ error: msg });
       return;
     }
     // Unexpected DB error — surface as 500
@@ -1541,6 +1589,142 @@ router.post("/v1/legal/action", async (req, res): Promise<void> => {
     let draftModelUsed: string;
     let draftFallback: boolean;
     let draftLatency: number;
+
+    // ── generate_revision_plan branch ────────────────────────────────────
+    if (actionTyped === "generate_revision_plan") {
+      const revisionInput: RevisionActionInput = {
+        matterReceipt: receipt,
+        actionReceipt: verifiedActionReceipt!,
+        originalText: original_text,
+        userInstruction: user_instruction,
+        callModelWithFallback,
+        modelChain: SPECIALIST_MODEL_CHAIN,
+      };
+
+      const revResult = await generateRevisionPlan(revisionInput);
+      const revArtifact = revResult.artifact;
+      const revBody = JSON.stringify(revArtifact.edits);
+
+      // Pass 2: verify revision plan (distinct contract from verifyDraft)
+      const tRevVerify = Date.now();
+      const revVerification = await verifyRevisionPlan(
+        revArtifact,
+        original_text,
+        issues,
+        callModelWithFallback,
+        SPECIALIST_MODEL_CHAIN,
+      );
+      const revVerifyLatency = Date.now() - tRevVerify;
+
+      // Build issue resolution map from revision plan coverage
+      const revCoverageForMap = issues.map((issue) => {
+        if (revArtifact.unaddressable_issues.includes(issue.id)) {
+          return { issue_id: issue.id, status: "human_only_blocker", evidence: "Flagged as unaddressable by revision planner" };
+        }
+        const edit = revArtifact.edits.find((e) => e.issue_id === issue.id);
+        if (!edit) {
+          return { issue_id: issue.id, status: "unresolved", evidence: "No edit generated" };
+        }
+        if (edit.edit_type === "flag_for_attorney") {
+          return { issue_id: issue.id, status: "human_only_blocker", evidence: "Flagged for attorney action" };
+        }
+        return { issue_id: issue.id, status: "addressed", evidence: `Edit proposed: ${edit.edit_type} at ${edit.location_hint}` };
+      });
+      const revIssueResolutionMap = buildIssueResolutionMap(issues, revCoverageForMap);
+
+      const revGovernance = buildRevisionGovernance(revVerification, privilegeDetected);
+
+      // Hashes
+      const revDraftHashFull = hashText(revBody);
+      const revVerificationHashFull = hashText(JSON.stringify(revVerification));
+      const revIssueMapHashFull = hashText(JSON.stringify(revIssueResolutionMap));
+      const revDraftHash = revDraftHashFull.slice(0, 16);
+      const revVerificationHash = revVerificationHashFull.slice(0, 16);
+      const revTotalLatency = Date.now() - t0;
+
+      // Hard-fail log
+      await pool.query(
+        `INSERT INTO model_usage_events (tenant_id, event_type, metadata) VALUES ($1, $2, $3::jsonb)`,
+        [
+          "anonymous",
+          "action_run",
+          JSON.stringify({
+            matter_id: receipt.matter_id,
+            action_type: actionTyped,
+            artifact_status: revGovernance.artifact_status,
+            draft_hash: revDraftHash,
+            verification_hash: revVerificationHash,
+            issue_resolution_map: revIssueResolutionMap,
+            governance: {
+              impact_tier: revGovernance.impact_tier,
+              approval_required: revGovernance.approval_required,
+              escalation_required: revGovernance.escalation_required,
+            },
+            revision_model: revResult.model_used,
+            verification_model: revVerification.model_used,
+            revision_latency_ms: revResult.latency_ms,
+            verification_latency_ms: revVerifyLatency,
+            total_latency_ms: revTotalLatency,
+            usage_event_id: usageEventId,
+            revision_prompt_version: "2b.1",
+            policy_version: ACTION_POLICY_VERSION,
+          }),
+        ],
+      );
+
+      // Sign action receipt for this revision run
+      const revReceiptIssuedAt = new Date();
+      const revActionReceiptPayload: ActionReceipt = {
+        matter_id: receipt.matter_id,
+        action_receipt_id: randomUUID(),
+        action_type: actionTyped,
+        artifact_status: revGovernance.artifact_status,
+        draft_hash: revDraftHashFull,
+        verification_hash: revVerificationHashFull,
+        issue_resolution_map_hash: revIssueMapHashFull,
+        original_text_hash: receipt.original_text_hash,
+        draft_prompt_version: "2b.1",
+        verification_prompt_version: "2b.1",
+        policy_version: ACTION_POLICY_VERSION,
+        issued_at: revReceiptIssuedAt.toISOString(),
+        expires_at: new Date(
+          revReceiptIssuedAt.getTime() +
+          ((parseInt(process.env.RECEIPT_TTL_HOURS ?? "4", 10) || 4) * 60 * 60 * 1000),
+        ).toISOString(),
+      };
+      const revActionReceiptToken = signActionReceipt(revActionReceiptPayload, secret);
+
+      res.json({
+        matter_id: receipt.matter_id,
+        action_type: actionTyped,
+        artifact_status: revGovernance.artifact_status,
+        action_receipt_token: revActionReceiptToken,
+        draft_artifact: revArtifact,
+        issue_resolution_map: revIssueResolutionMap,
+        verification: {
+          passed: revVerification.passed,
+          missing_edits: revVerification.missing_edits,
+          invented_facts: revVerification.invented_facts,
+          misrouted_blockers: revVerification.misrouted_blockers,
+        },
+        governance: revGovernance,
+        trace: {
+          matter_id: receipt.matter_id,
+          action_type: actionTyped,
+          revision_model: revResult.model_used,
+          verification_model: revVerification.model_used,
+          revision_latency_ms: revResult.latency_ms,
+          verification_latency_ms: revVerifyLatency,
+          total_latency_ms: revTotalLatency,
+          draft_hash: revDraftHash,
+          verification_hash: revVerificationHash,
+          usage_event_id: usageEventId,
+          revision_prompt_version: "2b.1",
+          policy_version: ACTION_POLICY_VERSION,
+        },
+      });
+      return;
+    }
 
     if (actionTyped === "draft_letter") {
       const r = await draftLetter(actionInput);

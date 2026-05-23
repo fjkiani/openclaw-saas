@@ -795,3 +795,263 @@ describe("POST /api/v1/legal/action — action_receipt_token (Phase 2B trust anc
     expect(envelope.sig).toBe(expectedSig);
   });
 });
+
+// ── Helper: get a valid action_receipt_token from /action ─────────────────────
+async function getActionReceipt(
+  receipt_token: string,
+): Promise<{ action_receipt_token: string }> {
+  (global.fetch as any) = vi.fn()
+    .mockResolvedValueOnce({
+      ok: true, status: 200,
+      json: async () => ({ choices: [{ message: { content: JSON.stringify(DRAFT_LETTER_RESPONSE) } }] }),
+    })
+    .mockResolvedValueOnce({
+      ok: true, status: 200,
+      json: async () => ({ choices: [{ message: { content: JSON.stringify(VERIFY_CLEAN) } }] }),
+    });
+
+  const res = await request(app)
+    .post("/api/v1/legal/action")
+    .send({ receipt_token, original_text: SAMPLE_TEXT, action_type: "draft_letter" })
+    .set("Content-Type", "application/json");
+
+  expect(res.status).toBe(200);
+  expect(res.body.action_receipt_token).toBeTruthy();
+  return { action_receipt_token: res.body.action_receipt_token };
+}
+
+// ── Revision plan model response ──────────────────────────────────────────────
+const REVISION_PLAN_RESPONSE = {
+  summary: "Two edits proposed: add vesting schedule and clarify IP scope.",
+  edits: [
+    {
+      issue_id: "MISSING_VESTING_SCHEDULE",
+      issue_status: "unresolved",
+      edit_type: "insert",
+      location_hint: "equity clause",
+      proposed_text: "Each Founder's equity shall vest over four (4) years with a one (1) year cliff.",
+      rationale: "Addresses missing vesting schedule identified in analysis.",
+      requires_attorney: false,
+    },
+    {
+      issue_id: "IP_SCOPE_AMBIGUOUS",
+      issue_status: "partially_addressed",
+      edit_type: "replace",
+      location_hint: "IP assignment clause",
+      proposed_text: "All intellectual property created by Founders in connection with the Company's business is hereby assigned to the Company, excluding prior inventions listed in Exhibit A.",
+      rationale: "Clarifies IP scope and excludes prior inventions.",
+      requires_attorney: false,
+    },
+  ],
+  unaddressable_issues: [],
+};
+
+// ── Revision plan verifier response ──────────────────────────────────────────
+const REVISION_VERIFY_CLEAN = {
+  invented_facts: [],
+};
+
+describe("POST /api/v1/legal/action — generate_revision_plan (Phase 2B)", () => {
+  it("receipt 16 — generate_revision_plan success: HTTP 200, edits array, impact_tier=action_triggering, action_receipt_token", async () => {
+    const { receipt_token } = await getMatterReceipt();
+    const { action_receipt_token } = await getActionReceipt(receipt_token);
+
+    // Mock: revision plan call + verifier call
+    (global.fetch as any) = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true, status: 200,
+        json: async () => ({ choices: [{ message: { content: JSON.stringify(REVISION_PLAN_RESPONSE) } }] }),
+      })
+      .mockResolvedValueOnce({
+        ok: true, status: 200,
+        json: async () => ({ choices: [{ message: { content: JSON.stringify(REVISION_VERIFY_CLEAN) } }] }),
+      });
+
+    const res = await request(app)
+      .post("/api/v1/legal/action")
+      .send({
+        receipt_token,
+        action_receipt_token,
+        original_text: SAMPLE_TEXT,
+        action_type: "generate_revision_plan",
+      })
+      .set("Content-Type", "application/json");
+
+    expect(res.status).toBe(200);
+    expect(res.body.action_type).toBe("generate_revision_plan");
+    expect(res.body.artifact_status).toBeDefined();
+
+    // draft_artifact is a RevisionPlanArtifact
+    expect(typeof res.body.draft_artifact.summary).toBe("string");
+    expect(Array.isArray(res.body.draft_artifact.edits)).toBe(true);
+    expect(res.body.draft_artifact.edits.length).toBeGreaterThan(0);
+    expect(Array.isArray(res.body.draft_artifact.unaddressable_issues)).toBe(true);
+    expect(typeof res.body.draft_artifact.total_edits).toBe("number");
+
+    // Each edit has required fields
+    for (const edit of res.body.draft_artifact.edits) {
+      expect(edit.issue_id).toBeTruthy();
+      expect(["insert", "replace", "delete", "flag_for_attorney"]).toContain(edit.edit_type);
+      expect(edit.location_hint).toBeDefined();
+      expect(edit.proposed_text).toBeDefined();
+      expect(edit.rationale).toBeTruthy();
+      expect(typeof edit.requires_attorney).toBe("boolean");
+    }
+
+    // Governance: revision plans are always action_triggering
+    expect(res.body.governance.impact_tier).toBe("action_triggering");
+    expect(res.body.governance.approval_required).toBe(true);
+    expect(res.body.governance.human_review_required).toBe(true);
+
+    // action_receipt_token issued for this revision run
+    expect(res.body.action_receipt_token).toBeTruthy();
+    const revEnvelope = JSON.parse(Buffer.from(res.body.action_receipt_token, "base64").toString());
+    const revDecoded = JSON.parse(revEnvelope.payload);
+    expect(revDecoded.action_type).toBe("generate_revision_plan");
+    expect(revDecoded.draft_hash).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("receipt 17 — generate_revision_plan missing action_receipt_token returns 400", async () => {
+    const { receipt_token } = await getMatterReceipt();
+
+    const res = await request(app)
+      .post("/api/v1/legal/action")
+      .send({ receipt_token, original_text: SAMPLE_TEXT, action_type: "generate_revision_plan" })
+      .set("Content-Type", "application/json");
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/action_receipt_token/i);
+  });
+
+  it("receipt 18 — generate_revision_plan with mismatched matter_id returns 400", async () => {
+    // Get two separate matter receipts (same text, different matter_id UUIDs)
+    // Then get an action receipt for matter B, and try to use it with matter A's receipt_token.
+    // Since matter_id is a UUID generated per /matter call, two calls with the same text
+    // produce different matter_ids — the action receipt's matter_id won't match.
+    const { receipt_token: receipt_token_A } = await getMatterReceipt();
+
+    // Get action receipt for matter B (second /matter call → different matter_id)
+    const { receipt_token: receipt_token_B } = await getMatterReceipt();
+
+    // Get action receipt signed for matter B
+    (global.fetch as any) = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true, status: 200,
+        json: async () => ({ choices: [{ message: { content: JSON.stringify(DRAFT_LETTER_RESPONSE) } }] }),
+      })
+      .mockResolvedValueOnce({
+        ok: true, status: 200,
+        json: async () => ({ choices: [{ message: { content: JSON.stringify(VERIFY_CLEAN) } }] }),
+      });
+
+    const actionResB = await request(app)
+      .post("/api/v1/legal/action")
+      .send({ receipt_token: receipt_token_B, original_text: SAMPLE_TEXT, action_type: "draft_letter" })
+      .set("Content-Type", "application/json");
+    expect(actionResB.status).toBe(200);
+    const action_receipt_token_B = actionResB.body.action_receipt_token;
+
+    // Use receipt_token_A (matter A) with action_receipt_token from matter B → matter_id mismatch
+    const res = await request(app)
+      .post("/api/v1/legal/action")
+      .send({
+        receipt_token: receipt_token_A,
+        action_receipt_token: action_receipt_token_B,
+        original_text: SAMPLE_TEXT,
+        action_type: "generate_revision_plan",
+      })
+      .set("Content-Type", "application/json");
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/matter_id/i);
+  });
+
+  it("receipt 19 — generate_revision_plan with blocked artifact_status returns 400", async () => {
+    // Build a fake action receipt with artifact_status = blocked
+    const { createHmac, createHash } = await import("crypto");
+    const secret = process.env.SESSION_SECRET!;
+    const { receipt_token } = await getMatterReceipt();
+
+    // Decode the matter receipt to get matter_id and original_text_hash
+    const matterEnvelope = JSON.parse(Buffer.from(receipt_token, "base64").toString());
+    const matterDecoded = JSON.parse(matterEnvelope.payload);
+
+    const blockedReceipt = {
+      matter_id: matterDecoded.matter_id,
+      action_receipt_id: "00000000-0000-0000-0000-000000000099",
+      action_type: "draft_letter",
+      artifact_status: "blocked",  // blocked — cannot revise
+      draft_hash: "a".repeat(64),
+      verification_hash: "b".repeat(64),
+      issue_resolution_map_hash: "c".repeat(64),
+      original_text_hash: matterDecoded.original_text_hash,
+      draft_prompt_version: "2a.1",
+      verification_prompt_version: "2a.1",
+      policy_version: "legal-action-v1",
+      issued_at: new Date().toISOString(),
+      expires_at: new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString(),
+    };
+    const payload = JSON.stringify(blockedReceipt);
+    const sig = createHmac("sha256", secret).update(payload).digest("hex");
+    const blockedToken = Buffer.from(JSON.stringify({ payload, sig })).toString("base64");
+
+    const res = await request(app)
+      .post("/api/v1/legal/action")
+      .send({
+        receipt_token,
+        action_receipt_token: blockedToken,
+        original_text: SAMPLE_TEXT,
+        action_type: "generate_revision_plan",
+      })
+      .set("Content-Type", "application/json");
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/blocked/i);
+  });
+
+  it("receipt 20 — generate_revision_plan replay (same action_receipt_token twice) returns 409", async () => {
+    const { receipt_token } = await getMatterReceipt();
+    const { action_receipt_token } = await getActionReceipt(receipt_token);
+
+    // First call: succeeds
+    (global.fetch as any) = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true, status: 200,
+        json: async () => ({ choices: [{ message: { content: JSON.stringify(REVISION_PLAN_RESPONSE) } }] }),
+      })
+      .mockResolvedValueOnce({
+        ok: true, status: 200,
+        json: async () => ({ choices: [{ message: { content: JSON.stringify(REVISION_VERIFY_CLEAN) } }] }),
+      });
+
+    const first = await request(app)
+      .post("/api/v1/legal/action")
+      .send({
+        receipt_token,
+        action_receipt_token,
+        original_text: SAMPLE_TEXT,
+        action_type: "generate_revision_plan",
+      })
+      .set("Content-Type", "application/json");
+
+    expect(first.status).toBe(200);
+
+    // Second call: simulate nonce already consumed
+    mockPoolQuery.mockRejectedValueOnce(
+      Object.assign(new Error("duplicate key value violates unique constraint"), { code: "23505" }),
+    );
+
+    const second = await request(app)
+      .post("/api/v1/legal/action")
+      .send({
+        receipt_token,
+        action_receipt_token,
+        original_text: SAMPLE_TEXT,
+        action_type: "generate_revision_plan",
+      })
+      .set("Content-Type", "application/json");
+
+    expect(second.status).toBe(409);
+    expect(second.body.error).toMatch(/already consumed/i);
+  });
+});
