@@ -31,11 +31,13 @@ export type IssueStatus = "addressed" | "partially_addressed" | "unresolved" | "
 
 export interface MatterReceipt {
   matter_id: string;
+  receipt_id: string;           // UUID nonce — unique per issuance, for future replay control
   specialist: string;
   original_text_hash: string;   // SHA-256 hex of original_text
   specialist_output: Record<string, unknown>;
   governance_decision: Record<string, unknown>;
   issued_at: string;            // ISO timestamp
+  expires_at: string;           // ISO timestamp — RECEIPT_TTL_MS after issued_at
 }
 
 export interface IssueResolution {
@@ -100,6 +102,17 @@ export interface ActionInput {
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
+/** Receipt validity window: 4 hours. Balances usability (long analysis sessions)
+ *  against replay risk. Adjust via RECEIPT_TTL_HOURS env var if needed. */
+const RECEIPT_TTL_MS = (parseInt(process.env.RECEIPT_TTL_HOURS ?? "4", 10) || 4) * 60 * 60 * 1000;
+
+/** Prompt and policy version constants — bump these when prompts or policy change.
+ *  These are embedded in every action trace and action_run log for reproducibility. */
+export const DRAFT_PROMPT_VERSION = "2a.1";
+export const VERIFY_PROMPT_VERSION = "2a.1";
+export const ACTION_POLICY_VERSION = "legal-action-v1";
+export const CORPUS_VERSION = "cofounder-corpus-v1";
+
 const PRIVILEGE_WARNING =
   "This output is not legal advice. It is a draft artifact for attorney review only. " +
   "It must not be sent, filed, or relied upon without review and approval by licensed counsel.";
@@ -140,7 +153,13 @@ export function verifyReceiptToken(token: string, secret: string): MatterReceipt
     }
     if (diff !== 0) return null;
 
-    return JSON.parse(envelope.payload) as MatterReceipt;
+    const decoded = JSON.parse(envelope.payload) as MatterReceipt;
+
+    // Expiry enforcement — reject tokens past their validity window
+    if (!decoded.expires_at) return null;
+    if (Date.now() > new Date(decoded.expires_at).getTime()) return null;
+
+    return decoded;
   } catch {
     return null;
   }

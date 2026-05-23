@@ -6,9 +6,9 @@
  * Calls POST /api/v1/legal/action and renders the governed artifact.
  *
  * State machine reflected in UI:
- *   draft_pending_approval → green badge, "Approve & Copy" enabled
- *   needs_revision         → amber badge, unresolved issues listed, "Approve & Copy" disabled
- *   blocked                → red banner, human-only blockers listed, "Approve & Copy" disabled
+ *   draft_pending_approval → green badge, "Copy for Review" enabled
+ *   needs_revision         → amber badge, unresolved issues listed, "Copy for Review" disabled
+ *   blocked                → red banner, human-only blockers listed, "Copy for Review" disabled
  */
 
 import { useState } from "react";
@@ -279,14 +279,14 @@ export default function ActionPanel({ receiptToken, originalText, apiBase }: Act
             <button
               onClick={handleCopy}
               disabled={!canApprove}
-              title={canApprove ? "Copy artifact to clipboard" : "Artifact must be in 'Ready for review' state to copy"}
+              title={canApprove ? "Copy draft to clipboard for attorney review" : "Artifact must be in 'Ready for review' state before copying"}
               className={`text-xs px-3 py-1 rounded font-semibold transition-colors ${
                 canApprove
                   ? "bg-green-600 hover:bg-green-700 text-white"
                   : "bg-gray-200 text-gray-400 cursor-not-allowed"
               }`}
             >
-              {copied ? "Copied!" : "Approve & Copy"}
+              {copied ? "Copied!" : "Copy for Review"}
             </button>
           </div>
 

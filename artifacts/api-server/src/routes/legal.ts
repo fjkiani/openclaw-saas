@@ -58,6 +58,10 @@ import {
   buildActionGovernance,
   buildIssueResolutionMap,
   extractIssues,
+  DRAFT_PROMPT_VERSION,
+  VERIFY_PROMPT_VERSION,
+  ACTION_POLICY_VERSION,
+  CORPUS_VERSION,
   type MatterReceipt,
   type ActionType,
 } from "../lib/legalActionEngine.js";
@@ -971,8 +975,10 @@ async function handleMatter(text: string, tenantId: string): Promise<{
 
   // Step 5: Sign receipt for action endpoint (HMAC-SHA256, SESSION_SECRET)
   const secret = process.env.SESSION_SECRET ?? "";
+  const issuedAt = new Date();
   const receipt: MatterReceipt = {
     matter_id: matterId,
+    receipt_id: randomUUID(),
     specialist: intake.matter_type,
     original_text_hash: hashText(text),
     specialist_output: decision.redacted_output as Record<string, unknown>,
@@ -983,7 +989,8 @@ async function handleMatter(text: string, tenantId: string): Promise<{
       redacted_fields: decision.redacted_fields,
       impact_tier: decision.impact_tier,
     },
-    issued_at: new Date().toISOString(),
+    issued_at: issuedAt.toISOString(),
+    expires_at: new Date(issuedAt.getTime() + (parseInt(process.env.RECEIPT_TTL_HOURS ?? "4", 10) || 4) * 60 * 60 * 1000).toISOString(),
   };
   const receiptToken = signReceipt(receipt, secret);
 
@@ -1606,6 +1613,10 @@ router.post("/v1/legal/action", async (req, res): Promise<void> => {
           verification_latency_ms: verifyLatency,
           total_latency_ms: totalLatency,
           usage_event_id: usageEventId,
+          draft_prompt_version: DRAFT_PROMPT_VERSION,
+          verification_prompt_version: VERIFY_PROMPT_VERSION,
+          policy_version: ACTION_POLICY_VERSION,
+          corpus_version: CORPUS_VERSION,
         }),
       ],
     );
@@ -1636,6 +1647,10 @@ router.post("/v1/legal/action", async (req, res): Promise<void> => {
         draft_hash: draftHash,
         verification_hash: verificationHash,
         usage_event_id: usageEventId,
+        draft_prompt_version: DRAFT_PROMPT_VERSION,
+        verification_prompt_version: VERIFY_PROMPT_VERSION,
+        policy_version: ACTION_POLICY_VERSION,
+        corpus_version: CORPUS_VERSION,
       },
     });
   } catch (err: any) {
