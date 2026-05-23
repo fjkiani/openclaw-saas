@@ -31,7 +31,7 @@ import {
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-export type ActionType = "draft_letter" | "generate_clause_pack";
+export type ActionType = "draft_letter" | "generate_clause_pack" | "generate_revision_plan";
 export type ArtifactStatus = "draft_pending_approval" | "needs_revision" | "blocked";
 export type IssueStatus = "addressed" | "partially_addressed" | "unresolved" | "human_only_blocker";
 
@@ -44,6 +44,29 @@ export interface MatterReceipt {
   governance_decision: Record<string, unknown>;
   issued_at: string;            // ISO timestamp
   expires_at: string;           // ISO timestamp — RECEIPT_TTL_MS after issued_at
+}
+
+/**
+ * ActionReceipt — server-signed record of a completed Phase 2A action run.
+ * Issued by /action at the end of a successful draft_letter or generate_clause_pack run.
+ * Required as input to generate_revision_plan (Phase 2B) to establish trusted provenance.
+ *
+ * Trust chain: MatterReceipt → ActionReceipt → RevisionPlanArtifact
+ */
+export interface ActionReceipt {
+  matter_id: string;                   // from upstream MatterReceipt
+  action_receipt_id: string;           // UUID nonce — unique per action run
+  action_type: ActionType;             // "draft_letter" | "generate_clause_pack"
+  artifact_status: ArtifactStatus;     // final status from Phase 2A governance
+  draft_hash: string;                  // full SHA-256 hex of draft body
+  verification_hash: string;           // full SHA-256 hex of JSON.stringify(VerificationResult)
+  issue_resolution_map_hash: string;   // full SHA-256 hex of JSON.stringify(issueResolutionMap)
+  original_text_hash: string;          // carried forward from MatterReceipt for lineage check
+  draft_prompt_version: string;
+  verification_prompt_version: string;
+  policy_version: string;
+  issued_at: string;                   // ISO timestamp
+  expires_at: string;                  // ISO timestamp — same TTL as matter receipt
 }
 
 export interface IssueResolution {
@@ -175,6 +198,49 @@ export function verifyReceiptToken(token: string, secret: string): MatterReceipt
  */
 export function hashText(text: string): string {
   return createHash("sha256").update(text, "utf8").digest("hex");
+}
+
+/**
+ * Sign an ActionReceipt with HMAC-SHA256 using the provided secret.
+ * Returns a base64-encoded JSON envelope: { payload: string, sig: string }
+ * Same envelope format as signReceipt() — verifiable with the same constant-time check.
+ */
+export function signActionReceipt(receipt: ActionReceipt, secret: string): string {
+  const payload = JSON.stringify(receipt);
+  const sig = createHmac("sha256", secret).update(payload).digest("hex");
+  return Buffer.from(JSON.stringify({ payload, sig })).toString("base64");
+}
+
+/**
+ * Verify an action receipt token. Returns the decoded ActionReceipt on success, null on tamper/malform/expiry.
+ */
+export function verifyActionReceiptToken(token: string, secret: string): ActionReceipt | null {
+  try {
+    const envelope = JSON.parse(Buffer.from(token, "base64").toString("utf8")) as {
+      payload: string;
+      sig: string;
+    };
+    if (!envelope.payload || !envelope.sig) return null;
+
+    const expectedSig = createHmac("sha256", secret).update(envelope.payload).digest("hex");
+    // Constant-time comparison to prevent timing attacks
+    if (envelope.sig.length !== expectedSig.length) return null;
+    let diff = 0;
+    for (let i = 0; i < expectedSig.length; i++) {
+      diff |= envelope.sig.charCodeAt(i) ^ expectedSig.charCodeAt(i);
+    }
+    if (diff !== 0) return null;
+
+    const decoded = JSON.parse(envelope.payload) as ActionReceipt;
+
+    // Expiry enforcement
+    if (!decoded.expires_at) return null;
+    if (Date.now() > new Date(decoded.expires_at).getTime()) return null;
+
+    return decoded;
+  } catch {
+    return null;
+  }
 }
 
 // ── Issue extraction helpers ──────────────────────────────────────────────────

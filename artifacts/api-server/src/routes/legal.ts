@@ -52,6 +52,7 @@ import {
   signReceipt,
   verifyReceiptToken,
   hashText,
+  signActionReceipt,
   draftLetter,
   generateClausePack,
   verifyDraft,
@@ -63,6 +64,7 @@ import {
   ACTION_POLICY_VERSION,
   CORPUS_VERSION,
   type MatterReceipt,
+  type ActionReceipt,
   type ActionType,
 } from "../lib/legalActionEngine.js";
 
@@ -1609,8 +1611,13 @@ router.post("/v1/legal/action", async (req, res): Promise<void> => {
     const governance = buildActionGovernance(verification, actionTyped, privilegeDetected);
 
     // ── Hashes ────────────────────────────────────────────────────────────
-    const draftHash = hashText(draftBody).slice(0, 16);
-    const verificationHash = hashText(JSON.stringify(verification)).slice(0, 16);
+    // Full SHA-256 hashes for the action receipt (provenance chain).
+    // Truncated 16-char versions kept in the DB log for display only.
+    const draftHashFull = hashText(draftBody);
+    const verificationHashFull = hashText(JSON.stringify(verification));
+    const issueResolutionMapHashFull = hashText(JSON.stringify(issueResolutionMap));
+    const draftHash = draftHashFull.slice(0, 16);
+    const verificationHash = verificationHashFull.slice(0, 16);
 
     const totalLatency = Date.now() - t0;
 
@@ -1647,11 +1654,36 @@ router.post("/v1/legal/action", async (req, res): Promise<void> => {
     );
     // Hard-fail: if pool.query throws, the catch block returns 500
 
+    // ── Sign action receipt (Phase 2B trust anchor) ───────────────────────
+    // The action receipt carries full hashes and lineage so generate_revision_plan
+    // can verify provenance without accepting unsigned client-supplied artifacts.
+    const actionReceiptIssuedAt = new Date();
+    const actionReceiptPayload: ActionReceipt = {
+      matter_id: receipt.matter_id,
+      action_receipt_id: randomUUID(),
+      action_type: actionTyped,
+      artifact_status: governance.artifact_status,
+      draft_hash: draftHashFull,
+      verification_hash: verificationHashFull,
+      issue_resolution_map_hash: issueResolutionMapHashFull,
+      original_text_hash: receipt.original_text_hash,  // lineage from MatterReceipt
+      draft_prompt_version: DRAFT_PROMPT_VERSION,
+      verification_prompt_version: VERIFY_PROMPT_VERSION,
+      policy_version: ACTION_POLICY_VERSION,
+      issued_at: actionReceiptIssuedAt.toISOString(),
+      expires_at: new Date(
+        actionReceiptIssuedAt.getTime() +
+        ((parseInt(process.env.RECEIPT_TTL_HOURS ?? "4", 10) || 4) * 60 * 60 * 1000),
+      ).toISOString(),
+    };
+    const actionReceiptToken = signActionReceipt(actionReceiptPayload, secret);
+
     // ── Response ──────────────────────────────────────────────────────────
     res.json({
       matter_id: receipt.matter_id,
       action_type: actionTyped,
       artifact_status: governance.artifact_status,
+      action_receipt_token: actionReceiptToken,
       draft_artifact: draftArtifact,
       issue_resolution_map: issueResolutionMap,
       verification: {

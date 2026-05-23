@@ -726,3 +726,72 @@ describe("POST /api/v1/legal/action — replay prevention", () => {
     expect(second.body.error).toMatch(/already consumed/i);
   });
 });
+
+describe("POST /api/v1/legal/action — action_receipt_token (Phase 2B trust anchor)", () => {
+  it("receipt 15 — success response includes valid action_receipt_token with full hashes and lineage", async () => {
+    const { receipt_token } = await getMatterReceipt();
+
+    (global.fetch as any) = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true, status: 200,
+        json: async () => ({ choices: [{ message: { content: JSON.stringify(DRAFT_LETTER_RESPONSE) } }] }),
+      })
+      .mockResolvedValueOnce({
+        ok: true, status: 200,
+        json: async () => ({ choices: [{ message: { content: JSON.stringify(VERIFY_CLEAN) } }] }),
+      });
+
+    const res = await request(app)
+      .post("/api/v1/legal/action")
+      .send({ receipt_token, original_text: SAMPLE_TEXT, action_type: "draft_letter" })
+      .set("Content-Type", "application/json");
+
+    expect(res.status).toBe(200);
+
+    // action_receipt_token must be present and non-empty
+    expect(res.body.action_receipt_token).toBeTruthy();
+    expect(typeof res.body.action_receipt_token).toBe("string");
+    expect(res.body.action_receipt_token.length).toBeGreaterThan(100);
+
+    // Decode and verify the envelope structure
+    const envelope = JSON.parse(Buffer.from(res.body.action_receipt_token, "base64").toString());
+    expect(envelope.payload).toBeTruthy();
+    expect(envelope.sig).toBeTruthy();
+
+    // Decode the payload
+    const decoded = JSON.parse(envelope.payload);
+
+    // Required identity fields
+    expect(decoded.matter_id).toBeTruthy();
+    expect(decoded.action_receipt_id).toMatch(/^[0-9a-f-]{36}$/);  // UUID
+    expect(decoded.action_type).toBe("draft_letter");
+    expect(decoded.artifact_status).toBeDefined();
+
+    // Full SHA-256 hashes (64 hex chars, not truncated)
+    expect(decoded.draft_hash).toMatch(/^[0-9a-f]{64}$/);
+    expect(decoded.verification_hash).toMatch(/^[0-9a-f]{64}$/);
+    expect(decoded.issue_resolution_map_hash).toMatch(/^[0-9a-f]{64}$/);
+
+    // Lineage: original_text_hash must match what /matter would have computed
+    const { createHash } = await import("crypto");
+    const expectedTextHash = createHash("sha256").update(SAMPLE_TEXT, "utf8").digest("hex");
+    expect(decoded.original_text_hash).toBe(expectedTextHash);
+
+    // Version fields
+    expect(decoded.draft_prompt_version).toBe("2a.1");
+    expect(decoded.verification_prompt_version).toBe("2a.1");
+    expect(decoded.policy_version).toBe("legal-action-v1");
+
+    // Expiry fields
+    expect(decoded.issued_at).toBeTruthy();
+    expect(decoded.expires_at).toBeTruthy();
+    expect(new Date(decoded.expires_at).getTime()).toBeGreaterThan(Date.now());
+
+    // HMAC signature is valid (re-verify with test secret)
+    const { createHmac } = await import("crypto");
+    const expectedSig = createHmac("sha256", "test-session-secret-for-integration-tests")
+      .update(envelope.payload)
+      .digest("hex");
+    expect(envelope.sig).toBe(expectedSig);
+  });
+});
