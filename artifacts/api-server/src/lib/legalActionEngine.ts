@@ -27,6 +27,7 @@ import {
   VERIFY_PROMPT_VERSION,
   ACTION_POLICY_VERSION,
   CORPUS_VERSION,
+  REDLINE_PROMPT_VERSION,
 } from "../prompts/versions.js";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -139,7 +140,7 @@ const RECEIPT_TTL_MS = (parseInt(process.env.RECEIPT_TTL_HOURS ?? "4", 10) || 4)
 // Version constants are imported from ../prompts/versions.ts — the single source
 // of truth. Re-exported here so callers that import from legalActionEngine.ts
 // continue to work without changes.
-export { DRAFT_PROMPT_VERSION, VERIFY_PROMPT_VERSION, ACTION_POLICY_VERSION, CORPUS_VERSION };
+export { DRAFT_PROMPT_VERSION, VERIFY_PROMPT_VERSION, ACTION_POLICY_VERSION, CORPUS_VERSION, REDLINE_PROMPT_VERSION };
 
 const PRIVILEGE_WARNING =
   "This output is not legal advice. It is a draft artifact for attorney review only. " +
@@ -636,8 +637,6 @@ export type { NormalizedIssue };
 // The ActionReceipt (from Commit C) is the trust anchor. The route verifies
 // both tokens and confirms lineage before any model call.
 // ═══════════════════════════════════════════════════════════════════════════════
-
-import { REDLINE_PROMPT_VERSION } from "../prompts/versions.js";
 
 // ── Phase 2B types ────────────────────────────────────────────────────────────
 
