@@ -8,6 +8,7 @@
  */
 
 import { useState } from "react";
+import ActionPanel from "./ActionPanel";
 
 interface RiskFlag {
   clause_type?: string;
@@ -29,6 +30,7 @@ interface DraftClause {
 
 interface MatterResult {
   matter_id: string;
+  receipt_token: string;
   intake: {
     matter_type: string;
     confidence: number;
@@ -462,6 +464,15 @@ export default function MatterTab({ wid }: { wid: string }) {
                   <div>fallback_used: {String(trace.fallback_used)}</div>
                 </div>
               </Section>
+            )}
+
+            {/* Action Panel — Phase 2A */}
+            {result?.receipt_token && (
+              <ActionPanel
+                receiptToken={result.receipt_token}
+                originalText={text}
+                apiBase={apiBase}
+              />
             )}
           </div>
         )}

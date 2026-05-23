@@ -48,6 +48,19 @@ import {
   getCriticalEntries,
   type CofounderClauseType,
 } from "../lib/cofounderCorpus.js";
+import {
+  signReceipt,
+  verifyReceiptToken,
+  hashText,
+  draftLetter,
+  generateClausePack,
+  verifyDraft,
+  buildActionGovernance,
+  buildIssueResolutionMap,
+  extractIssues,
+  type MatterReceipt,
+  type ActionType,
+} from "../lib/legalActionEngine.js";
 
 const router: IRouter = Router();
 
@@ -821,6 +834,7 @@ Respond with valid JSON only. No prose, no markdown. Start with { and end with }
 
 async function handleMatter(text: string, tenantId: string): Promise<{
   matter_id: string;
+  receipt_token: string;
   intake: Record<string, unknown>;
   specialist_output: Record<string, unknown>;
   governance_decision: Record<string, unknown>;
@@ -955,9 +969,28 @@ async function handleMatter(text: string, tenantId: string): Promise<{
     // Soft-fail: DB logging must never block the response
   }
 
-  // Step 5: Return unified result
+  // Step 5: Sign receipt for action endpoint (HMAC-SHA256, SESSION_SECRET)
+  const secret = process.env.SESSION_SECRET ?? "";
+  const receipt: MatterReceipt = {
+    matter_id: matterId,
+    specialist: intake.matter_type,
+    original_text_hash: hashText(text),
+    specialist_output: decision.redacted_output as Record<string, unknown>,
+    governance_decision: {
+      action: decision.action,
+      escalation_required: decision.escalation_required,
+      escalation_reasons: decision.escalation_reasons,
+      redacted_fields: decision.redacted_fields,
+      impact_tier: decision.impact_tier,
+    },
+    issued_at: new Date().toISOString(),
+  };
+  const receiptToken = signReceipt(receipt, secret);
+
+  // Step 6: Return unified result
   return {
     matter_id: matterId,
+    receipt_token: receiptToken,
     intake: {
       matter_type: intake.matter_type,
       confidence: intake.confidence,
@@ -1396,6 +1429,217 @@ router.post("/v1/legal/playbook/run", async (_req, res): Promise<void> => {
     res.json(receipt);
   } catch (err: any) {
     res.status(500).json({ error: "Playbook run failed", details: err.message });
+  }
+});
+
+
+// ── POST /v1/legal/action — Phase 2A: Action Generation ──────────────────────
+// Accepts a server-signed receipt_token from /matter. Verifies HMAC before use.
+// Produces a draft letter or clause pack with two-source verification.
+// Logs to model_usage_events with event_type "action_run" (HARD-FAIL).
+router.post("/v1/legal/action", async (req, res): Promise<void> => {
+  const {
+    receipt_token,
+    original_text,
+    action_type,
+    user_instruction,
+  } = req.body as {
+    receipt_token?: string;
+    original_text?: string;
+    action_type?: string;
+    user_instruction?: string;
+  };
+
+  // ── Input validation (all before any model call) ──────────────────────────
+  if (!receipt_token || typeof receipt_token !== "string") {
+    res.status(400).json({ error: "receipt_token (string) is required" });
+    return;
+  }
+  if (!original_text || typeof original_text !== "string") {
+    res.status(400).json({ error: "original_text (string) is required" });
+    return;
+  }
+  if (original_text.length < 20 || original_text.length > 16000) {
+    res.status(400).json({ error: "original_text must be 20–16000 characters" });
+    return;
+  }
+  if (!action_type || (action_type !== "draft_letter" && action_type !== "generate_clause_pack")) {
+    res.status(400).json({ error: "action_type must be 'draft_letter' or 'generate_clause_pack'" });
+    return;
+  }
+  if (user_instruction !== undefined && user_instruction.length > 500) {
+    res.status(400).json({ error: "user_instruction must be <= 500 characters" });
+    return;
+  }
+
+  // ── Verify receipt token (HMAC) ───────────────────────────────────────────
+  const secret = process.env.SESSION_SECRET ?? "";
+  const receipt = verifyReceiptToken(receipt_token, secret);
+  if (!receipt) {
+    res.status(401).json({ error: "Invalid or tampered receipt_token" });
+    return;
+  }
+
+  // ── Verify original_text matches receipt hash ─────────────────────────────
+  const textHash = hashText(original_text);
+  if (textHash !== receipt.original_text_hash) {
+    res.status(400).json({ error: "original_text does not match the receipt — use the same text submitted to /matter" });
+    return;
+  }
+
+  const t0 = Date.now();
+  const usageEventId = generateUsageEventId();
+  const actionTyped = action_type as ActionType;
+
+  try {
+    const issues = extractIssues(receipt.specialist_output);
+    const privilegeDetected = detectPrivilege(original_text);
+
+    // ── Pass 1: Draft ─────────────────────────────────────────────────────
+    const actionInput = {
+      receipt,
+      originalText: original_text,
+      actionType: actionTyped,
+      userInstruction: user_instruction,
+      callModelWithFallback,
+      modelChain: SPECIALIST_MODEL_CHAIN,
+    };
+
+    let draftArtifact: Record<string, unknown>;
+    let draftBody: string;
+    let draftModelUsed: string;
+    let draftFallback: boolean;
+    let draftLatency: number;
+
+    if (actionTyped === "draft_letter") {
+      const r = await draftLetter(actionInput);
+      draftArtifact = r.artifact;
+      draftBody = r.artifact.body;
+      draftModelUsed = r.model_used;
+      draftFallback = r.fallback_used;
+      draftLatency = r.latency_ms;
+    } else {
+      const r = await generateClausePack(actionInput);
+      draftArtifact = r.artifact;
+      draftBody = JSON.stringify(r.artifact.clauses);
+      draftModelUsed = r.model_used;
+      draftFallback = r.fallback_used;
+      draftLatency = r.latency_ms;
+    }
+
+    // ── Output size check (post-generation, pre-verification) ────────────
+    const oversized =
+      actionTyped === "draft_letter" &&
+      typeof (draftArtifact as any).body === "string" &&
+      (draftArtifact as any).body.length > 4000;
+
+    // ── Pass 2: Verify ────────────────────────────────────────────────────
+    const tVerify = Date.now();
+    const verification = await verifyDraft(
+      draftBody,
+      original_text,
+      issues,
+      actionTyped,
+      callModelWithFallback,
+      SPECIALIST_MODEL_CHAIN,
+    );
+    const verifyLatency = Date.now() - tVerify;
+
+    // Inject oversized flag into verification result
+    if (oversized) {
+      verification.passed = false;
+      verification.new_risks_detected.push("draft_exceeds_length_limit");
+    }
+
+    // Placeholder count check
+    const placeholders: string[] = Array.isArray((draftArtifact as any).placeholders)
+      ? (draftArtifact as any).placeholders
+      : [];
+    if (placeholders.length > 20) {
+      verification.new_risks_detected.push("excessive_placeholder_count — review for missing facts");
+    }
+
+    // ── Build issue resolution map ────────────────────────────────────────
+    // Extract coverage from verification model output (re-parse from verifyDraft internals)
+    // verifyDraft returns structured fields; we reconstruct coverage from unresolved + human_only
+    const coverageForMap = issues.map((issue) => {
+      if (verification.human_only_blockers.includes(issue.id)) {
+        return { issue_id: issue.id, status: "human_only_blocker", evidence: "Flagged by verifier as requiring attorney action" };
+      }
+      if (verification.unresolved_issues.includes(issue.id)) {
+        return { issue_id: issue.id, status: "unresolved", evidence: "Not addressed in draft" };
+      }
+      return { issue_id: issue.id, status: "addressed", evidence: "Addressed in draft per verifier" };
+    });
+    const issueResolutionMap = buildIssueResolutionMap(issues, coverageForMap);
+
+    // ── Governance state machine ──────────────────────────────────────────
+    const governance = buildActionGovernance(verification, actionTyped, privilegeDetected);
+
+    // ── Hashes ────────────────────────────────────────────────────────────
+    const draftHash = hashText(draftBody).slice(0, 16);
+    const verificationHash = hashText(JSON.stringify(verification)).slice(0, 16);
+
+    const totalLatency = Date.now() - t0;
+
+    // ── Hard-fail action run log ──────────────────────────────────────────
+    await pool.query(
+      `INSERT INTO model_usage_events (tenant_id, event_type, metadata) VALUES ($1, $2, $3::jsonb)`,
+      [
+        "anonymous",
+        "action_run",
+        JSON.stringify({
+          matter_id: receipt.matter_id,
+          action_type: actionTyped,
+          artifact_status: governance.artifact_status,
+          draft_hash: draftHash,
+          verification_hash: verificationHash,
+          issue_resolution_map: issueResolutionMap,
+          governance: {
+            impact_tier: governance.impact_tier,
+            approval_required: governance.approval_required,
+            escalation_required: governance.escalation_required,
+          },
+          draft_model: draftModelUsed,
+          verification_model: verification.model_used,
+          draft_latency_ms: draftLatency,
+          verification_latency_ms: verifyLatency,
+          total_latency_ms: totalLatency,
+          usage_event_id: usageEventId,
+        }),
+      ],
+    );
+    // Hard-fail: if pool.query throws, the catch block returns 500
+
+    // ── Response ──────────────────────────────────────────────────────────
+    res.json({
+      matter_id: receipt.matter_id,
+      action_type: actionTyped,
+      artifact_status: governance.artifact_status,
+      draft_artifact: draftArtifact,
+      issue_resolution_map: issueResolutionMap,
+      verification: {
+        passed: verification.passed,
+        unresolved_issues: verification.unresolved_issues,
+        new_risks_detected: verification.new_risks_detected,
+        human_only_blockers: verification.human_only_blockers,
+      },
+      governance,
+      trace: {
+        matter_id: receipt.matter_id,
+        action_type: actionTyped,
+        draft_model: draftModelUsed,
+        verification_model: verification.model_used,
+        draft_latency_ms: draftLatency,
+        verification_latency_ms: verifyLatency,
+        total_latency_ms: totalLatency,
+        draft_hash: draftHash,
+        verification_hash: verificationHash,
+        usage_event_id: usageEventId,
+      },
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: "Action generation failed", details: err.message });
   }
 });
 
