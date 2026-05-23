@@ -1,0 +1,58 @@
+name: Legal Integration Tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "artifacts/api-server/src/routes/legal.ts"
+      - "artifacts/api-server/src/lib/legalActionEngine.ts"
+      - "artifacts/api-server/src/routes/__tests__/legal.action.integration.test.ts"
+      - "artifacts/api-server/vitest.config.ts"
+      - "artifacts/api-server/package.json"
+  pull_request:
+    branches: [main]
+    paths:
+      - "artifacts/api-server/src/routes/legal.ts"
+      - "artifacts/api-server/src/lib/legalActionEngine.ts"
+      - "artifacts/api-server/src/routes/__tests__/**"
+
+jobs:
+  legal-integration-tests:
+    name: Phase 2A Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run legal integration tests
+        working-directory: artifacts/api-server
+        env:
+          # SESSION_SECRET is set in the test suite itself (beforeAll)
+          # DATABASE_URL is mocked — pool.query is never called against a real DB
+          # No API keys needed — fetch is mocked per test
+          NODE_ENV: test
+        run: pnpm test
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: legal-integration-test-results
+          path: artifacts/api-server/test-results/
+          if-no-files-found: ignore
