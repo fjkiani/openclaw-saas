@@ -564,7 +564,31 @@ describe("POST /api/v1/legal/action — governance state machine", () => {
 });
 
 describe("POST /api/v1/legal/action — DB hard-fail", () => {
-  it("receipt 7 — DB log failure returns 500", async () => {
+  it("receipt 7 — nonce INSERT DB failure returns 500", async () => {
+    // With replay prevention, the nonce INSERT is the FIRST DB call in /action.
+    // A DB failure at that point (before any model call) must return 500.
+    const { receipt_token } = await getMatterReceipt();
+
+    // No fetch mock needed — DB fails before any model call
+    (global.fetch as any) = vi.fn(); // should never be called
+
+    // Force pool.query to throw on the nonce INSERT (first call)
+    mockPoolQuery.mockRejectedValueOnce(new Error("connection refused: nonce insert failed"));
+
+    const res = await request(app)
+      .post("/api/v1/legal/action")
+      .send({ receipt_token, original_text: SAMPLE_TEXT, action_type: "draft_letter" })
+      .set("Content-Type", "application/json");
+
+    expect(res.status).toBe(500);
+    expect(res.body.error).toMatch(/action generation failed/i);
+
+    // fetch must NOT have been called — DB failed before model calls
+    expect((global.fetch as any)).not.toHaveBeenCalled();
+  });
+
+  it("receipt 7b — action_run INSERT DB failure returns 500 (nonce consumed, model calls succeed)", async () => {
+    // Nonce INSERT succeeds (first call), model calls succeed, action_run INSERT fails (second call).
     const { receipt_token } = await getMatterReceipt();
 
     (global.fetch as any) = vi.fn()
@@ -577,8 +601,10 @@ describe("POST /api/v1/legal/action — DB hard-fail", () => {
         json: async () => ({ choices: [{ message: { content: JSON.stringify(VERIFY_CLEAN) } }] }),
       });
 
-    // Force pool.query to throw on the action_run insert
-    mockPoolQuery.mockRejectedValueOnce(new Error("connection refused: model_usage_events insert failed"));
+    // First pool.query (nonce INSERT) succeeds; second (action_run INSERT) fails
+    mockPoolQuery
+      .mockResolvedValueOnce({ rows: [], rowCount: 1 })  // nonce INSERT OK
+      .mockRejectedValueOnce(new Error("connection refused: model_usage_events insert failed"));
 
     const res = await request(app)
       .post("/api/v1/legal/action")
@@ -661,5 +687,42 @@ describe("POST /api/v1/legal/action — issue_resolution_map completeness", () =
 
     // No silent drops — all 4 issues must appear
     expect(actionRes.body.issue_resolution_map.length).toBe(4);
+  });
+});
+
+describe("POST /api/v1/legal/action — replay prevention", () => {
+  it("receipt 14 — second call with same receipt_token returns 409", async () => {
+    const { receipt_token } = await getMatterReceipt();
+
+    // First call: nonce INSERT succeeds (default mock), model calls succeed → 200
+    (global.fetch as any) = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true, status: 200,
+        json: async () => ({ choices: [{ message: { content: JSON.stringify(DRAFT_LETTER_RESPONSE) } }] }),
+      })
+      .mockResolvedValueOnce({
+        ok: true, status: 200,
+        json: async () => ({ choices: [{ message: { content: JSON.stringify(VERIFY_CLEAN) } }] }),
+      });
+
+    const first = await request(app)
+      .post("/api/v1/legal/action")
+      .send({ receipt_token, original_text: SAMPLE_TEXT, action_type: "draft_letter" })
+      .set("Content-Type", "application/json");
+
+    expect(first.status).toBe(200);
+
+    // Second call: simulate nonce already consumed — pool.query throws unique_violation
+    mockPoolQuery.mockRejectedValueOnce(
+      Object.assign(new Error("duplicate key value violates unique constraint"), { code: "23505" }),
+    );
+
+    const second = await request(app)
+      .post("/api/v1/legal/action")
+      .send({ receipt_token, original_text: SAMPLE_TEXT, action_type: "draft_letter" })
+      .set("Content-Type", "application/json");
+
+    expect(second.status).toBe(409);
+    expect(second.body.error).toMatch(/already consumed/i);
   });
 });

@@ -1498,6 +1498,28 @@ router.post("/v1/legal/action", async (req, res): Promise<void> => {
   const usageEventId = generateUsageEventId();
   const actionTyped = action_type as ActionType;
 
+  // ── Replay prevention — consume nonce atomically before any model call ────
+  // INSERT fails with unique_violation (23505) if receipt_id was already used.
+  // This is a hard-fail: a replay attempt returns 409, not 500.
+  try {
+    await pool.query(
+      `INSERT INTO legal_receipt_nonces (receipt_id, matter_id, action_type, tenant_id)
+       VALUES ($1, $2, $3, $4)`,
+      [receipt.receipt_id, receipt.matter_id, actionTyped, "anonymous"],
+    );
+  } catch (nonceErr: any) {
+    if (nonceErr.code === "23505") {
+      // unique_violation — receipt already consumed
+      res.status(409).json({
+        error: "receipt already consumed — request a new receipt from /matter",
+      });
+      return;
+    }
+    // Unexpected DB error — surface as 500
+    res.status(500).json({ error: "Action generation failed", details: nonceErr.message });
+    return;
+  }
+
   try {
     const issues = extractIssues(receipt.specialist_output);
     const privilegeDetected = detectPrivilege(original_text);
