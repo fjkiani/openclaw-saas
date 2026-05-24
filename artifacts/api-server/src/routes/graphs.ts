@@ -72,7 +72,7 @@ router.get("/tenants/:id/graphs", requireAuth, async (req: any, res): Promise<vo
     .where(eq(knowledgeGraphsTable.tenantId, id));
 
   const withCounts = await Promise.all(
-    graphs.map(async (g) => {
+    graphs.map(async (g: (typeof graphs)[number]) => {
       const [{ cnt }] = await db
         .select({ cnt: count() })
         .from(graphDocumentsTable)

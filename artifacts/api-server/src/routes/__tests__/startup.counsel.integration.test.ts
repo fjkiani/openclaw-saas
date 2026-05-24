@@ -634,3 +634,97 @@ describe("Case 18 — buildCounselResponse: equity split not 100%", () => {
     expect(counselResult.overall_threshold).toBe("blocked");
   });
 });
+
+// ── Case 19: NL revision — "change vesting to 3 years with a 1-year cliff" ───
+describe("Case 19 — NL revision: change vesting to 3 years with a 1-year cliff", () => {
+  it("returns 200, vesting body contains '3' and '12 months', revision_number 1", async () => {
+    // Step A: initial draft (4yr/12mo)
+    const draftRes = await request(app)
+      .post("/v1/legal/draft")
+      .send({
+        doc_class: "co_founder_agreement",
+        jurisdiction: "DE",
+        parties: [
+          { name: "Alice Chen", role: "co_founder" },
+          { name: "Bob Park", role: "co_founder" },
+        ],
+        equity: {
+          split: { "Alice Chen": 50, "Bob Park": 50 },
+          vesting_years: 4,
+          cliff_months: 12,
+        },
+      });
+
+    expect(draftRes.status).toBe(200);
+    const token: string = draftRes.body.draft_receipt_token;
+    const originalDraftId: string = draftRes.body.draft_id;
+
+    // Confirm original vesting body
+    const origVesting = draftRes.body.draft.sections.find(
+      (s: { section_id: string }) => s.section_id === "vesting_schedule",
+    );
+    expect(origVesting).toBeDefined();
+    expect(origVesting.body).toMatch(/4/);
+    expect(origVesting.body).toMatch(/12/);
+
+    // Step B: NL revision instruction
+    const reviseRes = await request(app)
+      .post("/v1/legal/draft/revise")
+      .send({
+        draft_receipt_token: token,
+        revision_instruction: "change vesting to 3 years with a 1-year cliff",
+      });
+
+    expect(reviseRes.status).toBe(200);
+    expect(reviseRes.body.revision_number).toBe(1);
+    expect(reviseRes.body.parent_receipt_id).toBeTruthy();
+    expect(reviseRes.body.draft_id).not.toBe(originalDraftId);
+
+    const revisedVesting = reviseRes.body.draft.sections.find(
+      (s: { section_id: string }) => s.section_id === "vesting_schedule",
+    );
+    expect(revisedVesting).toBeDefined();
+    // Body must reflect 3-year vesting
+    expect(revisedVesting.body).toMatch(/3/);
+    // Body must reflect 12-month cliff (1-year = 12 months)
+    expect(revisedVesting.body).toMatch(/12/);
+    // Must not say "1 months" (the pre-fix defect)
+    expect(revisedVesting.body).not.toMatch(/1 months/);
+  });
+});
+
+// ── Case 20: Unparseable revision instruction → 422 ──────────────────────────
+describe("Case 20 — unparseable revision instruction returns 422", () => {
+  it("returns 422 with error instruction_not_parseable", async () => {
+    // Step A: initial draft
+    const draftRes = await request(app)
+      .post("/v1/legal/draft")
+      .send({
+        doc_class: "co_founder_agreement",
+        jurisdiction: "DE",
+        parties: [
+          { name: "Alice Chen", role: "co_founder" },
+          { name: "Bob Park", role: "co_founder" },
+        ],
+        equity: {
+          split: { "Alice Chen": 50, "Bob Park": 50 },
+          vesting_years: 4,
+          cliff_months: 12,
+        },
+      });
+
+    expect(draftRes.status).toBe(200);
+    const token: string = draftRes.body.draft_receipt_token;
+
+    // Step B: instruction that cannot be parsed
+    const reviseRes = await request(app)
+      .post("/v1/legal/draft/revise")
+      .send({
+        draft_receipt_token: token,
+        revision_instruction: "please make the document sound more professional",
+      });
+
+    expect(reviseRes.status).toBe(422);
+    expect(reviseRes.body.error).toBe("instruction_not_parseable");
+  });
+});

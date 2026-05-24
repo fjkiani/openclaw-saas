@@ -282,8 +282,60 @@ export function buildDraft(intake: DraftIntake): BuildDraftResult {
   };
 }
 
+
+// ── parseVestingInstruction ───────────────────────────────────────────────────
+// Parses both machine-syntax ("3yr/1yr", "3yr/12mo") and natural-language
+// ("change vesting to 3 years with a 1-year cliff") vesting instructions.
+// Returns { years, cliff_months } or null if not parseable.
+//
+// Machine-syntax rules:
+//   Xyr/Ymo  → cliff = Y months
+//   Xyr/Yyr  → cliff = Y * 12 months   (fixes "1 months" defect)
+//   Xyr/Y    → cliff = Y months (bare number treated as months)
+//
+// Natural-language rules:
+//   "N year[s] [with a] M-year cliff"   → cliff = M * 12
+//   "N year[s] [with a] M-month cliff"  → cliff = M
+//   "N year[s] [with a] M year cliff"   → cliff = M * 12
+//   "N year[s] [with a] M month cliff"  → cliff = M
+function parseVestingInstruction(
+  instruction: string,
+): { years: number; cliff_months: number } | null {
+  const s = instruction.toLowerCase();
+
+  // ── Machine syntax: Xyr/Yyr or Xyr/Ymo or Xyr/Y ─────────────────────────
+  const machineMatch = s.match(
+    /(?:change vesting to|use|vesting)\s+(\d+)yr\/(\d+)(yr|mo|month)?/,
+  );
+  if (machineMatch) {
+    const years = parseInt(machineMatch[1], 10);
+    const rawNum = parseInt(machineMatch[2], 10);
+    const unit = machineMatch[3] ?? "mo"; // bare number → treat as months
+    const cliff_months = unit === "yr" ? rawNum * 12 : rawNum;
+    return { years, cliff_months };
+  }
+
+  // ── Natural language: "N year[s] ... M-year cliff" ───────────────────────
+  // Captures: "3 years with a 1-year cliff", "3-year vesting with 12-month cliff",
+  //           "change vesting to 3 years with a 1 year cliff", etc.
+  const nlMatch = s.match(
+    /(\d+)[- ]?year[s]?.*?(\d+)[- ]?(year|month|mo)[s]?\s+cliff/,
+  );
+  if (nlMatch) {
+    const years = parseInt(nlMatch[1], 10);
+    const rawNum = parseInt(nlMatch[2], 10);
+    const unit = nlMatch[3];
+    const cliff_months = unit === "year" ? rawNum * 12 : rawNum;
+    return { years, cliff_months };
+  }
+
+  return null;
+}
+
 // ── applyRevision ─────────────────────────────────────────────────────────────
 // Deterministic revision parser. Trusted intake comes from stored.intake — never from client.
+// Returns RevisionResult. missing_info_flags includes "revision_instruction_not_parseable"
+// when no pattern matches — callers MUST check this flag and return 422, not 200.
 export function applyRevision(
   stored: StoredDraftArtifact,
   revision_instruction: string,
@@ -306,40 +358,39 @@ export function applyRevision(
   const assumptions: string[] = [...stored.assumptions];
   const missing_info_flags: string[] = [];
 
-  // "change vesting to Xyr/Ymo" or "use Xyr/Ymo"
-  const vestingMatch = instruction.match(
-    /(?:change vesting to|use)\s+(\d+)yr\/(\d+)(?:yr|mo|month)?/,
-  );
+  // Track whether any branch matched
+  let matched = false;
 
-  // "switch governing law to XX" or "change governing law to XX"
-  const govLawMatch = instruction.match(
-    /(?:switch|change) governing law to\s+([a-z]{2,})/,
-  );
-
-  // "remove <section_id>"
-  const removeMatch = instruction.match(/remove\s+([\w-]+)/);
-
-  if (vestingMatch) {
-    const years = parseInt(vestingMatch[1], 10);
-    const months = parseInt(vestingMatch[2], 10);
-    // Build a temporary intake with new vesting values to select the right variant
+  // ── Vesting change ────────────────────────────────────────────────────────
+  // Handles both machine syntax ("3yr/1yr") and natural language
+  // ("change vesting to 3 years with a 1-year cliff")
+  const vestingParsed = parseVestingInstruction(instruction);
+  if (vestingParsed) {
+    matched = true;
+    const { years, cliff_months } = vestingParsed;
     const newIntake: DraftIntake = {
       ...stored.intake,
-      equity: { ...stored.intake.equity, vesting_years: years, cliff_months: months },
+      equity: { ...stored.intake.equity, vesting_years: years, cliff_months },
     };
     const rebuilt = buildDraft(newIntake);
     const newVesting = rebuilt.sections.find((s) => s.section_id === "vesting_schedule");
     const existingIdx = sections.findIndex((s) => s.section_id === "vesting_schedule");
     if (newVesting && existingIdx >= 0) {
-      // Replace in-place — preserves section order
       sections[existingIdx] = newVesting;
       assumptions.push(
-        `vesting_schedule: revised to ${years}yr/${months}mo cliff per instruction`,
+        `vesting_schedule: revised to ${years}yr/${cliff_months}mo cliff per instruction`,
       );
     } else {
-      missing_info_flags.push(`no_vesting_variant_for_${years}yr_${months}mo`);
+      missing_info_flags.push(`no_vesting_variant_for_${years}yr_${cliff_months}mo`);
     }
-  } else if (govLawMatch) {
+  }
+
+  // ── Governing law change ──────────────────────────────────────────────────
+  const govLawMatch = instruction.match(
+    /(?:switch|change) governing law to\s+([a-z]{2,})/,
+  );
+  if (govLawMatch) {
+    matched = true;
     const newJurisdiction = govLawMatch[1].toUpperCase();
     const newIntake: DraftIntake = { ...stored.intake, jurisdiction: newJurisdiction };
     const rebuilt = buildDraft(newIntake);
@@ -349,14 +400,22 @@ export function applyRevision(
       sections[existingIdx] = newGl;
       assumptions.push(`governing_law: revised to ${newJurisdiction} per instruction`);
     }
-  } else if (removeMatch) {
+  }
+
+  // ── Remove section ────────────────────────────────────────────────────────
+  const removeMatch = instruction.match(/remove\s+([\w-]+)/);
+  if (removeMatch) {
+    matched = true;
     const target = removeMatch[1].replace(/-/g, "_");
     const idx = sections.findIndex((s) => s.section_id === target);
     if (idx >= 0) {
       sections.splice(idx, 1);
       assumptions.push(`${target}: removed per instruction`);
     }
-  } else {
+  }
+
+  // ── Unparseable — caller must return 422, not 200 ─────────────────────────
+  if (!matched) {
     missing_info_flags.push("revision_instruction_not_parseable");
   }
 

@@ -34,7 +34,6 @@
 
 import { randomUUID } from "crypto";
 import { Router, type IRouter } from "express";
-import draftRouter from "./legal.draft.addendum";
 import { pool } from "@workspace/db";
 import { runTerminationExtractionBaseline } from "../lib/nextAssetBaseline.js";
 import {

@@ -43,7 +43,7 @@ router.get("/billing/usage", requireAuth, async (req: any, res): Promise<void> =
     .from(tenantsTable)
     .where(eq(tenantsTable.userId, req.userId));
 
-  const tenantIds = userTenants.map((t) => t.id);
+  const tenantIds = userTenants.map((t: (typeof userTenants)[number]) => t.id);
   let totalSkillsInstalled = 0;
 
   if (tenantIds.length > 0) {

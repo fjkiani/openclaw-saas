@@ -34,7 +34,7 @@ router.get("/dashboard/summary", requireAuth, async (req: any, res): Promise<voi
     .from(tenantsTable)
     .where(eq(tenantsTable.userId, req.userId));
 
-  const tenantIds = userTenants.map((t) => t.id);
+  const tenantIds = userTenants.map((t: (typeof userTenants)[number]) => t.id);
   let totalSkillsInstalled = 0;
   let totalTasksCompleted = 0;
 

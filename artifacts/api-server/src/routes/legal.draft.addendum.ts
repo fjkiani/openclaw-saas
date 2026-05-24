@@ -237,6 +237,15 @@ router.post("/v1/legal/draft/revise", async (req: Request, res: Response) => {
     // Step 5: apply revision
     const revisionResult = applyRevision(stored, revision_instruction, false);
 
+
+    // Step 5b: reject unparseable instructions — do not silently return 200
+    if (revisionResult.missing_info_flags.includes("revision_instruction_not_parseable")) {
+      return res.status(422).json({
+        error: "instruction_not_parseable",
+        message: "The revision_instruction could not be applied. Supported patterns: vesting change (e.g. \"change vesting to 3 years with a 1-year cliff\"), governing law change, section removal.",
+        revision_instruction,
+      });
+    }
     // Step 6: re-verify
     const verifierResult = verifyDraft(
       {
