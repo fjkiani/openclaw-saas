@@ -54,7 +54,7 @@ export async function runBenchmark(req: BenchmarkRunRequest): Promise<{ benchmar
     const text = await res.text().catch(() => "");
     throw new Error(`Benchmark service error ${res.status}: ${text}`);
   }
-  return res.json();
+  return res.json() as Promise<{ benchmark_id: string; status: string }>;
 }
 
 /**
@@ -71,7 +71,7 @@ export async function runBenchmarkSync(req: BenchmarkRunRequest): Promise<Benchm
     const text = await res.text().catch(() => "");
     throw new Error(`Benchmark service error ${res.status}: ${text}`);
   }
-  return res.json();
+  return res.json() as Promise<BenchmarkResult>;
 }
 
 /**
@@ -85,7 +85,7 @@ export async function getBenchmarkResult(benchmarkId: string): Promise<Benchmark
     const text = await res.text().catch(() => "");
     throw new Error(`Benchmark service error ${res.status}: ${text}`);
   }
-  return res.json();
+  return res.json() as Promise<BenchmarkResult>;
 }
 
 /**

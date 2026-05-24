@@ -36,7 +36,7 @@ function requireAuth(req: any, res: any, next: any) {
   // 2. Fall back to userId in request body — body userId must start with "user_"
   //    (Clerk user ID format) to prevent trivial spoofing.
   const auth = getAuth(req);
-  const jwtUserId: string | undefined = auth?.userId;
+  const jwtUserId: string | undefined = auth?.userId ?? undefined;
   const rawHeaderUserId: unknown = req.headers["x-user-id"];
   const headerUserId: string | undefined =
     typeof rawHeaderUserId === "string" && rawHeaderUserId.startsWith("user_")

@@ -71,6 +71,7 @@ import {
   type MatterReceipt,
   type ActionReceipt,
   type ActionType,
+  type ActionInput,
   type RevisionActionInput,
 } from "../lib/legalActionEngine.js";
 
@@ -439,6 +440,22 @@ async function callModelWithFallback(
   }
   throw new Error("All models failed");
 }
+
+/** Satisfies ActionInput/RevisionActionInput callModelWithFallback contract. */
+const callModelForLegalAction: ActionInput["callModelWithFallback"] = (
+  systemPrompt,
+  userContent,
+  title,
+  maxTokens,
+  chain,
+) =>
+  callModelWithFallback(
+    systemPrompt,
+    userContent,
+    title,
+    maxTokens,
+    chain as ModelEntry[],
+  );
 
 // ── CA non-compete post-processing (S6 fix) ───────────────────────────────────
 function applyCANoncompeteRule(
@@ -1581,8 +1598,8 @@ router.post("/v1/legal/action", async (req, res): Promise<void> => {
       originalText: original_text,
       actionType: actionTyped,
       userInstruction: user_instruction,
-      callModelWithFallback,
-      modelChain: SPECIALIST_MODEL_CHAIN,
+      callModelWithFallback: callModelForLegalAction,
+      modelChain: SPECIALIST_MODEL_CHAIN as unknown[],
     };
 
     let draftArtifact: Record<string, unknown>;
@@ -1598,8 +1615,8 @@ router.post("/v1/legal/action", async (req, res): Promise<void> => {
         actionReceipt: verifiedActionReceipt!,
         originalText: original_text,
         userInstruction: user_instruction,
-        callModelWithFallback,
-        modelChain: SPECIALIST_MODEL_CHAIN,
+        callModelWithFallback: callModelForLegalAction,
+        modelChain: SPECIALIST_MODEL_CHAIN as unknown[],
       };
 
       const revResult = await generateRevisionPlan(revisionInput);
@@ -1612,8 +1629,8 @@ router.post("/v1/legal/action", async (req, res): Promise<void> => {
         revArtifact,
         original_text,
         issues,
-        callModelWithFallback,
-        SPECIALIST_MODEL_CHAIN,
+        callModelForLegalAction,
+        SPECIALIST_MODEL_CHAIN as unknown[],
       );
       const revVerifyLatency = Date.now() - tRevVerify;
 
@@ -1729,14 +1746,14 @@ router.post("/v1/legal/action", async (req, res): Promise<void> => {
 
     if (actionTyped === "draft_letter") {
       const r = await draftLetter(actionInput);
-      draftArtifact = r.artifact;
+      draftArtifact = r.artifact as unknown as Record<string, unknown>;
       draftBody = r.artifact.body;
       draftModelUsed = r.model_used;
       draftFallback = r.fallback_used;
       draftLatency = r.latency_ms;
     } else {
       const r = await generateClausePack(actionInput);
-      draftArtifact = r.artifact;
+      draftArtifact = r.artifact as unknown as Record<string, unknown>;
       draftBody = JSON.stringify(r.artifact.clauses);
       draftModelUsed = r.model_used;
       draftFallback = r.fallback_used;
@@ -1756,8 +1773,8 @@ router.post("/v1/legal/action", async (req, res): Promise<void> => {
       original_text,
       issues,
       actionTyped,
-      callModelWithFallback,
-      SPECIALIST_MODEL_CHAIN,
+      callModelForLegalAction,
+      SPECIALIST_MODEL_CHAIN as unknown[],
     );
     const verifyLatency = Date.now() - tVerify;
 

@@ -1,4 +1,4 @@
-import type { DocClass } from "./draftReceiptEngine";
+import type { DocClass, DraftIntake } from "./draftReceiptEngine";
 
 export const CLAUSE_LIBRARY_VERSION = "v1";
 
@@ -17,15 +17,28 @@ export interface ClauseVariant {
   allowed_jurisdictions: string[]; // ["*"] = all jurisdictions
 }
 
+// Intake-aware guards for variants whose `conditions` are documentation-only.
+function variantMatchesIntake(v: ClauseVariant, intake: DraftIntake): boolean {
+  if (v.variant_id === "IP-003") {
+    return (intake.ip?.prior_inventions?.length ?? 0) > 0;
+  }
+  if (v.variant_id === "IP-001") {
+    return intake.ip?.scope !== "work_product_only";
+  }
+  return true;
+}
+
 // ── Selector ──────────────────────────────────────────────────────────────────
 // Returns best approved variant for (section, doc_class, jurisdiction).
 // Preference: exact doc_class match > "all"; standard risk > elevated.
+// When intake is provided, IP variants are filtered by documented conditions.
 // Returns null if no approved variant exists.
 export function selectVariant(
   section: string,
   doc_class: DocClass,
   jurisdiction: string,
   library: ClauseVariant[],
+  intake?: DraftIntake,
 ): ClauseVariant | null {
   const candidates = library.filter(
     (v) =>
@@ -33,7 +46,8 @@ export function selectVariant(
       (v.doc_class === doc_class || v.doc_class === "all") &&
       v.approved_for_use &&
       (v.allowed_jurisdictions.includes("*") ||
-        v.allowed_jurisdictions.includes(jurisdiction)),
+        v.allowed_jurisdictions.includes(jurisdiction)) &&
+      (intake == null || variantMatchesIntake(v, intake)),
   );
   if (candidates.length === 0) return null;
 

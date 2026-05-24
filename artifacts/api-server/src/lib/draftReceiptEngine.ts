@@ -46,8 +46,12 @@ export interface DraftIntake {
     cash_fee?: number;
   };
   user_instruction?: string;
-  allow_model_clause_rewrite?: false;   // internal: only false or absent
 }
+
+/** Raw POST body — allows the rewrite flag before coercion to DraftIntake. */
+export type DraftRequestBody = DraftIntake & {
+  allow_model_clause_rewrite?: boolean;
+};
 
 // ── Verifier flag types ───────────────────────────────────────────────────────
 // review_threshold is optional on all flag interfaces (v0.5 addition — backward-compatible)

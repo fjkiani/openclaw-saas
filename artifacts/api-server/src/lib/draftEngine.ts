@@ -164,6 +164,13 @@ export function buildDraft(intake: DraftIntake): BuildDraftResult {
   // Apply defaults — mutate a shallow copy so original intake is not modified
   let i: DraftIntake = { ...intake };
 
+  if (!i.effective_date) {
+    assumptions.push(
+      "effective_date: not provided — defaulted to 'the date of last signature below'",
+    );
+    i = { ...i, effective_date: "the date of last signature below" };
+  }
+
   if (
     i.doc_class === "co_founder_agreement" ||
     i.doc_class === "advisor_agreement"
@@ -207,7 +214,13 @@ export function buildDraft(intake: DraftIntake): BuildDraftResult {
   // Build each section
   const sections: DraftSection[] = [];
   for (const section_id of activeSectionIds) {
-    const variant = selectVariant(section_id, i.doc_class, i.jurisdiction, CLAUSE_LIBRARY);
+    const variant = selectVariant(
+      section_id,
+      i.doc_class,
+      i.jurisdiction,
+      CLAUSE_LIBRARY,
+      i,
+    );
     if (!variant) {
       missing_info_flags.push(
         `${section_id}: no approved variant for jurisdiction ${i.jurisdiction}`,
@@ -295,7 +308,7 @@ export function applyRevision(
 
   // "change vesting to Xyr/Ymo" or "use Xyr/Ymo"
   const vestingMatch = instruction.match(
-    /(?:change vesting to|use)\s+(\d+)yr\/(\d+)(?:mo|month)/,
+    /(?:change vesting to|use)\s+(\d+)yr\/(\d+)(?:yr|mo|month)?/,
   );
 
   // "switch governing law to XX" or "change governing law to XX"

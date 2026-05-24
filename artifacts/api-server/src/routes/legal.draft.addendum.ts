@@ -24,6 +24,7 @@ import {
   verifyDraftReceipt,
   hashText,
   type DraftIntake,
+  type DraftRequestBody,
   type DocClass,
   type StoredDraftArtifact,
 } from "../lib/draftReceiptEngine";
@@ -47,9 +48,7 @@ router.post("/v1/legal/draft", async (req: Request, res: Response) => {
   const start = Date.now();
 
   try {
-    const body = req.body as Partial<DraftIntake> & {
-      allow_model_clause_rewrite?: boolean;
-    };
+    const body = req.body as DraftRequestBody;
 
     // 501: model rewrite stub
     if (body.allow_model_clause_rewrite === true) {
@@ -246,6 +245,7 @@ router.post("/v1/legal/draft/revise", async (req: Request, res: Response) => {
         section_map: revisionResult.new_section_map,
         assumptions: revisionResult.assumptions,
         missing_info_flags: revisionResult.missing_info_flags,
+        missing_decision_prompts: [],
       },
       stored.intake,
     );
