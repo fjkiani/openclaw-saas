@@ -1,6 +1,14 @@
 import { useState, useEffect } from "react";
 import { Link, useLocation } from "wouter";
 import { useUser, useClerk } from "@clerk/react";
+
+// Safe wrappers — return null/no-op when rendered outside <ClerkProvider> (e.g. dev without Clerk key).
+function useSafeUser() {
+  try { return useUser(); } catch { return { user: null, isLoaded: false, isSignedIn: false }; }
+}
+function useSafeClerk() {
+  try { return useClerk(); } catch { return { signOut: () => Promise.resolve() } as ReturnType<typeof useClerk>; }
+}
 import {
   LayoutDashboard,
   Bot,
@@ -47,8 +55,8 @@ function useTheme() {
 
 export function Layout({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
-  const { user } = useUser();
-  const { signOut } = useClerk();
+  const { user } = useSafeUser();
+  const { signOut } = useSafeClerk();
   const { theme, toggle } = useTheme();
 
   return (
