@@ -36,8 +36,27 @@ src/golden/
 - `intakeQuestions.ts` — v0.5
 - `counselResponse.ts` — v0.5
 
-**`legal.ts` scope:** Only the minimal route-mount changes required to register
-`legal.draft.addendum.ts` are allowed. No other edits to `legal.ts`.
+### `legal.ts` mount — MANDATORY
+
+**This is not optional.** The draft routes will not be reachable without it.
+Add exactly these two lines to `legal.ts` — no other edits:
+
+```typescript
+// At the top of legal.ts, with the other imports:
+import draftRouter from "./legal.draft.addendum";
+
+// Inside the router setup block, after existing route registrations:
+router.use(draftRouter);
+```
+
+**Where to place `router.use(draftRouter)`:** After the last existing `router.use(...)` or
+`router.post(...)` call in `legal.ts`, before the `export default router` line.
+Do not insert it inside a conditional block or middleware chain.
+
+**Verification:** After mounting, `POST /api/v1/legal/draft` must return 200 or 400
+(not 404). A 404 means the mount is missing or placed incorrectly.
+
+**`legal.ts` scope:** Only these two lines are allowed. No other edits to `legal.ts`.
 No changes to `legalActionEngine.ts`, `cofounderCorpus.ts`, `governanceEngine.ts`.
 
 ---
@@ -80,6 +99,10 @@ export type ArtifactStatus =
   | "blocked";
 
 // ── Intake ────────────────────────────────────────────────────────────────────
+// DraftIntake is the INTERNAL trusted type — used after the route handler
+// has validated and coerced the raw request body.
+// allow_model_clause_rewrite is locked to false | undefined here.
+// See §3.6 for the request-boundary type distinction.
 export interface DraftIntake {
   doc_class: DocClass;
   jurisdiction: string;
@@ -101,7 +124,7 @@ export interface DraftIntake {
     cash_fee?: number;
   };
   user_instruction?: string;
-  allow_model_clause_rewrite?: false;
+  allow_model_clause_rewrite?: false;   // internal: only false or absent
 }
 
 // ── Verifier flag types ───────────────────────────────────────────────────────
@@ -319,6 +342,33 @@ export const CLAUSE_LIBRARY: ClauseVariant[];
 `[PLACEHOLDER: field.path]` syntax. `buildDraft` fills these from intake; unresolved ones
 remain as-is and trigger `PLACEHOLDER_LEAK` in the verifier.
 
+**Preamble clause — `effective_date` absent rule (no placeholder leakage):**
+The preamble variant body MUST NOT contain `[PLACEHOLDER: effective_date]` as a bare marker.
+When `effective_date` is absent from intake, the preamble must render a deterministic
+fallback string — not leave an unresolved placeholder. The required fallback text is:
+
+```
+"the date last signed below"
+```
+
+Implement this in the preamble variant body using a conditional fill, not a raw placeholder:
+
+```typescript
+// In buildDraft, when filling the preamble body:
+const effectiveDateText = intake.effective_date ?? "the date last signed below";
+body = body.replace("[PLACEHOLDER: effective_date]", effectiveDateText);
+```
+
+This means:
+- `effective_date` present → renders the provided date string
+- `effective_date` absent → renders `"the date last signed below"` — no `[PLACEHOLDER:` in output
+- The preamble variant body MAY contain `[PLACEHOLDER: effective_date]` as a fill target
+- After `buildDraft` runs, zero `[PLACEHOLDER:` substrings may remain in any preamble body
+
+This is not a new field. It is a fill-time behavior constraint on the existing `effective_date`
+optional field. The `no_placeholder_leak: true` assertion in all three golden fixtures
+covers this case.
+
 ---
 
 ### 3.4 `draftEngine.ts`
@@ -371,11 +421,53 @@ and not via `require()`.**
 
 - `allow_model_rewrite = true` → return `{ ...unchanged, not_implemented: true, missing_info_flags: ["model_clause_rewrite_not_implemented"] }`
 - Parse `revision_instruction` (case-insensitive) for:
-  - `"change vesting to Xyr/Ymo"` or `"use Xyr/Ymo"` → rebuild vesting_schedule section with new years/months
+  - `"change vesting to Xyr/Ymo"` or `"use Xyr/Ymo"` → rebuild vesting_schedule section (see §3.4.1)
   - `"switch governing law to XX"` or `"change governing law to XX"` → rebuild governing_law section with new jurisdiction
   - `"remove <section_id>"` → splice section from array
   - Unrecognized → push `"revision_instruction_not_parseable"` to `missing_info_flags`, return draft unchanged
 - Trusted intake comes from `stored.intake` — never from the client request
+
+#### 3.4.1 Vesting mutation — exact behavior
+
+When `revision_instruction` matches the vesting pattern (e.g. `"change vesting to 3yr/1yr"`):
+
+**What changes:**
+- The `vesting_schedule` section in `new_sections` is replaced with a newly selected variant
+- `new_full_text` is rebuilt from the full `new_sections` array
+- `new_section_map` is rebuilt from `new_sections.map(s => s.section_id)`
+
+**What does NOT change:**
+- `stored.intake` is never mutated — the stored intake retains the original `vesting_years`/`cliff_months`
+- All other sections are carried over from `stored.sections` unchanged
+- The position of `vesting_schedule` in the array is preserved (same index, not appended)
+
+**Variant selection for vesting mutation:**
+Parse `Xyr` → `new_vesting_years: number` and `Ymo` → `new_cliff_months: number` from the instruction.
+Call `selectVariant("vesting_schedule", stored.doc_class, stored.intake.jurisdiction, CLAUSE_LIBRARY)`
+and pick the variant whose label or `variant_id` best matches the requested years/months.
+
+Matching priority (in order):
+1. Exact match: variant body or label contains both `X` year and `Y` month values
+2. Nearest match by years first, then cliff: e.g. `"3yr/1yr"` → VS-003 before VS-004
+3. If no variant matches at all: push `"no_vesting_variant_for_Xyr_Ymo"` to `missing_info_flags`,
+   carry the original vesting section unchanged
+
+**Placeholder fill after variant selection:**
+After selecting the new variant, fill `[PLACEHOLDER: ...]` markers using `stored.intake`
+(the trusted copy) — not from the revision instruction string. The instruction only
+determines which variant to select; intake data populates the clause body.
+
+**`new_sections` construction:**
+```typescript
+const newSections = stored.sections.map(s =>
+  s.section_id === "vesting_schedule" ? newVestingSection : s
+);
+```
+This preserves section order and replaces only the vesting entry.
+
+**`assumptions` and `missing_info_flags` in RevisionResult:**
+- Carry forward `stored.assumptions` unchanged
+- `missing_info_flags`: empty array unless a matching failure occurred (see above)
 
 ---
 
@@ -438,6 +530,55 @@ firing logic.
 
 ---
 
+### 3.6 `allow_model_clause_rewrite` — request boundary vs. internal type
+
+This field has two different types depending on where it appears. JR1 must implement both.
+
+**At the HTTP request boundary (raw request body):**
+The route handler must accept `boolean | undefined` for this field so that `true` can arrive
+and be caught before constructing `DraftIntake`. Use a plain object type or a separate
+`DraftRequestBody` interface for the raw body:
+
+```typescript
+// In legal.draft.addendum.ts — raw request body type (NOT DraftIntake)
+interface DraftRequestBody {
+  doc_class: unknown;
+  jurisdiction: unknown;
+  parties: unknown;
+  effective_date?: unknown;
+  equity?: unknown;
+  ip?: unknown;
+  advisory?: unknown;
+  user_instruction?: unknown;
+  allow_model_clause_rewrite?: boolean;   // accepts true so the 501 guard can fire
+}
+```
+
+**Validation order in the route handler (exact):**
+```
+1. Check allow_model_clause_rewrite === true → return 501 immediately
+2. Validate doc_class, parties, jurisdiction → return 400 if invalid
+3. Construct DraftIntake from validated fields
+   (allow_model_clause_rewrite is omitted or set to false in DraftIntake)
+4. Call buildDraft(intake)
+```
+
+**In `DraftIntake` (internal trusted type, defined in `draftReceiptEngine.ts`):**
+`allow_model_clause_rewrite?: false` — only `false` or absent. This is the type that flows
+through `buildDraft`, `applyRevision`, `verifyDraft`, and is stored in `DraftArtifactStore`.
+A `true` value never reaches `DraftIntake` — it is intercepted at step 1 above.
+
+**Why this matters:** If `DraftIntake` accepted `boolean`, TypeScript would require every
+downstream consumer to handle the `true` case. Locking it to `false | undefined` keeps the
+internal pipeline clean and makes the 501 guard the single enforcement point.
+
+**`/revise` endpoint:** The `DraftRequestBody` for `/revise` does not include
+`allow_model_clause_rewrite` at all — the field is not accepted on revision requests.
+The trusted intake is read from `DraftArtifactStore`; its `allow_model_clause_rewrite`
+is already `false | undefined`.
+
+---
+
 ## 4. Route Contract
 
 > **These definitions are canonical.** Field names, nesting, and status codes must match exactly.
@@ -474,7 +615,8 @@ at `/api` — not at `/api/v1/legal`. Registering as `/draft` will silently serv
     cash_fee?: number;
   };
   user_instruction?: string;           // max 500 chars; ignored in v0
-  allow_model_clause_rewrite?: false;  // v0: stub returns 501 if true
+  allow_model_clause_rewrite?: boolean; // true → 501; false/absent → proceed
+                                        // (boolean at boundary; false|undefined in DraftIntake)
 }
 ```
 
@@ -551,6 +693,7 @@ at `/api` — not at `/api/v1/legal`. Registering as `/draft` will silently serv
   draft_receipt_token: string;    // required — from prior /draft or /draft/revise
   revision_instruction: string;   // required — max 500 chars
   // NO intake fields — trusted intake comes from DraftArtifactStore only
+  // allow_model_clause_rewrite is NOT accepted here
 }
 ```
 
@@ -681,6 +824,8 @@ Case 7 — Revision loop: valid receipt, "change vesting to 3yr/1yr"
     - parent_receipt_id is a non-empty string and !== draft_receipt_token from Step A
     - draft_id !== draft_id from Step A
     - vesting_schedule section body reflects 3yr/1yr (variant VS-003 or body contains "3" year reference)
+    - All other sections are unchanged from Step A (same section_ids, same bodies)
+    - section_map order is preserved (vesting_schedule at same index as Step A)
 
 Case 8 — Tampered receipt token
   POST /api/v1/legal/draft/revise with a valid token where one character has been flipped
@@ -868,10 +1013,12 @@ v0 is landed when **every item below is checked**. JR2 owns this list.
 - [ ] `DraftArtifactStore` is a module-level singleton — same instance across all requests in a process
 - [ ] `DraftArtifactStore` is NOT re-created per request or per test file
 
-### Route registration
-- [ ] `POST /api/v1/legal/draft` responds at exactly that path
-- [ ] `POST /api/v1/legal/draft/revise` responds at exactly that path
-- [ ] Only minimal mount changes made to `legal.ts` — no other edits
+### Route registration — MANDATORY
+- [ ] `import draftRouter from "./legal.draft.addendum"` added to `legal.ts`
+- [ ] `router.use(draftRouter)` added to `legal.ts` after existing route registrations
+- [ ] `POST /api/v1/legal/draft` responds at exactly that path (not 404)
+- [ ] `POST /api/v1/legal/draft/revise` responds at exactly that path (not 404)
+- [ ] Only these two lines added to `legal.ts` — no other edits
 - [ ] `/revise` does NOT accept any intake fields from the client
 
 ### Signature correctness
@@ -879,6 +1026,26 @@ v0 is landed when **every item below is checked**. JR2 owns this list.
 - [ ] `buildDraft` takes only `intake` — no template argument
 - [ ] `RevisionResult` fields are `new_sections`, `new_full_text`, `new_section_map`
 - [ ] `DocumentTemplate` field is `title_template` (not `title`)
+
+### Type boundary correctness
+- [ ] Route handler accepts `allow_model_clause_rewrite?: boolean` in raw request body type
+- [ ] `DraftIntake` has `allow_model_clause_rewrite?: false` (not `boolean`)
+- [ ] 501 guard fires before `DraftIntake` is constructed — `true` never reaches internal pipeline
+- [ ] `/revise` request body type does not include `allow_model_clause_rewrite`
+
+### Preamble / effective_date
+- [ ] Preamble variant body uses `[PLACEHOLDER: effective_date]` as a fill target (not hardcoded)
+- [ ] `buildDraft` fills `effective_date` with `intake.effective_date ?? "the date last signed below"`
+- [ ] No `[PLACEHOLDER:` substring remains in preamble body after `buildDraft` runs
+- [ ] Case 4 (vesting_years absent) passes with `no_placeholder_leak` — confirms default fill works
+
+### Vesting mutation (applyRevision)
+- [ ] `stored.intake` is never mutated by `applyRevision`
+- [ ] `new_sections` is the full section array with vesting_schedule replaced in-place (same index)
+- [ ] `new_section_map` is rebuilt from `new_sections.map(s => s.section_id)`
+- [ ] `new_full_text` is rebuilt from the full `new_sections` array
+- [ ] All non-vesting sections are identical to `stored.sections` after revision
+- [ ] Case 7 asserts section order is preserved and only vesting body changed
 
 ### Flag naming
 - [ ] 83(b) timing flag is `SECTION_83B_TIMING_WARNING` — not `CA_83B_WINDOW_NOTE`
@@ -890,6 +1057,7 @@ v0 is landed when **every item below is checked**. JR2 owns this list.
 - [ ] Case 1 asserts `SECTION_83B_TIMING_WARNING` (not `CA_83B_WINDOW_NOTE`)
 - [ ] Case 2 asserts `CA_MORAL_RIGHTS` — clean CA contractor draft has no prohibited section to flag
 - [ ] Case 6 asserts `EQUITY_SPLIT_NOT_100` with split summing to 90
+- [ ] Case 7 asserts all non-vesting sections unchanged and section order preserved
 
 ### Verifier behavior
 - [ ] `CA_NONCOMPETE_VOID` does NOT fire on a clean CA contractor draft
@@ -917,6 +1085,7 @@ Every item here caused a real bug in prior implementation passes.
 | Pitfall | Correct behavior |
 |---|---|
 | Route registered as `"/draft"` | Must be `"/v1/legal/draft"` — router mounts at `/api`, not `/api/v1/legal` |
+| `router.use(draftRouter)` not added to `legal.ts` | **MANDATORY** — routes are unreachable without it; 404 is the symptom |
 | `issueDraftReceipt(receipt, secret)` | Takes one opts object: `{ draft_id, doc_class, full_text, intake, ..., secret }` |
 | `template.title` | Field is `template.title_template` |
 | `revisionResult.sections` | Fields are `new_sections`, `new_full_text`, `new_section_map` |
@@ -927,6 +1096,10 @@ Every item here caused a real bug in prior implementation passes.
 | `DraftArtifactStore` re-created per request | Must be module singleton — revision loop requires the same instance |
 | `require()` inside `buildDraft` | Use static `import` at top of file; build `CLAUSE_LIBRARY` at module level |
 | `EQUITY_SPLIT_NOT_100` test uses split summing to 100 | Test must use a split that sums to ≠ 100 (e.g., `{ "Alice": 50, "Bob": 40 }` = 90) |
+| `allow_model_clause_rewrite: boolean` in `DraftIntake` | `DraftIntake` locks to `false \| undefined`; raw request body accepts `boolean` |
+| `effective_date` absent → `[PLACEHOLDER: effective_date]` in output | Fill with `"the date last signed below"` — never leave bare placeholder in preamble |
+| `applyRevision` mutates `stored.intake` | Intake is read-only; only `new_sections` / `new_full_text` / `new_section_map` change |
+| `new_sections` appends revised section instead of replacing in-place | Use `.map()` to replace at same index — section order must be preserved |
 
 ---
 
