@@ -1,0 +1,36 @@
+{
+  "_fixture_version": "v0",
+  "_description": "Contractor + company, CA, work-product-only IP, prior inventions listed",
+  "_section_map_note": "non_solicitation and non_compete omitted — jurisdiction is CA (Bus. & Prof. Code § 16600). CA_NONCOMPETE_VOID does NOT fire because the sections are absent from the draft (template-level omission is the primary control).",
+  "intake": {
+    "doc_class": "contractor_ip_assignment",
+    "jurisdiction": "CA",
+    "parties": [
+      { "name": "Riya Desai",  "role": "contractor" },
+      { "name": "Acme Inc.",   "role": "company" }
+    ],
+    "ip": {
+      "scope": "work_product_only",
+      "prior_inventions": ["personal blog engine", "open source CLI tool"]
+    }
+  },
+  "expected": {
+    "artifact_status": "draft_pending_approval",
+    "section_map": [
+      "preamble",
+      "scope_of_work",
+      "ip_assignment",
+      "work_made_for_hire",
+      "moral_rights_waiver",
+      "prior_inventions_carveout",
+      "confidentiality",
+      "governing_law",
+      "representations_and_warranties"
+    ],
+    "jurisdiction_escalation_ids": ["CA_MORAL_RIGHTS"],
+    "legal_conflict_ids": [],
+    "template_failure_ids": [],
+    "assumptions_contain": [],
+    "no_placeholder_leak": true
+  }
+}

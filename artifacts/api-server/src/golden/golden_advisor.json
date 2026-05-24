@@ -1,0 +1,41 @@
+{
+  "_fixture_version": "v0",
+  "_description": "Advisor + company, DE, 0.25% equity, 2yr/6mo cliff, no acceleration",
+  "_section_map_note": "acceleration_clause absent because acceleration is 'none'. cash_compensation absent because advisory.cash_fee is not provided.",
+  "intake": {
+    "doc_class": "advisor_agreement",
+    "jurisdiction": "DE",
+    "parties": [
+      { "name": "Marcus Webb",      "role": "advisor" },
+      { "name": "Nexus Labs Inc.",  "role": "company" }
+    ],
+    "equity": {
+      "vesting_years": 2,
+      "cliff_months": 6,
+      "acceleration": "none"
+    },
+    "advisory": {
+      "equity_pct": 0.25,
+      "services_description": "strategic introductions and go-to-market advisory"
+    }
+  },
+  "expected": {
+    "artifact_status": "draft_pending_approval",
+    "section_map": [
+      "preamble",
+      "advisory_services",
+      "equity_compensation",
+      "vesting_schedule",
+      "ip_assignment",
+      "confidentiality",
+      "no_conflict",
+      "termination",
+      "governing_law"
+    ],
+    "jurisdiction_escalation_ids": ["DE_BOARD_APPROVAL"],
+    "legal_conflict_ids": [],
+    "template_failure_ids": [],
+    "assumptions_contain": [],
+    "no_placeholder_leak": true
+  }
+}

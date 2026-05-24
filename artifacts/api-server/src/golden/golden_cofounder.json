@@ -1,0 +1,43 @@
+{
+  "_fixture_version": "v0",
+  "_description": "2 founders, DE, 50/50 split, 4yr/1yr cliff, single-trigger acceleration, broad IP + prior inventions carve-out",
+  "_section_map_note": "non_solicitation present because jurisdiction is DE (condition: !== CA). acceleration_clause present because acceleration is 'single'.",
+  "intake": {
+    "doc_class": "co_founder_agreement",
+    "jurisdiction": "DE",
+    "parties": [
+      { "name": "Alice Chen", "role": "co_founder" },
+      { "name": "Bob Park",   "role": "co_founder" }
+    ],
+    "equity": {
+      "split": { "Alice Chen": 50, "Bob Park": 50 },
+      "vesting_years": 4,
+      "cliff_months": 12,
+      "acceleration": "single"
+    },
+    "ip": { "scope": "broad", "prior_inventions": ["personal blog engine"] }
+  },
+  "expected": {
+    "artifact_status": "draft_pending_approval",
+    "section_map": [
+      "preamble",
+      "equity_split",
+      "vesting_schedule",
+      "election_83b",
+      "ip_assignment",
+      "roles_and_responsibilities",
+      "decision_making",
+      "deadlock_resolution",
+      "transfer_restrictions",
+      "termination_and_buyout",
+      "governing_law",
+      "acceleration_clause",
+      "non_solicitation"
+    ],
+    "jurisdiction_escalation_ids": ["DE_BOARD_APPROVAL", "SECTION_83B_TIMING_WARNING"],
+    "legal_conflict_ids": [],
+    "template_failure_ids": [],
+    "assumptions_contain": [],
+    "no_placeholder_leak": true
+  }
+}
