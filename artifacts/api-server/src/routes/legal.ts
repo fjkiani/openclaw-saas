@@ -74,6 +74,7 @@ import {
   type ActionInput,
   type RevisionActionInput,
 } from "../lib/legalActionEngine.js";
+import draftRouter from "./legal.draft.addendum.js";
 
 const router: IRouter = Router();
 
@@ -1917,5 +1918,7 @@ router.post("/v1/legal/action", async (req, res): Promise<void> => {
     res.status(500).json({ error: "Action generation failed", details: err.message });
   }
 });
+
+router.use(draftRouter);
 
 export default router;
