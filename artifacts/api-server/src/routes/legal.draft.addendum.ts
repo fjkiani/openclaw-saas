@@ -152,10 +152,12 @@ router.post("/v1/legal/draft", async (req: Request, res: Response) => {
       section_map: buildResult.section_map,
       assumptions: buildResult.assumptions,
       missing_info_flags: buildResult.missing_info_flags,
+      missing_decision_prompts: buildResult.missing_decision_prompts,   // v0.5
       verifier: verifierResult,
       governance: {
         artifact_status: governance.artifact_status,
         escalation_required: governance.escalation_required,
+        review_threshold: governance.review_threshold,                  // v0.5
         human_review_required: true as const,
         not_legal_advice: true as const,
         privilege_warning: PRIVILEGE_WARNING,
@@ -306,10 +308,12 @@ router.post("/v1/legal/draft/revise", async (req: Request, res: Response) => {
       section_map: revisionResult.new_section_map,
       assumptions: revisionResult.assumptions,
       missing_info_flags: revisionResult.missing_info_flags,
+      missing_decision_prompts: [],                                      // v0.5 — revision path: prompts not regenerated
       verifier: verifierResult,
       governance: {
         artifact_status: governance.artifact_status,
         escalation_required: governance.escalation_required,
+        review_threshold: governance.review_threshold,                  // v0.5
         human_review_required: true as const,
         not_legal_advice: true as const,
         privilege_warning: PRIVILEGE_WARNING,

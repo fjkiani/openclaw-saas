@@ -173,7 +173,8 @@ export const CLAUSE_LIBRARY: ClauseVariant[] = [
     approved_for_use: true,
     reviewed_by: "template-review-v1",
     last_reviewed_at: "2026-01-01",
-    risk_level: "standard",
+    // 83(b) election has an absolute 30-day IRS filing window — time-critical, requires counsel.
+    risk_level: "requires_counsel",
     allowed_jurisdictions: ["*"],
   },
 

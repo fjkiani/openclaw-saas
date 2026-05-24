@@ -23,6 +23,7 @@ import {
   hashText,
   type DraftIntake,
 } from "../../lib/draftReceiptEngine";
+import { buildCounselResponse, type DraftResponse } from "../../lib/counselResponse";
 
 // ── App setup ─────────────────────────────────────────────────────────────────
 const app = express();
@@ -428,5 +429,208 @@ describe("Case 12 — allow_model_clause_rewrite: true", () => {
       });
 
     expect(res.status).toBe(501);
+  });
+});
+
+// ── v0.5 cases ────────────────────────────────────────────────────────────────
+
+// ── Case 13: rationale populated + governance.review_threshold ────────────────
+describe("Case 13 — co-founder DE, all fields: rationale populated", () => {
+  it("every section has rationale.selection_reason; governance.review_threshold is counsel_review_required", async () => {
+    const res = await request(app)
+      .post("/v1/legal/draft")
+      .send({
+        doc_class: "co_founder_agreement",
+        jurisdiction: "DE",
+        parties: [
+          { name: "Alice Chen", role: "co_founder" },
+          { name: "Bob Park", role: "co_founder" },
+        ],
+        equity: {
+          split: { "Alice Chen": 50, "Bob Park": 50 },
+          vesting_years: 4,
+          cliff_months: 12,
+          acceleration: "single",
+        },
+        ip: { scope: "broad", prior_inventions: ["personal blog engine"] },
+      });
+
+    expect(res.status).toBe(200);
+
+    // Every section must have rationale with a non-empty selection_reason
+    const sections: Array<{ section_id: string; rationale?: { selection_reason: string; review_threshold: string } }> =
+      res.body.draft.sections;
+    for (const section of sections) {
+      expect(section.rationale).toBeDefined();
+      expect(typeof section.rationale!.selection_reason).toBe("string");
+      expect(section.rationale!.selection_reason.length).toBeGreaterThan(0);
+    }
+
+    // DE_BOARD_APPROVAL (counsel_review_required) + SECTION_83B_TIMING_WARNING (counsel_review_required)
+    // → aggregate review_threshold must be counsel_review_required
+    expect(res.body.governance.review_threshold).toBe("counsel_review_required");
+
+    // Existing v0 assertions still hold
+    expect(res.body.governance.artifact_status).toBe("draft_pending_approval");
+    expect(res.body.governance.escalation_required).toBe(false);
+  });
+});
+
+// ── Case 14: missing_decision_prompts — contractor CA, prior_inventions absent ─
+describe("Case 14 — contractor CA, ip.prior_inventions absent", () => {
+  it("missing_decision_prompts contains ip.prior_inventions at priority 1 with counsel_review_required", async () => {
+    const res = await request(app)
+      .post("/v1/legal/draft")
+      .send({
+        doc_class: "contractor_ip_assignment",
+        jurisdiction: "CA",
+        parties: [
+          { name: "Riya Desai", role: "contractor" },
+          { name: "Acme Inc.", role: "company" },
+        ],
+        ip: { scope: "work_product_only" },
+        // ip.prior_inventions intentionally absent
+      });
+
+    expect(res.status).toBe(200);
+
+    const prompts: Array<{ field: string; review_threshold: string; priority: number }> =
+      res.body.missing_decision_prompts;
+
+    expect(Array.isArray(prompts)).toBe(true);
+
+    const priorInventionsPrompt = prompts.find((p) => p.field === "ip.prior_inventions");
+    expect(priorInventionsPrompt).toBeDefined();
+    expect(priorInventionsPrompt!.review_threshold).toBe("counsel_review_required");
+    expect(priorInventionsPrompt!.priority).toBe(1);
+  });
+});
+
+// ── Case 15: missing_decision_prompts — advisor DE, advisory.equity_pct absent ─
+describe("Case 15 — advisor DE, advisory.equity_pct absent", () => {
+  it("missing_decision_prompts contains advisory.equity_pct with business_review_required", async () => {
+    const res = await request(app)
+      .post("/v1/legal/draft")
+      .send({
+        doc_class: "advisor_agreement",
+        jurisdiction: "DE",
+        parties: [
+          { name: "Marcus Webb", role: "advisor" },
+          { name: "Nexus Labs Inc.", role: "company" },
+        ],
+        equity: { vesting_years: 2, cliff_months: 6, acceleration: "none" },
+        advisory: {
+          services_description: "strategic introductions and go-to-market advisory",
+          // equity_pct intentionally absent
+        },
+      });
+
+    expect(res.status).toBe(200);
+
+    const prompts: Array<{ field: string; review_threshold: string }> =
+      res.body.missing_decision_prompts;
+
+    expect(Array.isArray(prompts)).toBe(true);
+
+    const equityPctPrompt = prompts.find((p) => p.field === "advisory.equity_pct");
+    expect(equityPctPrompt).toBeDefined();
+    expect(equityPctPrompt!.review_threshold).toBe("business_review_required");
+  });
+});
+
+// ── Case 16: section rationale — broad IP (IP-001, elevated risk) ─────────────
+describe("Case 16 — co-founder broad IP: ip_assignment rationale.review_threshold is business_review_required", () => {
+  it("ip_assignment section has review_threshold business_review_required", async () => {
+    const res = await request(app)
+      .post("/v1/legal/draft")
+      .send({
+        doc_class: "co_founder_agreement",
+        jurisdiction: "DE",
+        parties: [
+          { name: "Alice Chen", role: "co_founder" },
+          { name: "Bob Park", role: "co_founder" },
+        ],
+        equity: {
+          split: { "Alice Chen": 50, "Bob Park": 50 },
+          vesting_years: 4,
+          cliff_months: 12,
+        },
+        ip: { scope: "broad" },
+      });
+
+    expect(res.status).toBe(200);
+
+    const sections: Array<{ section_id: string; rationale?: { review_threshold: string; selection_reason: string } }> =
+      res.body.draft.sections;
+
+    const ipSection = sections.find((s) => s.section_id === "ip_assignment");
+    expect(ipSection).toBeDefined();
+    expect(ipSection!.rationale).toBeDefined();
+    expect(ipSection!.rationale!.review_threshold).toBe("business_review_required");
+  });
+});
+
+// ── Case 17: buildCounselResponse — co_founder DE clean draft ─────────────────
+describe("Case 17 — buildCounselResponse: co_founder DE clean draft", () => {
+  it("returns ready_to_proceed true, overall_threshold counsel_review_required, review_guidance includes election_83b", async () => {
+    const res = await request(app)
+      .post("/v1/legal/draft")
+      .send({
+        doc_class: "co_founder_agreement",
+        jurisdiction: "DE",
+        parties: [
+          { name: "Alice Chen", role: "co_founder" },
+          { name: "Bob Park", role: "co_founder" },
+        ],
+        equity: {
+          split: { "Alice Chen": 50, "Bob Park": 50 },
+          vesting_years: 4,
+          cliff_months: 12,
+          acceleration: "single",
+        },
+        ip: { scope: "broad" },
+      });
+
+    expect(res.status).toBe(200);
+
+    const counselResult = buildCounselResponse(res.body as DraftResponse);
+
+    expect(counselResult.ready_to_proceed).toBe(true);
+    expect(counselResult.overall_threshold).toBe("counsel_review_required");
+    expect(counselResult.assumptions_made.length).toBeGreaterThan(0);
+
+    const election83bGuidance = counselResult.review_guidance.find(
+      (g) => g.section === "election_83b",
+    );
+    expect(election83bGuidance).toBeDefined();
+    expect(election83bGuidance!.guidance.length).toBeGreaterThan(0);
+  });
+});
+
+// ── Case 18: buildCounselResponse — equity split not 100% ────────────────────
+describe("Case 18 — buildCounselResponse: equity split not 100%", () => {
+  it("returns ready_to_proceed false, overall_threshold blocked", async () => {
+    const res = await request(app)
+      .post("/v1/legal/draft")
+      .send({
+        doc_class: "co_founder_agreement",
+        jurisdiction: "DE",
+        parties: [
+          { name: "Alice Chen", role: "co_founder" },
+          { name: "Bob Park", role: "co_founder" },
+        ],
+        equity: {
+          split: { "Alice Chen": 50, "Bob Park": 40 }, // sums to 90
+          vesting_years: 4,
+          cliff_months: 12,
+        },
+      });
+
+    expect(res.status).toBe(200);
+
+    const counselResult = buildCounselResponse(res.body as DraftResponse);
+
+    expect(counselResult.ready_to_proceed).toBe(false);
+    expect(counselResult.overall_threshold).toBe("blocked");
   });
 });

@@ -6,14 +6,31 @@ import type {
   LegalConflictFlag,
   TemplateFailureFlag,
   JurisdictionFlag,
+  ReviewThreshold,
 } from "./draftReceiptEngine";
 import type { BuildDraftResult } from "./draftEngine";
+import { getEscalationTrigger } from "./draftIntakeSchemas";
 
 export const VERIFIER_VERSION = "v1";
 
+// ── ReviewThreshold ordering ──────────────────────────────────────────────────
+const THRESHOLD_ORDER: ReviewThreshold[] = [
+  "self_review_ok",
+  "business_review_required",
+  "counsel_review_required",
+  "blocked",
+];
+
+function maxThreshold(a: ReviewThreshold, b: ReviewThreshold): ReviewThreshold {
+  return THRESHOLD_ORDER.indexOf(a) >= THRESHOLD_ORDER.indexOf(b) ? a : b;
+}
+
+// ── GovernanceResult ──────────────────────────────────────────────────────────
+// review_threshold is a v0.5 addition — always present, coexists with artifact_status
 export interface GovernanceResult {
   artifact_status: ArtifactStatus;
   escalation_required: boolean;
+  review_threshold: ReviewThreshold;   // v0.5 — aggregate max across all flags
 }
 
 // ── Option A comment ──────────────────────────────────────────────────────────
@@ -44,7 +61,6 @@ export function verifyDraft(
   // PLACEHOLDER_LEAK: any unresolved [PLACEHOLDER: ...] in full_text
   const leakMatches = result.full_text.match(/\[PLACEHOLDER:[^\]]+\]/g) ?? [];
   for (const leak of leakMatches) {
-    // Determine which section this leak belongs to by scanning sections
     const ownerSection =
       result.sections.find((s) => s.body.includes(leak))?.section_id ?? "unknown";
     template_failures.push({
@@ -52,6 +68,7 @@ export function verifyDraft(
       section: ownerSection,
       detail: leak,
       severity: "warning",
+      review_threshold: "business_review_required",   // v0.5
     });
   }
 
@@ -63,6 +80,7 @@ export function verifyDraft(
         section: s.section_id,
         detail: `Section '${s.section_id}' has empty body`,
         severity: "blocking",
+        review_threshold: "blocked",   // v0.5
       });
     }
   }
@@ -78,15 +96,20 @@ export function verifyDraft(
         section: s.section_id,
         detail: `No approved variant found for section '${s.section_id}' in jurisdiction '${intake.jurisdiction}'`,
         severity: "blocking",
+        review_threshold: "blocked",   // v0.5
       });
     }
   }
 
   // ── Missing data ───────────────────────────────────────────────────────────
   for (const flag of result.missing_info_flags) {
+    // Derive review_threshold from ESCALATION_TRIGGERS if available
+    const fieldKey = flag.split(":")[0].trim();
+    const trigger = getEscalationTrigger(fieldKey, intake.doc_class);
     missing_data.push({
       field: flag,
       impact: "Section uses placeholder or default value",
+      review_threshold: trigger?.review_threshold ?? "business_review_required",   // v0.5
     });
   }
 
@@ -101,6 +124,7 @@ export function verifyDraft(
       description: `cliff_months (${cm}) must be less than vesting_years * 12 (${vy * 12})`,
       sections_involved: ["vesting_schedule"],
       severity: "blocking",
+      review_threshold: "counsel_review_required",   // v0.5
     });
   }
 
@@ -114,6 +138,7 @@ export function verifyDraft(
         description: `equity.split sums to ${total.toFixed(2)}, must equal 100`,
         sections_involved: ["equity_split"],
         severity: "blocking",
+        review_threshold: "blocked",   // v0.5
       });
     }
   }
@@ -134,6 +159,7 @@ export function verifyDraft(
         "Non-compete and non-solicitation clauses are void under CA Bus. & Prof. Code § 16600",
       severity: "blocking",
       recommended_action: "Remove non-compete and non-solicitation sections",
+      review_threshold: "blocked",   // v0.5
     });
   }
 
@@ -149,6 +175,7 @@ export function verifyDraft(
       severity: "warning",
       recommended_action:
         "File by certified mail within 30 days of grant date and retain proof of filing",
+      review_threshold: "counsel_review_required",   // v0.5
     });
   }
 
@@ -164,6 +191,7 @@ export function verifyDraft(
       description: "DGCL § 152 requires board authorization for equity issuances",
       severity: "warning",
       recommended_action: "Obtain board resolution before issuing equity",
+      review_threshold: "counsel_review_required",   // v0.5
     });
   }
 
@@ -178,6 +206,7 @@ export function verifyDraft(
       severity: "warning",
       recommended_action:
         "Confirm work-for-hire scope excludes visual art or obtain separate waiver",
+      review_threshold: "business_review_required",   // v0.5
     });
   }
 
@@ -207,13 +236,33 @@ export function buildDraftGovernance(verifier: VerifierResult): GovernanceResult
     (f) => f.severity === "blocking",
   );
 
-  // Jurisdiction blocking takes precedence (artifact is "blocked", not just "needs_revision")
+  // artifact_status: jurisdiction blocking takes precedence
+  let artifact_status: ArtifactStatus;
   if (hasBlockingJurisdiction) {
-    return { artifact_status: "blocked", escalation_required: true };
+    artifact_status = "blocked";
+  } else if (hasBlockingTemplateFailure || hasBlockingConflict) {
+    artifact_status = "needs_revision";
+  } else {
+    artifact_status = "draft_pending_approval";
   }
-  if (hasBlockingTemplateFailure || hasBlockingConflict) {
-    return { artifact_status: "needs_revision", escalation_required: true };
+
+  const escalation_required = hasBlockingJurisdiction || hasBlockingTemplateFailure || hasBlockingConflict;
+
+  // v0.5: compute aggregate review_threshold — max across all flag buckets
+  let review_threshold: ReviewThreshold = "self_review_ok";
+
+  for (const f of verifier.template_failures) {
+    if (f.review_threshold) review_threshold = maxThreshold(review_threshold, f.review_threshold);
   }
-  // missing_data alone does not block — draft is produced with placeholders
-  return { artifact_status: "draft_pending_approval", escalation_required: false };
+  for (const f of verifier.legal_conflicts) {
+    if (f.review_threshold) review_threshold = maxThreshold(review_threshold, f.review_threshold);
+  }
+  for (const f of verifier.jurisdiction_escalations) {
+    if (f.review_threshold) review_threshold = maxThreshold(review_threshold, f.review_threshold);
+  }
+  for (const f of verifier.missing_data) {
+    if (f.review_threshold) review_threshold = maxThreshold(review_threshold, f.review_threshold);
+  }
+
+  return { artifact_status, escalation_required, review_threshold };
 }

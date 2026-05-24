@@ -12,7 +12,19 @@ export type ArtifactStatus =
   | "needs_revision"
   | "blocked";
 
+// ── ReviewThreshold (v0.5) ────────────────────────────────────────────────────
+// Exported from this shared type hub so all files import from one place.
+// Aggregate rule: blocked > counsel_review_required > business_review_required > self_review_ok
+export type ReviewThreshold =
+  | "self_review_ok"
+  | "business_review_required"
+  | "counsel_review_required"
+  | "blocked";
+
 // ── Intake ────────────────────────────────────────────────────────────────────
+// DraftIntake is the INTERNAL trusted type — used after the route handler
+// has validated and coerced the raw request body.
+// allow_model_clause_rewrite is locked to false | undefined here.
 export interface DraftIntake {
   doc_class: DocClass;
   jurisdiction: string;
@@ -34,13 +46,15 @@ export interface DraftIntake {
     cash_fee?: number;
   };
   user_instruction?: string;
-  allow_model_clause_rewrite?: false;
+  allow_model_clause_rewrite?: false;   // internal: only false or absent
 }
 
 // ── Verifier flag types ───────────────────────────────────────────────────────
+// review_threshold is optional on all flag interfaces (v0.5 addition — backward-compatible)
 export interface MissingDataFlag {
   field: string;
   impact: string;
+  review_threshold?: ReviewThreshold;   // v0.5
 }
 
 export interface LegalConflictFlag {
@@ -48,6 +62,7 @@ export interface LegalConflictFlag {
   description: string;
   sections_involved: string[];
   severity: "blocking" | "warning";
+  review_threshold?: ReviewThreshold;   // v0.5
 }
 
 export interface TemplateFailureFlag {
@@ -55,6 +70,7 @@ export interface TemplateFailureFlag {
   section: string;
   detail: string;
   severity: "blocking" | "warning";
+  review_threshold?: ReviewThreshold;   // v0.5
 }
 
 export interface JurisdictionFlag {
@@ -64,6 +80,7 @@ export interface JurisdictionFlag {
   description: string;
   severity: "blocking" | "warning";
   recommended_action: string;
+  review_threshold?: ReviewThreshold;   // v0.5
 }
 
 export interface VerifierResult {
@@ -74,13 +91,25 @@ export interface VerifierResult {
   jurisdiction_escalations: JurisdictionFlag[];
 }
 
-// ── DraftSection (defined here so StoredDraftArtifact can reference it
-//    without a circular import from draftEngine) ───────────────────────────────
+// ── SectionRationale (v0.5) ───────────────────────────────────────────────────
+// Defined here alongside DraftSection to avoid a circular import.
+// draftEngine.ts imports this type and re-exports it for convenience.
+export interface SectionRationale {
+  selection_reason: string;
+  condition_matched: string;
+  jurisdiction_note_applied: string | null;   // null = no note; never ""
+  review_threshold: ReviewThreshold;
+  assumptions_applied: string[];
+}
+
+// ── DraftSection ──────────────────────────────────────────────────────────────
+// rationale is optional (v0.5 addition — backward-compatible)
 export interface DraftSection {
   section_id: string;
   title: string;
   body: string;
   variant_used?: string;
+  rationale?: SectionRationale;   // v0.5 — optional
 }
 
 // ── Receipt ───────────────────────────────────────────────────────────────────
