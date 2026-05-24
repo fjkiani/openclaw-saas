@@ -31,6 +31,7 @@ import {
 import { buildDraft, applyRevision, buildTitle, TEMPLATE_VERSION, CLAUSE_LIBRARY_VERSION } from "../lib/draftEngine";
 import { verifyDraft, buildDraftGovernance, VERIFIER_VERSION } from "../lib/draftVerifier";
 import { getTemplate } from "../lib/startupTemplates";
+import { extractIntakeFromText } from "../lib/contractExtractor";
 
 const router = Router();
 
@@ -342,6 +343,102 @@ router.post("/v1/legal/draft/revise", async (req: Request, res: Response) => {
     });
   } catch (err) {
     console.error("[legal.draft.revise] unexpected error", err);
+    return res.status(500).json({ error: "internal_error" });
+  }
+});
+
+
+// ── POST /v1/legal/draft/analyze ─────────────────────────────────────────────
+router.post("/v1/legal/draft/analyze", async (req: Request, res: Response) => {
+  const start = Date.now();
+
+  try {
+    const { contract_text, doc_class } = req.body as {
+      contract_text?: unknown;
+      doc_class?: unknown;
+    };
+
+    // ── Validate contract_text ──────────────────────────────────────────────
+    if (typeof contract_text !== "string" || contract_text.length === 0) {
+      return res.status(422).json({
+        error: "invalid_input",
+        message: "contract_text required",
+      });
+    }
+    if (contract_text.length < 50) {
+      return res.status(422).json({
+        error: "invalid_input",
+        message: "contract_text too short (min 50 chars)",
+      });
+    }
+    if (contract_text.length > 50_000) {
+      return res.status(422).json({
+        error: "invalid_input",
+        message: "contract_text too long (max 50000 chars)",
+      });
+    }
+
+    // ── Validate doc_class ──────────────────────────────────────────────────
+    if (!doc_class || !VALID_DOC_CLASSES.includes(doc_class as DocClass)) {
+      return res.status(422).json({
+        error: "invalid_input",
+        message: `doc_class required; must be one of: ${VALID_DOC_CLASSES.join(", ")}`,
+      });
+    }
+
+    const validDocClass = doc_class as DocClass;
+
+    // ── 1. Extract ──────────────────────────────────────────────────────────
+    const extractResult = await extractIntakeFromText(contract_text, validDocClass);
+
+    // ── 2. Build draft from draft_ready_intake ──────────────────────────────
+    const buildResult = buildDraft(extractResult.draft_ready_intake);
+
+    // ── 3. Verify ───────────────────────────────────────────────────────────
+    const verifierResult = verifyDraft(buildResult, extractResult.draft_ready_intake);
+
+    // ── 4. Governance ───────────────────────────────────────────────────────
+    const governanceResult = buildDraftGovernance(verifierResult);
+
+    // ── 5. Compose response ─────────────────────────────────────────────────
+    const analysis_id = crypto.randomUUID();
+    const sourceHash  = hashText(contract_text).slice(0, 16);
+
+    const redraft_available =
+      extractResult.extraction_confidence >= 0.5 && verifierResult.passed;
+
+    return res.status(200).json({
+      analysis_id,
+      doc_class: validDocClass,
+      source: {
+        length: contract_text.length,
+        hash:   sourceHash,
+        text:   contract_text,
+      },
+      extracted_intake:      extractResult.intake,
+      draft_ready_intake:    extractResult.draft_ready_intake,
+      uncertain_fields:      extractResult.uncertain_fields,
+      unextractable_fields:  extractResult.unextractable_fields,
+      extraction_confidence: extractResult.extraction_confidence,
+      sections:              buildResult.sections,
+      assumptions:           buildResult.assumptions,
+      missing_decision_prompts: buildResult.missing_decision_prompts,
+      verifier:              verifierResult,
+      governance: {
+        review_threshold:  governanceResult.review_threshold,
+        artifact_status:   governanceResult.artifact_status,
+        not_legal_advice:  true,
+        privilege_warning: PRIVILEGE_WARNING,
+      },
+      redraft_available,
+      trace: {
+        latency_ms:    Date.now() - start,
+        model_used:    extractResult.model_used,
+        fallback_used: extractResult.fallback_used,
+      },
+    });
+  } catch (err) {
+    console.error("[legal.draft.analyze] unexpected error", err);
     return res.status(500).json({ error: "internal_error" });
   }
 });

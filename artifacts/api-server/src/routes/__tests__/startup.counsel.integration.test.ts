@@ -728,3 +728,127 @@ describe("Case 20 — unparseable revision instruction returns 422", () => {
     expect(reviseRes.body.error).toBe("instruction_not_parseable");
   });
 });
+
+
+// ── Cases 21–23: POST /v1/legal/draft/analyze ────────────────────────────────
+
+describe("POST /v1/legal/draft/analyze", () => {
+  const SAMPLE_COFOUNDER_TEXT = `CO-FOUNDER AGREEMENT
+
+This Co-Founder Agreement ("Agreement") is entered into as of January 1, 2025,
+by and between Alice Chen, an individual ("Founder A"), and Bob Park, an individual
+("Founder B"), collectively referred to as the "Founders."
+
+1. COMPANY FORMATION
+The Founders agree to form a Delaware corporation ("Company") for the purpose of
+developing and commercializing software products.
+
+2. EQUITY SPLIT
+Founder A shall hold fifty percent (50%) of the Company's outstanding shares.
+Founder B shall hold fifty percent (50%) of the Company's outstanding shares.
+
+3. VESTING
+All shares issued to the Founders shall be subject to a four (4) year vesting
+schedule with a one (1) year cliff. Upon completion of the cliff period, 25% of
+the shares shall vest, with the remaining shares vesting monthly over the
+subsequent 36 months.
+
+4. INTELLECTUAL PROPERTY
+Each Founder hereby assigns to the Company all right, title, and interest in any
+inventions, works of authorship, or other intellectual property created in
+connection with the Company's business. The scope of this assignment is broad and
+covers all work product related to the Company.
+
+5. GOVERNING LAW
+This Agreement shall be governed by the laws of the State of Delaware, without
+regard to its conflict of law provisions.
+
+IN WITNESS WHEREOF, the parties have executed this Agreement as of the date first
+written above.
+
+Alice Chen: ___________________
+Bob Park:   ___________________`;
+
+  // Case 21 — valid co-founder text → 200, all required fields present
+  it("Case 21 — valid co-founder text returns 200 with all required fields", async () => {
+    const res = await request(app)
+      .post("/v1/legal/draft/analyze")
+      .send({
+        contract_text: SAMPLE_COFOUNDER_TEXT,
+        doc_class: "co_founder_agreement",
+      });
+
+    expect(res.status).toBe(200);
+
+    // Identity fields
+    expect(res.body.analysis_id).toBeTruthy();
+    expect(res.body.doc_class).toBe("co_founder_agreement");
+
+    // Source preservation
+    expect(res.body.source).toBeDefined();
+    expect(res.body.source.text).toBe(SAMPLE_COFOUNDER_TEXT);
+    expect(res.body.source.length).toBe(SAMPLE_COFOUNDER_TEXT.length);
+    expect(typeof res.body.source.hash).toBe("string");
+
+    // Extraction fields
+    expect(res.body.extracted_intake).toBeDefined();
+    expect(typeof res.body.extracted_intake).toBe("object");
+    expect(res.body.draft_ready_intake).toBeDefined();
+    expect(typeof res.body.draft_ready_intake).toBe("object");
+    expect(Array.isArray(res.body.uncertain_fields)).toBe(true);
+    expect(Array.isArray(res.body.unextractable_fields)).toBe(true);
+    expect(typeof res.body.extraction_confidence).toBe("number");
+    expect(res.body.extraction_confidence).toBeGreaterThanOrEqual(0);
+    expect(res.body.extraction_confidence).toBeLessThanOrEqual(1);
+
+    // Draft pipeline fields
+    expect(Array.isArray(res.body.sections)).toBe(true);
+    expect(Array.isArray(res.body.assumptions)).toBe(true);
+    expect(Array.isArray(res.body.missing_decision_prompts)).toBe(true);
+
+    // Verifier
+    expect(res.body.verifier).toBeDefined();
+    expect(typeof res.body.verifier.passed).toBe("boolean");
+
+    // Governance
+    expect(res.body.governance).toBeDefined();
+    expect(res.body.governance.review_threshold).toBeTruthy();
+    expect(res.body.governance.not_legal_advice).toBe(true);
+    expect(typeof res.body.governance.privilege_warning).toBe("string");
+
+    // Redraft
+    expect(typeof res.body.redraft_available).toBe("boolean");
+
+    // Trace
+    expect(res.body.trace).toBeDefined();
+    expect(typeof res.body.trace.latency_ms).toBe("number");
+  });
+
+  // Case 22 — missing doc_class → 422 invalid_input
+  it("Case 22 — missing doc_class returns 422 invalid_input", async () => {
+    const res = await request(app)
+      .post("/v1/legal/draft/analyze")
+      .send({
+        contract_text: SAMPLE_COFOUNDER_TEXT,
+        // doc_class intentionally omitted
+      });
+
+    expect(res.status).toBe(422);
+    expect(res.body.error).toBe("invalid_input");
+    expect(typeof res.body.message).toBe("string");
+  });
+
+  // Case 23 — contract_text too short → 422 invalid_input
+  it("Case 23 — contract_text too short returns 422 invalid_input", async () => {
+    const res = await request(app)
+      .post("/v1/legal/draft/analyze")
+      .send({
+        contract_text: "too short",
+        doc_class: "co_founder_agreement",
+      });
+
+    expect(res.status).toBe(422);
+    expect(res.body.error).toBe("invalid_input");
+    expect(typeof res.body.message).toBe("string");
+  });
+});

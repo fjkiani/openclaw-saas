@@ -25,6 +25,7 @@ import {
   RotateCcw,
   Send,
   Info,
+  ScanText,
 } from "lucide-react";
 
 // ── Types mirroring the API response shape ────────────────────────────────────
@@ -895,6 +896,497 @@ function ErrorCard({
   );
 }
 
+
+// ── Analyze feature types ─────────────────────────────────────────────────────
+
+interface UncertainField {
+  field: string;
+  extracted_value: unknown;
+  confidence: number;
+  reason: string;
+}
+
+interface AnalyzeApiResponse {
+  analysis_id: string;
+  doc_class: DocClass;
+  source: {
+    length: number;
+    hash: string;
+    text: string;
+  };
+  extracted_intake: Record<string, unknown>;
+  draft_ready_intake: Record<string, unknown>;
+  uncertain_fields: UncertainField[];
+  unextractable_fields: string[];
+  extraction_confidence: number;
+  sections: DraftSection[];
+  assumptions: string[];
+  missing_decision_prompts: MissingDecisionPrompt[];
+  verifier: {
+    passed: boolean;
+    missing_data: Array<{ field: string; impact: string; review_threshold?: ReviewThreshold }>;
+    legal_conflicts: Array<{ conflict_id: string; description: string; sections_involved: string[]; severity: string; review_threshold?: ReviewThreshold }>;
+    template_failures: Array<{ failure_id: string; section: string; detail: string; severity: string; review_threshold?: ReviewThreshold }>;
+    jurisdiction_escalations: Array<{ flag_id: string; jurisdiction: string; section: string; description: string; severity: string; recommended_action: string; review_threshold?: ReviewThreshold }>;
+  };
+  governance: {
+    review_threshold: ReviewThreshold;
+    artifact_status: string;
+    not_legal_advice: boolean;
+    privilege_warning: string;
+  };
+  redraft_available: boolean;
+  trace: {
+    latency_ms: number;
+    model_used: string;
+    fallback_used: boolean;
+  };
+}
+
+type AnalyzeTurnKind = "user_analyze" | "analyze_result" | "analyze_error";
+
+interface AnalyzeTurn {
+  id: string;
+  kind: AnalyzeTurnKind;
+  label?: string;
+  data?: AnalyzeApiResponse;
+  errorMessage?: string;
+  errorRetryFn?: () => void;
+}
+
+// ── AnalyzeComposer ───────────────────────────────────────────────────────────
+
+const DOC_CLASS_OPTIONS: { value: DocClass; label: string }[] = [
+  { value: "co_founder_agreement",     label: "Co-Founder Agreement" },
+  { value: "contractor_ip_assignment", label: "Contractor IP Assignment" },
+  { value: "advisor_agreement",        label: "Advisor Agreement" },
+];
+
+function AnalyzeComposer({
+  onSubmit,
+  loading,
+}: {
+  onSubmit: (text: string, docClass: DocClass) => void;
+  loading: boolean;
+}) {
+  const [contractText, setContractText] = useState("");
+  const [docClass, setDocClass] = useState<DocClass | "">("");
+
+  const canSubmit = contractText.length >= 50 && docClass !== "" && !loading;
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <label className="block text-[10px] font-mono font-semibold text-muted-foreground uppercase tracking-widest mb-1.5">
+          Contract Text
+        </label>
+        <Textarea
+          rows={12}
+          placeholder="Paste contract text here…"
+          value={contractText}
+          onChange={(e) => setContractText(e.target.value)}
+          className="text-xs font-mono resize-none"
+        />
+        <p className="text-[9px] font-mono text-muted-foreground mt-1">
+          {contractText.length.toLocaleString()} chars
+          {contractText.length > 0 && contractText.length < 50 && (
+            <span className="text-amber-500 ml-1">(min 50)</span>
+          )}
+        </p>
+      </div>
+
+      <div>
+        <label className="block text-[10px] font-mono font-semibold text-muted-foreground uppercase tracking-widest mb-1.5">
+          Document Type
+        </label>
+        <div className="space-y-1.5">
+          {DOC_CLASS_OPTIONS.map((opt) => (
+            <label
+              key={opt.value}
+              className="flex items-center gap-2 cursor-pointer group"
+            >
+              <input
+                type="radio"
+                name="analyze-doc-class"
+                value={opt.value}
+                checked={docClass === opt.value}
+                onChange={() => setDocClass(opt.value)}
+                className="accent-primary"
+              />
+              <span className="text-xs font-mono text-foreground group-hover:text-primary transition-colors">
+                {opt.label}
+              </span>
+            </label>
+          ))}
+        </div>
+      </div>
+
+      <Button
+        className="w-full text-xs font-mono"
+        onClick={() => canSubmit && onSubmit(contractText, docClass as DocClass)}
+        disabled={!canSubmit}
+      >
+        {loading ? (
+          <>
+            <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+            Analyzing…
+          </>
+        ) : (
+          <>
+            <ScanText className="w-3.5 h-3.5 mr-1.5" />
+            Analyze Contract
+          </>
+        )}
+      </Button>
+    </div>
+  );
+}
+
+// ── AnalysisResultCard ────────────────────────────────────────────────────────
+
+function ConfidenceBadge({ confidence }: { confidence: number }) {
+  const pct = Math.round(confidence * 100);
+  const color =
+    pct >= 70 ? "bg-green-500/10 text-green-600 border-green-500/20" :
+    pct >= 40 ? "bg-amber-500/10 text-amber-600 border-amber-500/20" :
+                "bg-red-500/10 text-red-500 border-red-500/20";
+  return (
+    <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-mono border ${color}`}>
+      {pct}% confidence
+    </span>
+  );
+}
+
+function CollapsibleSection({
+  title,
+  defaultOpen = false,
+  children,
+}: {
+  title: string;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="border border-border rounded">
+      <button
+        className="w-full flex items-center justify-between px-3 py-2 text-[10px] font-mono font-semibold text-muted-foreground uppercase tracking-widest hover:bg-muted/30 transition-colors"
+        onClick={() => setOpen((v) => !v)}
+      >
+        {title}
+        {open ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+      </button>
+      {open && <div className="px-3 pb-3 pt-1 space-y-2">{children}</div>}
+    </div>
+  );
+}
+
+function AnalysisResultCard({
+  data,
+  onGenerateDraft,
+  generatingDraft,
+}: {
+  data: AnalyzeApiResponse;
+  onGenerateDraft: (intake: Record<string, unknown>) => void;
+  generatingDraft: boolean;
+}) {
+  const docLabel = DOC_CLASS_OPTIONS.find((o) => o.value === data.doc_class)?.label ?? data.doc_class;
+
+  // Extracted parties for display
+  const parties = (data.extracted_intake as any)?.parties as Array<{ name: string; role: string; entity_type?: string }> | undefined;
+  const equity  = (data.extracted_intake as any)?.equity as Record<string, unknown> | undefined;
+  const ip      = (data.extracted_intake as any)?.ip as Record<string, unknown> | undefined;
+  const advisory = (data.extracted_intake as any)?.advisory as Record<string, unknown> | undefined;
+  const jurisdiction = (data.extracted_intake as any)?.jurisdiction as string | undefined;
+
+  return (
+    <div className="space-y-3">
+      {/* Header */}
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="flex items-center gap-2">
+          <Badge variant="outline" className="text-[9px] font-mono">{docLabel}</Badge>
+          <ConfidenceBadge confidence={data.extraction_confidence} />
+        </div>
+        <span className="text-[9px] font-mono text-muted-foreground">
+          {data.trace.model_used.split("/").pop()}
+          {data.trace.fallback_used && " · fallback"}
+          {" · "}{data.trace.latency_ms}ms
+        </span>
+      </div>
+
+      {/* 1. Extracted Structure */}
+      <CollapsibleSection title="Extracted Structure" defaultOpen>
+        <div className="space-y-2 text-xs font-mono">
+          {jurisdiction && (
+            <div className="flex gap-2">
+              <span className="text-muted-foreground w-20 shrink-0">Jurisdiction</span>
+              <span className="text-foreground">{jurisdiction}</span>
+            </div>
+          )}
+
+          {parties && parties.length > 0 && (
+            <div>
+              <p className="text-[9px] text-muted-foreground uppercase tracking-widest mb-1">Parties</p>
+              <table className="w-full text-[10px]">
+                <thead>
+                  <tr className="text-muted-foreground">
+                    <th className="text-left font-normal pb-0.5">Name</th>
+                    <th className="text-left font-normal pb-0.5">Role</th>
+                    <th className="text-left font-normal pb-0.5">Entity</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {parties.map((p, i) => (
+                    <tr key={i}>
+                      <td className="pr-2">{p.name}</td>
+                      <td className="pr-2 text-muted-foreground">{p.role}</td>
+                      <td className="text-muted-foreground">{p.entity_type ?? "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {equity && (
+            <div>
+              <p className="text-[9px] text-muted-foreground uppercase tracking-widest mb-1">Equity</p>
+              <div className="space-y-0.5 text-[10px]">
+                {equity.vesting_years != null && (
+                  <div className="flex gap-2">
+                    <span className="text-muted-foreground w-20 shrink-0">Vesting</span>
+                    <span>{String(equity.vesting_years)} years</span>
+                  </div>
+                )}
+                {equity.cliff_months != null && (
+                  <div className="flex gap-2">
+                    <span className="text-muted-foreground w-20 shrink-0">Cliff</span>
+                    <span>{String(equity.cliff_months)} months</span>
+                  </div>
+                )}
+                {equity.acceleration != null && (
+                  <div className="flex gap-2">
+                    <span className="text-muted-foreground w-20 shrink-0">Acceleration</span>
+                    <span>{String(equity.acceleration)}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {ip && (
+            <div>
+              <p className="text-[9px] text-muted-foreground uppercase tracking-widest mb-1">IP</p>
+              <div className="space-y-0.5 text-[10px]">
+                {ip.scope != null && (
+                  <div className="flex gap-2">
+                    <span className="text-muted-foreground w-20 shrink-0">Scope</span>
+                    <span>{String(ip.scope)}</span>
+                  </div>
+                )}
+                {Array.isArray(ip.prior_inventions) && ip.prior_inventions.length > 0 && (
+                  <div className="flex gap-2">
+                    <span className="text-muted-foreground w-20 shrink-0">Prior inv.</span>
+                    <span>{(ip.prior_inventions as string[]).join(", ")}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {advisory && (
+            <div>
+              <p className="text-[9px] text-muted-foreground uppercase tracking-widest mb-1">Advisory</p>
+              <div className="space-y-0.5 text-[10px]">
+                {advisory.equity_pct != null && (
+                  <div className="flex gap-2">
+                    <span className="text-muted-foreground w-20 shrink-0">Equity</span>
+                    <span>{String(advisory.equity_pct)}%</span>
+                  </div>
+                )}
+                {advisory.services_description != null && (
+                  <div className="flex gap-2">
+                    <span className="text-muted-foreground w-20 shrink-0">Services</span>
+                    <span className="truncate">{String(advisory.services_description)}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Uncertain fields */}
+          {data.uncertain_fields.length > 0 && (
+            <div>
+              <p className="text-[9px] text-muted-foreground uppercase tracking-widest mb-1">Uncertain</p>
+              <div className="flex flex-wrap gap-1">
+                {data.uncertain_fields.map((uf) => (
+                  <span
+                    key={uf.field}
+                    title={uf.reason}
+                    className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-mono bg-amber-500/10 text-amber-600 border border-amber-500/20 cursor-help"
+                  >
+                    {uf.field} · {Math.round(uf.confidence * 100)}%
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Unextractable fields */}
+          {data.unextractable_fields.length > 0 && (
+            <div>
+              <p className="text-[9px] text-muted-foreground uppercase tracking-widest mb-1">Not found</p>
+              <div className="flex flex-wrap gap-1">
+                {data.unextractable_fields.map((f) => (
+                  <span
+                    key={f}
+                    className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-mono bg-muted text-muted-foreground border border-border"
+                  >
+                    {f}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </CollapsibleSection>
+
+      {/* 2. Governance + Verification */}
+      <CollapsibleSection title="Governance + Verification" defaultOpen>
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <ThresholdBadge threshold={data.governance.review_threshold} />
+            <Badge variant="outline" className="text-[9px] font-mono">{data.governance.artifact_status}</Badge>
+          </div>
+          <div className="flex items-start gap-1.5 text-[10px] font-mono text-muted-foreground">
+            <Info className="w-3 h-3 mt-0.5 shrink-0" />
+            <span>{data.governance.privilege_warning}</span>
+          </div>
+
+          {/* Verifier flags */}
+          {!data.verifier.passed && (
+            <div className="space-y-1">
+              {data.verifier.template_failures.map((f) => (
+                <div key={f.failure_id} className="flex items-start gap-1.5 text-[10px] font-mono">
+                  <AlertTriangle className="w-3 h-3 text-amber-500 mt-0.5 shrink-0" />
+                  <span className="text-foreground">{f.section}: {f.detail}</span>
+                </div>
+              ))}
+              {data.verifier.legal_conflicts.map((f) => (
+                <div key={f.conflict_id} className="flex items-start gap-1.5 text-[10px] font-mono">
+                  <AlertTriangle className="w-3 h-3 text-red-500 mt-0.5 shrink-0" />
+                  <span className="text-foreground">{f.description}</span>
+                </div>
+              ))}
+              {data.verifier.jurisdiction_escalations.map((f) => (
+                <div key={f.flag_id} className="flex items-start gap-1.5 text-[10px] font-mono">
+                  <ShieldAlert className="w-3 h-3 text-red-500 mt-0.5 shrink-0" />
+                  <span className="text-foreground">{f.description}</span>
+                </div>
+              ))}
+              {data.verifier.missing_data.map((f, i) => (
+                <div key={i} className="flex items-start gap-1.5 text-[10px] font-mono">
+                  <Info className="w-3 h-3 text-muted-foreground mt-0.5 shrink-0" />
+                  <span className="text-muted-foreground">{f.field}: {f.impact}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {data.verifier.passed && (
+            <p className="text-[10px] font-mono text-green-600">Verifier passed</p>
+          )}
+
+          {/* Missing decision prompts */}
+          {data.missing_decision_prompts.length > 0 && (
+            <div className="space-y-1.5 pt-1 border-t border-border">
+              <p className="text-[9px] font-mono text-muted-foreground uppercase tracking-widest">
+                Decisions needed
+              </p>
+              {data.missing_decision_prompts.map((p) => (
+                <div key={p.field} className="p-2 bg-muted/30 rounded space-y-0.5">
+                  <div className="flex items-center gap-1.5">
+                    <ThresholdBadge threshold={p.review_threshold} />
+                    <span className="text-[10px] font-mono font-semibold text-foreground">{p.question}</span>
+                  </div>
+                  <p className="text-[9px] font-mono text-muted-foreground">{p.why_it_matters}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </CollapsibleSection>
+
+      {/* 3. Assumptions */}
+      {data.assumptions.length > 0 && (
+        <CollapsibleSection title="Assumptions">
+          <ul className="space-y-0.5">
+            {data.assumptions.map((a, i) => (
+              <li key={i} className="text-[10px] font-mono text-muted-foreground flex gap-1.5">
+                <span className="text-primary/60 shrink-0">·</span>
+                {a}
+              </li>
+            ))}
+          </ul>
+        </CollapsibleSection>
+      )}
+
+      {/* 4. Source Text */}
+      <CollapsibleSection title="Source Text">
+        <pre className="text-[9px] font-mono text-muted-foreground whitespace-pre-wrap break-words max-h-72 overflow-y-auto leading-relaxed">
+          {data.source.text}
+        </pre>
+        <p className="text-[9px] font-mono text-muted-foreground/60 mt-1">
+          {data.source.length.toLocaleString()} chars · sha256:{data.source.hash}
+        </p>
+      </CollapsibleSection>
+
+      {/* Generate Clean Draft */}
+      {data.redraft_available && (
+        <div className="pt-1 border-t border-border">
+          <Button
+            className="w-full text-xs font-mono"
+            variant="outline"
+            onClick={() => onGenerateDraft(data.draft_ready_intake)}
+            disabled={generatingDraft}
+          >
+            {generatingDraft ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                Generating…
+              </>
+            ) : (
+              <>
+                <FileText className="w-3.5 h-3.5 mr-1.5" />
+                Generate Clean Draft from Extracted Fields
+              </>
+            )}
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Analyze empty state ───────────────────────────────────────────────────────
+
+function AnalyzeEmptyState() {
+  return (
+    <div className="flex flex-col items-center justify-center py-16 text-center px-6">
+      <div className="w-12 h-12 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center mb-4">
+        <ScanText className="w-6 h-6 text-primary" />
+      </div>
+      <h3 className="text-sm font-mono font-bold text-foreground mb-2">Analyze Contract</h3>
+      <p className="text-xs font-mono text-muted-foreground max-w-sm mb-4 leading-relaxed">
+        Paste an existing contract to extract structured fields, run governance checks,
+        and optionally generate a clean library-backed redraft.
+      </p>
+      <p className="text-[9px] font-mono text-muted-foreground/60 max-w-xs">
+        Paste contract text and select a document type on the right to begin.
+      </p>
+    </div>
+  );
+}
+
 // ── Empty state ───────────────────────────────────────────────────────────────
 
 function EmptyState() {
@@ -930,16 +1422,30 @@ function EmptyState() {
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function StartupCounselPage() {
+  // ── Tab state ──────────────────────────────────────────────────────────────
+  const [activeTab, setActiveTab] = useState<"draft" | "analyze">("draft");
+
+  // ── Draft tab state ─────────────────────────────────────────────────────────
   const [turns, setTurns] = useState<Turn[]>([]);
   const [form, setForm] = useState<IntakeFormState>(DEFAULT_INTAKE);
   const [loading, setLoading] = useState(false);
   const [lastReceiptToken, setLastReceiptToken] = useState<string | null>(null);
   const threadEndRef = useRef<HTMLDivElement>(null);
 
+  // ── Analyze tab state ───────────────────────────────────────────────────────
+  const [analyzeTurns, setAnalyzeTurns] = useState<AnalyzeTurn[]>([]);
+  const [analyzeLoading, setAnalyzeLoading] = useState(false);
+  const [generatingDraft, setGeneratingDraft] = useState(false);
+  const analyzeThreadEndRef = useRef<HTMLDivElement>(null);
+
   // Scroll to bottom on new turn
   useEffect(() => {
     threadEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [turns]);
+
+  useEffect(() => {
+    analyzeThreadEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [analyzeTurns]);
 
   const addTurn = useCallback((turn: Turn) => {
     setTurns((prev) => [...prev, turn]);
@@ -1054,7 +1560,92 @@ export default function StartupCounselPage() {
     [lastReceiptToken, addTurn]
   );
 
-  const handleFormChange = useCallback((patch: Partial<IntakeFormState>) => {
+  const addAnalyzeTurn = useCallback((turn: AnalyzeTurn) => {
+    setAnalyzeTurns((prev) => [...prev, turn]);
+  }, []);
+
+  const submitAnalyze = useCallback(
+    async (contractText: string, docClass: DocClass) => {
+      addAnalyzeTurn({
+        id: nanoid(),
+        kind: "user_analyze",
+        label: `${DOC_CLASS_OPTIONS.find((o) => o.value === docClass)?.label ?? docClass} · ${contractText.length.toLocaleString()} chars`,
+      });
+      setAnalyzeLoading(true);
+
+      const doRequest = async () => {
+        try {
+          const res = await apiFetch("/api/v1/legal/draft/analyze", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ contract_text: contractText, doc_class: docClass }),
+          });
+
+          if (!res.ok) {
+            const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+            const msg = body.message ?? body.error ?? `Server returned ${res.status}`;
+            addAnalyzeTurn({
+              id: nanoid(),
+              kind: "analyze_error",
+              errorMessage: `Analysis failed: ${msg}`,
+              errorRetryFn: doRequest,
+            });
+            return;
+          }
+
+          const data: AnalyzeApiResponse = await res.json();
+          addAnalyzeTurn({ id: nanoid(), kind: "analyze_result", data });
+        } catch (err) {
+          addAnalyzeTurn({
+            id: nanoid(),
+            kind: "analyze_error",
+            errorMessage: `Network error: ${err instanceof Error ? err.message : String(err)}`,
+            errorRetryFn: doRequest,
+          });
+        } finally {
+          setAnalyzeLoading(false);
+        }
+      };
+
+      await doRequest();
+    },
+    [addAnalyzeTurn]
+  );
+
+  const generateDraftFromAnalysis = useCallback(
+    async (intake: Record<string, unknown>) => {
+      setGeneratingDraft(true);
+      try {
+        const res = await apiFetch("/api/v1/legal/draft", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(intake),
+        });
+
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+          const msg = body.message ?? body.error ?? `Server returned ${res.status}`;
+          addTurn({ id: nanoid(), kind: "error", errorMessage: `Draft failed: ${msg}` });
+        } else {
+          const data: DraftApiResponse = await res.json();
+          setLastReceiptToken(data.draft_receipt_token);
+          addTurn({ id: nanoid(), kind: "draft_result", data });
+        }
+      } catch (err) {
+        addTurn({
+          id: nanoid(),
+          kind: "error",
+          errorMessage: `Network error: ${err instanceof Error ? err.message : String(err)}`,
+        });
+      } finally {
+        setGeneratingDraft(false);
+        setActiveTab("draft");
+      }
+    },
+    [addTurn]
+  );
+
+    const handleFormChange = useCallback((patch: Partial<IntakeFormState>) => {
     setForm((prev) => ({ ...prev, ...patch }));
   }, []);
 
@@ -1068,94 +1659,156 @@ export default function StartupCounselPage() {
       {/* Disclaimer banner */}
       <DisclaimerBanner />
 
+      {/* Tab bar */}
+      <div className="flex border-b border-border px-4 bg-background">
+        {(["draft", "analyze"] as const).map((tab) => (
+          <button
+            key={tab}
+            onClick={() => setActiveTab(tab)}
+            className={[
+              "px-4 py-2 text-[11px] font-mono font-semibold uppercase tracking-widest border-b-2 transition-colors",
+              activeTab === tab
+                ? "border-primary text-primary"
+                : "border-transparent text-muted-foreground hover:text-foreground",
+            ].join(" ")}
+          >
+            {tab === "draft" ? "Generate Draft" : "Analyze Contract"}
+          </button>
+        ))}
+      </div>
+
       {/* Two-column layout: thread left, composer right */}
-      <div className="flex h-[calc(100vh-8.5rem)] overflow-hidden">
-        {/* ── Thread (left) ── */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-4 min-w-0">
-          {turns.length === 0 ? (
-            <EmptyState />
-          ) : (
-            turns.map((turn) => (
-              <div key={turn.id}>
-                {/* User intake bubble */}
-                {turn.kind === "user_intake" && (
-                  <div className="flex justify-end">
-                    <div className="max-w-[80%] bg-primary/10 border border-primary/20 rounded-lg px-3 py-2">
-                      <p className="text-[9px] font-mono text-primary/60 uppercase tracking-widest mb-0.5">
-                        Draft request
-                      </p>
-                      <p className="text-xs font-mono text-foreground">{turn.label}</p>
-                    </div>
+      <div className="flex h-[calc(100vh-10rem)] overflow-hidden">
+
+        {/* ══ DRAFT TAB ══════════════════════════════════════════════════════ */}
+        {activeTab === "draft" && (
+          <>
+            {/* Thread (left) */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-4 min-w-0">
+              {turns.length === 0 ? (
+                <EmptyState />
+              ) : (
+                turns.map((turn) => (
+                  <div key={turn.id}>
+                    {turn.kind === "user_intake" && (
+                      <div className="flex justify-end">
+                        <div className="max-w-[80%] bg-primary/10 border border-primary/20 rounded-lg px-3 py-2">
+                          <p className="text-[9px] font-mono text-primary/60 uppercase tracking-widest mb-0.5">
+                            Draft request
+                          </p>
+                          <p className="text-xs font-mono text-foreground">{turn.label}</p>
+                        </div>
+                      </div>
+                    )}
+                    {turn.kind === "user_revision" && (
+                      <div className="flex justify-end">
+                        <div className="max-w-[80%] bg-secondary/50 border border-border rounded-lg px-3 py-2">
+                          <p className="text-[9px] font-mono text-muted-foreground uppercase tracking-widest mb-0.5">
+                            Revision instruction
+                          </p>
+                          <p className="text-xs font-mono text-foreground">{turn.label}</p>
+                        </div>
+                      </div>
+                    )}
+                    {turn.kind === "draft_result" && turn.data && (
+                      <div className="bg-card border border-border rounded-lg p-4">
+                        <DraftResultCard data={turn.data} label="Draft" />
+                      </div>
+                    )}
+                    {turn.kind === "revision_result" && turn.data && (
+                      <div className="bg-card border border-primary/20 rounded-lg p-4">
+                        <DraftResultCard data={turn.data} label="Revised Draft" />
+                      </div>
+                    )}
+                    {turn.kind === "error" && (
+                      <ErrorCard
+                        message={turn.errorMessage ?? "Unknown error"}
+                        onRetry={turn.errorRetryFn}
+                      />
+                    )}
                   </div>
-                )}
-
-                {/* User revision bubble */}
-                {turn.kind === "user_revision" && (
-                  <div className="flex justify-end">
-                    <div className="max-w-[80%] bg-secondary/50 border border-border rounded-lg px-3 py-2">
-                      <p className="text-[9px] font-mono text-muted-foreground uppercase tracking-widest mb-0.5">
-                        Revision instruction
-                      </p>
-                      <p className="text-xs font-mono text-foreground">{turn.label}</p>
-                    </div>
-                  </div>
-                )}
-
-                {/* Draft result */}
-                {turn.kind === "draft_result" && turn.data && (
-                  <div className="bg-card border border-border rounded-lg p-4">
-                    <DraftResultCard data={turn.data} label="Draft" />
-                  </div>
-                )}
-
-                {/* Revision result */}
-                {turn.kind === "revision_result" && turn.data && (
-                  <div className="bg-card border border-primary/20 rounded-lg p-4">
-                    <DraftResultCard data={turn.data} label="Revised Draft" />
-                  </div>
-                )}
-
-                {/* Error */}
-                {turn.kind === "error" && (
-                  <ErrorCard
-                    message={turn.errorMessage ?? "Unknown error"}
-                    onRetry={turn.errorRetryFn}
-                  />
-                )}
-              </div>
-            ))
-          )}
-
-          {/* Loading indicator in thread */}
-          {loading && (
-            <div className="flex items-center gap-2 p-3 bg-primary/5 border border-primary/20 rounded text-xs font-mono text-primary">
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              Processing…
+                ))
+              )}
+              {loading && (
+                <div className="flex items-center gap-2 p-3 bg-primary/5 border border-primary/20 rounded text-xs font-mono text-primary">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  Processing…
+                </div>
+              )}
+              <div ref={threadEndRef} />
             </div>
-          )}
 
-          <div ref={threadEndRef} />
-        </div>
+            {/* Composer (right) */}
+            <div className="w-80 shrink-0 border-l border-border bg-card overflow-y-auto p-4 space-y-4">
+              <IntakeForm
+                form={form}
+                onChange={handleFormChange}
+                onSubmit={submitDraft}
+                loading={loading}
+              />
+              {lastReceiptToken && (
+                <div className="border-t border-border pt-4">
+                  <RevisionComposer onSubmit={submitRevision} loading={loading} />
+                </div>
+              )}
+            </div>
+          </>
+        )}
 
-        {/* ── Composer (right) ── */}
-        <div className="w-80 shrink-0 border-l border-border bg-card overflow-y-auto p-4 space-y-4">
-          {/* Intake form — always visible for new drafts */}
-          <IntakeForm
-            form={form}
-            onChange={handleFormChange}
-            onSubmit={submitDraft}
-            loading={loading}
-          />
+        {/* ══ ANALYZE TAB ════════════════════════════════════════════════════ */}
+        {activeTab === "analyze" && (
+          <>
+            {/* Thread (left) */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-4 min-w-0">
+              {analyzeTurns.length === 0 ? (
+                <AnalyzeEmptyState />
+              ) : (
+                analyzeTurns.map((turn) => (
+                  <div key={turn.id}>
+                    {turn.kind === "user_analyze" && (
+                      <div className="flex justify-end">
+                        <div className="max-w-[80%] bg-primary/10 border border-primary/20 rounded-lg px-3 py-2">
+                          <p className="text-[9px] font-mono text-primary/60 uppercase tracking-widest mb-0.5">
+                            Analyze request
+                          </p>
+                          <p className="text-xs font-mono text-foreground">{turn.label}</p>
+                        </div>
+                      </div>
+                    )}
+                    {turn.kind === "analyze_result" && turn.data && (
+                      <div className="bg-card border border-border rounded-lg p-4">
+                        <AnalysisResultCard
+                          data={turn.data}
+                          onGenerateDraft={generateDraftFromAnalysis}
+                          generatingDraft={generatingDraft}
+                        />
+                      </div>
+                    )}
+                    {turn.kind === "analyze_error" && (
+                      <ErrorCard
+                        message={turn.errorMessage ?? "Unknown error"}
+                        onRetry={turn.errorRetryFn}
+                      />
+                    )}
+                  </div>
+                ))
+              )}
+              {analyzeLoading && (
+                <div className="flex items-center gap-2 p-3 bg-primary/5 border border-primary/20 rounded text-xs font-mono text-primary">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  Extracting…
+                </div>
+              )}
+              <div ref={analyzeThreadEndRef} />
+            </div>
 
-          {/* Revision composer — appears after first successful draft */}
-          {lastReceiptToken && (
-            <>
-              <div className="border-t border-border pt-4">
-                <RevisionComposer onSubmit={submitRevision} loading={loading} />
-              </div>
-            </>
-          )}
-        </div>
+            {/* Composer (right) */}
+            <div className="w-80 shrink-0 border-l border-border bg-card overflow-y-auto p-4 space-y-4">
+              <AnalyzeComposer onSubmit={submitAnalyze} loading={analyzeLoading} />
+            </div>
+          </>
+        )}
+
       </div>
     </Layout>
   );
