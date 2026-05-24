@@ -20,6 +20,7 @@ import ForgePage from "@/pages/forge/index";
 import ForgeWorkspacePage from "@/pages/forge/workspace";
 import VerticalPickerPage from "@/pages/onboarding/vertical-picker";
 import SetupPage from "@/pages/onboarding/setup";
+import StartupCounselPage from "@/pages/startup-counsel";
 
 const queryClient = new QueryClient();
 
@@ -233,6 +234,7 @@ function AppRoutes() {
         <Route path="/forge/:wid/:tab?"><ProtectedRoute component={ForgeWorkspacePage} /></Route>
         <Route path="/onboarding"><ProtectedRoute component={VerticalPickerPage} /></Route>
         <Route path="/onboarding/setup"><ProtectedRoute component={SetupPage} /></Route>
+        <Route path="/startup-counsel"><ProtectedRoute component={StartupCounselPage} /></Route>
         <Route component={NotFound} />
       </Switch>
     </QueryClientProvider>

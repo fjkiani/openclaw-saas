@@ -12,6 +12,7 @@ import {
   FlaskConical,
   Sun,
   Moon,
+  Scale,
 } from "lucide-react";
 
 const navItems = [
@@ -20,6 +21,7 @@ const navItems = [
   { href: "/skills", icon: Zap, label: "Skills" },
   { href: "/zoa", icon: Zap, label: "ZOA" },
   { href: "/forge", icon: FlaskConical, label: "Model Forge" },
+  { href: "/startup-counsel", icon: Scale, label: "Counsel" },
   { href: "/billing", icon: CreditCard, label: "Billing" },
 ];
 

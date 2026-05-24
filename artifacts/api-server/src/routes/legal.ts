@@ -34,6 +34,7 @@
 
 import { randomUUID } from "crypto";
 import { Router, type IRouter } from "express";
+import draftRouter from "./legal.draft.addendum";
 import { pool } from "@workspace/db";
 import { runTerminationExtractionBaseline } from "../lib/nextAssetBaseline.js";
 import {
@@ -1919,6 +1920,9 @@ router.post("/v1/legal/action", async (req, res): Promise<void> => {
   }
 });
 
+// ── Startup Counsel draft routes ──────────────────────────────────────────────
+// POST /api/v1/legal/draft        — deterministic draft generation (no model calls)
+// POST /api/v1/legal/draft/revise — apply revision instruction to existing draft
 router.use(draftRouter);
 
 export default router;
