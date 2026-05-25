@@ -769,7 +769,7 @@ written above.
 Alice Chen: ___________________
 Bob Park:   ___________________`;
 
-  // Case 21 — valid co-founder text → 200, all required fields present
+  // Case 21 — valid co-founder text → 200, all required fields present (normalization layer)
   it("Case 21 — valid co-founder text returns 200 with all required fields", async () => {
     const res = await request(app)
       .post("/v1/legal/draft/analyze")
@@ -790,18 +790,32 @@ Bob Park:   ___________________`;
     expect(res.body.source.length).toBe(SAMPLE_COFOUNDER_TEXT.length);
     expect(typeof res.body.source.hash).toBe("string");
 
-    // Extraction fields
-    expect(res.body.extracted_intake).toBeDefined();
-    expect(typeof res.body.extracted_intake).toBe("object");
-    expect(res.body.draft_ready_intake).toBeDefined();
-    expect(typeof res.body.draft_ready_intake).toBe("object");
-    expect(Array.isArray(res.body.uncertain_fields)).toBe(true);
-    expect(Array.isArray(res.body.unextractable_fields)).toBe(true);
+    // Extraction fields (renamed: extracted_intake → raw_extracted_intake)
+    expect(res.body.raw_extracted_intake).toBeDefined();
+    expect(typeof res.body.raw_extracted_intake).toBe("object");
     expect(typeof res.body.extraction_confidence).toBe("number");
     expect(res.body.extraction_confidence).toBeGreaterThanOrEqual(0);
     expect(res.body.extraction_confidence).toBeLessThanOrEqual(1);
 
+    // Normalization fields (new)
+    expect(res.body.normalized_intake).toBeDefined();
+    expect(typeof res.body.normalized_intake).toBe("object");
+    expect(Array.isArray(res.body.normalization_notes)).toBe(true);
+    expect(res.body.normalization_summary).toBeDefined();
+    expect(typeof res.body.normalization_summary.substitutions_made).toBe("number");
+    expect(typeof res.body.normalization_summary.warnings_present).toBe("boolean");
+    expect(Array.isArray(res.body.not_applicable_fields)).toBe(true);
+    expect(Array.isArray(res.body.missing_required_fields)).toBe(true);
+    expect(Array.isArray(res.body.uncertain_fields)).toBe(true);
+
+    // unextractable_fields removed — must not be present
+    expect(res.body.unextractable_fields).toBeUndefined();
+    // extracted_intake renamed — old key must not be present
+    expect(res.body.extracted_intake).toBeUndefined();
+
     // Draft pipeline fields
+    expect(res.body.draft_ready_intake).toBeDefined();
+    expect(typeof res.body.draft_ready_intake).toBe("object");
     expect(Array.isArray(res.body.sections)).toBe(true);
     expect(Array.isArray(res.body.assumptions)).toBe(true);
     expect(Array.isArray(res.body.missing_decision_prompts)).toBe(true);
@@ -851,4 +865,75 @@ Bob Park:   ___________________`;
     expect(res.body.error).toBe("invalid_input");
     expect(typeof res.body.message).toBe("string");
   });
+
+  // Case 24 — jurisdiction normalization: "Delaware, USA" → "DE"
+  it("Case 24 — jurisdiction 'Delaware, USA' normalizes to 'DE' in normalized_intake", async () => {
+    // SAMPLE_COFOUNDER_TEXT already contains "Delaware, USA" as jurisdiction
+    const res = await request(app)
+      .post("/v1/legal/draft/analyze")
+      .send({
+        contract_text: SAMPLE_COFOUNDER_TEXT,
+        doc_class: "co_founder_agreement",
+      });
+
+    expect(res.status).toBe(200);
+
+    // If the LLM extracted "Delaware, USA" (or similar), normalizer must canonicalize to "DE"
+    // If no API key is available, raw extraction falls back to "Delaware, USA" default —
+    // normalizer still fires and produces "DE".
+    const normJurisdiction = res.body.normalized_intake?.jurisdiction;
+    // Accept either "DE" (normalized) or the raw value if the LLM returned something else
+    // The key assertion: if raw was "Delaware, USA" or "delaware, usa", normalized must be "DE"
+    const rawJurisdiction = res.body.raw_extracted_intake?.jurisdiction;
+    if (
+      typeof rawJurisdiction === "string" &&
+      rawJurisdiction.toLowerCase().includes("delaware")
+    ) {
+      expect(normJurisdiction).toBe("DE");
+      // normalization_notes must contain a jurisdiction entry
+      const jurisdictionNote = res.body.normalization_notes.find(
+        (n: { field: string }) => n.field === "jurisdiction",
+      );
+      expect(jurisdictionNote).toBeDefined();
+      expect(jurisdictionNote.normalized_value).toBe("DE");
+    }
+
+    // normalization_summary must be present regardless
+    expect(typeof res.body.normalization_summary.substitutions_made).toBe("number");
+  });
+
+  // Case 25 — advisory fields not applicable for co_founder_agreement
+  it("Case 25 — advisory fields appear in not_applicable_fields for co_founder_agreement", async () => {
+    // Use a contract text that explicitly mentions advisory terms so the LLM might extract them
+    const contractWithAdvisory = SAMPLE_COFOUNDER_TEXT +
+      "\n\nAdvisory: The advisor shall receive 0.5% equity for advisory services rendered.";
+
+    const res = await request(app)
+      .post("/v1/legal/draft/analyze")
+      .send({
+        contract_text: contractWithAdvisory,
+        doc_class: "co_founder_agreement",
+      });
+
+    expect(res.status).toBe(200);
+
+    // advisory.* fields must NOT appear in missing_required_fields for co_founder_agreement
+    const advisoryMissing = res.body.missing_required_fields.filter(
+      (f: { field: string }) => f.field.startsWith("advisory"),
+    );
+    expect(advisoryMissing).toHaveLength(0);
+
+    // If the LLM extracted advisory fields, they must appear in not_applicable_fields
+    const rawAdvisory = res.body.raw_extracted_intake?.advisory;
+    if (rawAdvisory != null && typeof rawAdvisory === "object") {
+      const advisoryNotApplicable = res.body.not_applicable_fields.filter(
+        (f: string) => f.startsWith("advisory"),
+      );
+      expect(advisoryNotApplicable.length).toBeGreaterThan(0);
+    }
+
+    // not_applicable_fields must be an array
+    expect(Array.isArray(res.body.not_applicable_fields)).toBe(true);
+  });
+
 });

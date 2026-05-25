@@ -906,6 +906,21 @@ interface UncertainField {
   reason: string;
 }
 
+interface NormalizationNote {
+  field: string;
+  raw_value: unknown;
+  normalized_value: unknown;
+  reason: string;
+}
+
+interface MissingRequiredField {
+  field: string;
+  required_by: "schema" | "escalation_trigger";
+  blocking: boolean;
+  review_threshold: ReviewThreshold;
+  risk_if_absent: string;
+}
+
 interface AnalyzeApiResponse {
   analysis_id: string;
   doc_class: DocClass;
@@ -914,11 +929,18 @@ interface AnalyzeApiResponse {
     hash: string;
     text: string;
   };
-  extracted_intake: Record<string, unknown>;
-  draft_ready_intake: Record<string, unknown>;
-  uncertain_fields: UncertainField[];
-  unextractable_fields: string[];
+  // Extraction
+  raw_extracted_intake: Record<string, unknown>;
   extraction_confidence: number;
+  // Normalization
+  normalized_intake: Record<string, unknown>;
+  normalization_notes: NormalizationNote[];
+  normalization_summary: { substitutions_made: number; warnings_present: boolean };
+  not_applicable_fields: string[];
+  missing_required_fields: MissingRequiredField[];
+  uncertain_fields: UncertainField[];
+  // Draft pipeline
+  draft_ready_intake: Record<string, unknown>;
   sections: DraftSection[];
   assumptions: string[];
   missing_decision_prompts: MissingDecisionPrompt[];
@@ -1092,12 +1114,15 @@ function AnalysisResultCard({
 }) {
   const docLabel = DOC_CLASS_OPTIONS.find((o) => o.value === data.doc_class)?.label ?? data.doc_class;
 
-  // Extracted parties for display
-  const parties = (data.extracted_intake as any)?.parties as Array<{ name: string; role: string; entity_type?: string }> | undefined;
-  const equity  = (data.extracted_intake as any)?.equity as Record<string, unknown> | undefined;
-  const ip      = (data.extracted_intake as any)?.ip as Record<string, unknown> | undefined;
-  const advisory = (data.extracted_intake as any)?.advisory as Record<string, unknown> | undefined;
-  const jurisdiction = (data.extracted_intake as any)?.jurisdiction as string | undefined;
+  const rawIntake  = data.raw_extracted_intake;
+  const parties    = (rawIntake as any)?.parties as Array<{ name: string; role: string; entity_type?: string }> | undefined;
+  const equity     = (rawIntake as any)?.equity as Record<string, unknown> | undefined;
+  const ip         = (rawIntake as any)?.ip as Record<string, unknown> | undefined;
+  const advisory   = (rawIntake as any)?.advisory as Record<string, unknown> | undefined;
+  const jurisdiction = (rawIntake as any)?.jurisdiction as string | undefined;
+
+  const normJurisdiction = (data.normalized_intake as any)?.jurisdiction as string | undefined;
+  const hasIncompleteSplit = data.normalization_notes.some((n) => n.field === "equity.split");
 
   return (
     <div className="space-y-3">
@@ -1106,6 +1131,11 @@ function AnalysisResultCard({
         <div className="flex items-center gap-2">
           <Badge variant="outline" className="text-[9px] font-mono">{docLabel}</Badge>
           <ConfidenceBadge confidence={data.extraction_confidence} />
+          {data.normalization_summary.substitutions_made > 0 && (
+            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-mono bg-blue-500/10 text-blue-600 border border-blue-500/20">
+              {data.normalization_summary.substitutions_made} normalized
+            </span>
+          )}
         </div>
         <span className="text-[9px] font-mono text-muted-foreground">
           {data.trace.model_used.split("/").pop()}
@@ -1118,9 +1148,16 @@ function AnalysisResultCard({
       <CollapsibleSection title="Extracted Structure" defaultOpen>
         <div className="space-y-2 text-xs font-mono">
           {jurisdiction && (
-            <div className="flex gap-2">
+            <div className="flex gap-2 items-start">
               <span className="text-muted-foreground w-20 shrink-0">Jurisdiction</span>
-              <span className="text-foreground">{jurisdiction}</span>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-foreground">{jurisdiction}</span>
+                {normJurisdiction && normJurisdiction !== jurisdiction && (
+                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-mono bg-amber-500/10 text-amber-600 border border-amber-500/20">
+                    → {normJurisdiction}
+                  </span>
+                )}
+              </div>
             </div>
           )}
 
@@ -1150,7 +1187,7 @@ function AnalysisResultCard({
 
           {equity && (
             <div>
-              <p className="text-[9px] text-muted-foreground uppercase tracking-widest mb-1">Equity</p>
+              <p className="text-[9px] text-muted-foreground uppercase tracking-widest mb-1">Equity (raw)</p>
               <div className="space-y-0.5 text-[10px]">
                 {equity.vesting_years != null && (
                   <div className="flex gap-2">
@@ -1170,13 +1207,28 @@ function AnalysisResultCard({
                     <span>{String(equity.acceleration)}</span>
                   </div>
                 )}
+                {equity.split != null && (
+                  <div className="flex gap-2 items-start">
+                    <span className="text-muted-foreground w-20 shrink-0">Split</span>
+                    <div className="flex flex-wrap gap-1">
+                      {Object.entries(equity.split as Record<string, number>).map(([name, pct]) => (
+                        <span key={name} className="text-foreground">{name}: {pct}%</span>
+                      ))}
+                      {hasIncompleteSplit && (
+                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-mono bg-amber-500/10 text-amber-600 border border-amber-500/20">
+                          incomplete extraction
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}
 
           {ip && (
             <div>
-              <p className="text-[9px] text-muted-foreground uppercase tracking-widest mb-1">IP</p>
+              <p className="text-[9px] text-muted-foreground uppercase tracking-widest mb-1">IP (raw)</p>
               <div className="space-y-0.5 text-[10px]">
                 {ip.scope != null && (
                   <div className="flex gap-2">
@@ -1184,7 +1236,7 @@ function AnalysisResultCard({
                     <span>{String(ip.scope)}</span>
                   </div>
                 )}
-                {Array.isArray(ip.prior_inventions) && ip.prior_inventions.length > 0 && (
+                {Array.isArray(ip.prior_inventions) && (ip.prior_inventions as string[]).length > 0 && (
                   <div className="flex gap-2">
                     <span className="text-muted-foreground w-20 shrink-0">Prior inv.</span>
                     <span>{(ip.prior_inventions as string[]).join(", ")}</span>
@@ -1196,7 +1248,7 @@ function AnalysisResultCard({
 
           {advisory && (
             <div>
-              <p className="text-[9px] text-muted-foreground uppercase tracking-widest mb-1">Advisory</p>
+              <p className="text-[9px] text-muted-foreground uppercase tracking-widest mb-1">Advisory (raw)</p>
               <div className="space-y-0.5 text-[10px]">
                 {advisory.equity_pct != null && (
                   <div className="flex gap-2">
@@ -1213,11 +1265,78 @@ function AnalysisResultCard({
               </div>
             </div>
           )}
+        </div>
+      </CollapsibleSection>
 
-          {/* Uncertain fields */}
+      {/* 2. Normalized Intake */}
+      <CollapsibleSection title="Normalized Intake" defaultOpen>
+        <div className="space-y-2">
+          {data.normalization_notes.length > 0 && (
+            <div>
+              <p className="text-[9px] font-mono text-muted-foreground uppercase tracking-widest mb-1">Substitutions</p>
+              <div className="space-y-1">
+                {data.normalization_notes.map((n, i) => (
+                  <div key={i} className="flex items-start gap-1.5 text-[10px] font-mono">
+                    <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-600 border border-amber-500/20 shrink-0">
+                      {n.field}
+                    </span>
+                    <span className="text-muted-foreground">{n.reason}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {data.missing_required_fields.filter((f) => f.required_by === "schema").length > 0 && (
+            <div>
+              <p className="text-[9px] font-mono text-muted-foreground uppercase tracking-widest mb-1">
+                Missing — schema required
+              </p>
+              <div className="flex flex-wrap gap-1">
+                {data.missing_required_fields
+                  .filter((f) => f.required_by === "schema")
+                  .map((f) => (
+                    <span
+                      key={f.field}
+                      title={f.risk_if_absent}
+                      className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-mono bg-red-500/10 text-red-500 border border-red-500/20 cursor-help"
+                    >
+                      {f.field} · blocks draft
+                    </span>
+                  ))}
+              </div>
+            </div>
+          )}
+
+          {data.missing_required_fields.filter((f) => f.required_by === "escalation_trigger").length > 0 && (
+            <div>
+              <p className="text-[9px] font-mono text-muted-foreground uppercase tracking-widest mb-1">
+                Missing — policy required
+              </p>
+              <div className="flex flex-wrap gap-1">
+                {data.missing_required_fields
+                  .filter((f) => f.required_by === "escalation_trigger")
+                  .map((f) => (
+                    <span
+                      key={f.field}
+                      title={f.risk_if_absent}
+                      className={[
+                        "inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-mono border cursor-help",
+                        f.blocking
+                          ? "bg-red-500/10 text-red-500 border-red-500/20"
+                          : "bg-amber-500/10 text-amber-600 border-amber-500/20",
+                      ].join(" ")}
+                    >
+                      {f.field} · {f.blocking ? "blocks draft" : f.review_threshold}
+                    </span>
+                  ))}
+              </div>
+            </div>
+          )}
+
           {data.uncertain_fields.length > 0 && (
             <div>
-              <p className="text-[9px] text-muted-foreground uppercase tracking-widest mb-1">Uncertain</p>
+              <p className="text-[9px] font-mono text-muted-foreground uppercase tracking-widest mb-1">Uncertain</p>
               <div className="flex flex-wrap gap-1">
                 {data.uncertain_fields.map((uf) => (
                   <span
@@ -1232,12 +1351,13 @@ function AnalysisResultCard({
             </div>
           )}
 
-          {/* Unextractable fields */}
-          {data.unextractable_fields.length > 0 && (
+          {data.not_applicable_fields.length > 0 && (
             <div>
-              <p className="text-[9px] text-muted-foreground uppercase tracking-widest mb-1">Not found</p>
+              <p className="text-[9px] font-mono text-muted-foreground uppercase tracking-widest mb-1">
+                Not applicable for {docLabel}
+              </p>
               <div className="flex flex-wrap gap-1">
-                {data.unextractable_fields.map((f) => (
+                {data.not_applicable_fields.map((f) => (
                   <span
                     key={f}
                     className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-mono bg-muted text-muted-foreground border border-border"
@@ -1248,10 +1368,17 @@ function AnalysisResultCard({
               </div>
             </div>
           )}
+
+          {data.normalization_notes.length === 0 &&
+           data.missing_required_fields.length === 0 &&
+           data.uncertain_fields.length === 0 &&
+           data.not_applicable_fields.length === 0 && (
+            <p className="text-[10px] font-mono text-green-600">Extraction clean — no normalization needed</p>
+          )}
         </div>
       </CollapsibleSection>
 
-      {/* 2. Governance + Verification */}
+      {/* 3. Governance + Verification */}
       <CollapsibleSection title="Governance + Verification" defaultOpen>
         <div className="space-y-2">
           <div className="flex items-center gap-2 flex-wrap">
@@ -1263,7 +1390,6 @@ function AnalysisResultCard({
             <span>{data.governance.privilege_warning}</span>
           </div>
 
-          {/* Verifier flags */}
           {!data.verifier.passed && (
             <div className="space-y-1">
               {data.verifier.template_failures.map((f) => (
@@ -1275,7 +1401,11 @@ function AnalysisResultCard({
               {data.verifier.legal_conflicts.map((f) => (
                 <div key={f.conflict_id} className="flex items-start gap-1.5 text-[10px] font-mono">
                   <AlertTriangle className="w-3 h-3 text-red-500 mt-0.5 shrink-0" />
-                  <span className="text-foreground">{f.description}</span>
+                  <span className="text-foreground">
+                    {f.conflict_id === "EQUITY_SPLIT_NOT_100" && hasIncompleteSplit
+                      ? `Incomplete extraction — ${f.description}`
+                      : f.description}
+                  </span>
                 </div>
               ))}
               {data.verifier.jurisdiction_escalations.map((f) => (
@@ -1296,7 +1426,6 @@ function AnalysisResultCard({
             <p className="text-[10px] font-mono text-green-600">Verifier passed</p>
           )}
 
-          {/* Missing decision prompts */}
           {data.missing_decision_prompts.length > 0 && (
             <div className="space-y-1.5 pt-1 border-t border-border">
               <p className="text-[9px] font-mono text-muted-foreground uppercase tracking-widest">
@@ -1316,7 +1445,7 @@ function AnalysisResultCard({
         </div>
       </CollapsibleSection>
 
-      {/* 3. Assumptions */}
+      {/* 4. Assumptions */}
       {data.assumptions.length > 0 && (
         <CollapsibleSection title="Assumptions">
           <ul className="space-y-0.5">
@@ -1330,7 +1459,7 @@ function AnalysisResultCard({
         </CollapsibleSection>
       )}
 
-      {/* 4. Source Text */}
+      {/* 5. Source Text */}
       <CollapsibleSection title="Source Text">
         <pre className="text-[9px] font-mono text-muted-foreground whitespace-pre-wrap break-words max-h-72 overflow-y-auto leading-relaxed">
           {data.source.text}
