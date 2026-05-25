@@ -487,6 +487,49 @@ pnpm --filter @workspace/openclaw-saas run build
 
 ---
 
+---
+
+## Testing & Release
+
+### Running Tests
+
+```bash
+# Run api-server test suite (integration tests, all cases)
+pnpm --filter api-server test
+
+# Run api-server typecheck
+pnpm --filter api-server exec tsc -p tsconfig.json --noEmit
+```
+
+**Note:** `pnpm run typecheck` at the repo root produces pre-existing TS6305/TS7006 errors
+from workspace lib packages not being built. These are non-blocking. The release bar is
+scoped to `api-server` only.
+
+### Test Coverage
+
+| Test file | Cases | What it covers |
+|-----------|-------|----------------|
+| `startup.counsel.integration.test.ts` | 1–20, 35–39 | Draft generation, revision loop, governance, NL revision, coverage layer, gate object, negation, contradiction, mixed-doc, summary honesty |
+| `legal.action.integration.test.ts` | 21–28 | Legal action endpoint, normalization, detection, threshold escalation |
+
+### Release Bar
+
+Both of the following must exit cleanly before any release:
+
+```bash
+pnpm --filter api-server exec tsc -p tsconfig.json --noEmit   # exits 0
+pnpm --filter api-server test                                  # all tests pass
+```
+
+See `docs/release-checklist.md` for the full release checklist including acceptance criteria,
+negation regression pack, and residual risk documentation.
+
+### Verification Artifacts
+
+- `docs/release-checklist.md` — release bar, acceptance criteria, residual risks
+- `docs/verification/gate-ui-proof.md` — manual verification that UI reads `draft_generation_gate.allowed` from backend (Case 35)
+
+
 ## What's Next
 
 ### Immediate (deterministic fixes, ~45 lines total)

@@ -6,6 +6,13 @@
  *
  * Exports:
  *   reviewDocumentCoverage(text, doc_class) → CoverageResult
+ *
+ * JR Corrective Pass (fix/protect):
+ *   - Fix 2: negation-aware detection (isNegated, 40-char lookback)
+ *   - Fix 3: contradiction + multi-jurisdiction detection
+ *   - Fix 4: mixed-document contamination detection
+ *   - Fix 5: coverage_summary honesty (no "no material gaps" when warnings present)
+ *   - Fix 6: raised specificity for indemnification, advisory services, equity compensation
  */
 
 import type { DocClass, ReviewThreshold } from "./draftReceiptEngine";
@@ -46,6 +53,21 @@ export interface CrossReferenceWarning {
   warning: string;
 }
 
+/** Fix 3: contradiction / multi-jurisdiction warning */
+export interface ContradictionWarning {
+  clause_family: string;
+  detected_values: string[];
+  warning: string;
+}
+
+/** Fix 4: mixed-document contamination warning */
+export interface MixedDocumentWarning {
+  foreign_clause_family: string;
+  foreign_doc_class: DocClass;
+  evidence: string;
+  warning: string;
+}
+
 export interface CoverageResult {
   coverage_score: number;
   review_threshold: ReviewThreshold;
@@ -59,6 +81,10 @@ export interface CoverageResult {
   cross_reference_warnings: CrossReferenceWarning[];
   exhibits_detected: string[];
   coverage_summary: string;
+  /** Fix 3 */
+  contradiction_warnings: ContradictionWarning[];
+  /** Fix 4 */
+  mixed_document_warnings: MixedDocumentWarning[];
 }
 
 // ── ReviewThreshold ordering ──────────────────────────────────────────────────
@@ -72,6 +98,79 @@ const THRESHOLD_ORDER: ReviewThreshold[] = [
 
 function maxThreshold(a: ReviewThreshold, b: ReviewThreshold): ReviewThreshold {
   return THRESHOLD_ORDER.indexOf(a) >= THRESHOLD_ORDER.indexOf(b) ? a : b;
+}
+
+// ── Fix 2: Negation-aware detection ──────────────────────────────────────────
+// Looks back up to 40 characters before a match position for negation signals.
+// Known limitation: 40-char window is a heuristic. Constructs like
+// "no IP assignment except as provided below" may still pass if the positive
+// clause is described later in the same sentence. Recorded as residual risk
+// in docs/release-checklist.md.
+
+const NEGATION_PREFIXES: string[] = [
+  "no ",
+  "not ",
+  "without ",
+  "shall not ",
+  "does not ",
+  "will not ",
+  "no such ",
+  "expressly excludes ",
+  "excluding ",
+  "waives ",
+  "no obligation to ",
+  "not required to ",
+  "not subject to ",
+  "notwithstanding ",
+  "except ",
+  "unless ",
+];
+
+/**
+ * Post-match negation signals — checked in the 40 chars AFTER the matched term.
+ * Catches constructs like "non-compete shall not apply" where the negation follows the keyword.
+ */
+const NEGATION_SUFFIXES: string[] = [
+  " shall not apply",
+  " does not apply",
+  " is not applicable",
+  " shall not be enforceable",
+  " is waived",
+  " is excluded",
+  " is not required",
+];
+
+function isNegated(text: string, matchIndex: number, matchLen = 0): boolean {
+  // Lookback: 40 chars before the match position
+  const windowBack = text.slice(Math.max(0, matchIndex - 40), matchIndex).toLowerCase();
+  if (NEGATION_PREFIXES.some((prefix) => windowBack.endsWith(prefix) || windowBack.includes(prefix))) {
+    return true;
+  }
+  // Forward look: 40 chars after the match (catches "non-compete shall not apply")
+  if (matchLen > 0) {
+    const windowFwd = text.slice(matchIndex + matchLen, matchIndex + matchLen + 40).toLowerCase();
+    if (NEGATION_SUFFIXES.some((suffix) => windowFwd.startsWith(suffix.trimStart()) || windowFwd.includes(suffix.trimStart()))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Returns true if `needle` appears at least once in `text` in a non-negated context.
+ * Scans ALL occurrences — not just the first — so a negated early occurrence does not
+ * shadow a positive later occurrence (e.g., "no IP assignment... hereby assigns all IP").
+ * Uses both lookback and forward-look negation checks.
+ */
+function hasNonNegatedOccurrence(text: string, needle: string): boolean {
+  const lower = needle.toLowerCase();
+  let start = 0;
+  while (true) {
+    const idx = text.indexOf(lower, start);
+    if (idx === -1) return false;
+    if (!isNegated(text, idx, lower.length)) return true;
+    start = idx + 1;
+  }
 }
 
 // ── Clause inventories ────────────────────────────────────────────────────────
@@ -334,21 +433,49 @@ const ADVISOR_CLAUSES: ExpectedClause[] = [
     review_threshold: "blocked",
   },
   {
+    // Fix 6: raised specificity — multi-word keyword_patterns
     clause_id: "advisory_services",
     label: "Advisory Services",
     required: true,
-    high_specificity_phrases: ["advisory services", "advisor shall provide", "services as an advisor", "advisory role", "scope of advisory"],
-    keyword_patterns: ["advisory", "services", "advise", "assist", "consult", "guidance"],
+    high_specificity_phrases: [
+      "advisory services",
+      "advisor shall provide",
+      "services as an advisor",
+      "scope of advisory services",
+      "advisor's services shall include",
+      "advisor agrees to provide",
+    ],
+    keyword_patterns: [
+      "advisory services",
+      "advisor shall",
+      "advise the company",
+      "advisory obligations",
+    ],
     heading_patterns: ["^\\s*(advisory services?|services|scope of services|advisor obligations?)\\b"],
     risk_if_absent: "No defined advisory services — advisor obligations are unenforceable.",
     review_threshold: "counsel_review_required",
   },
   {
+    // Fix 6: raised specificity — multi-word keyword_patterns
     clause_id: "equity_compensation",
     label: "Equity Compensation",
     required: true,
-    high_specificity_phrases: ["equity compensation", "stock option grant", "option to purchase", "equity award", "shares of common stock"],
-    keyword_patterns: ["equity", "option", "shares", "compensation", "grant", "stock"],
+    high_specificity_phrases: [
+      "equity compensation",
+      "stock option grant",
+      "option to purchase shares",
+      "equity award",
+      "shares of common stock",
+      "advisor equity grant",
+      "restricted stock award",
+    ],
+    keyword_patterns: [
+      "equity compensation",
+      "stock option",
+      "restricted stock",
+      "equity grant",
+      "option grant",
+    ],
     heading_patterns: ["^\\s*(equity compensation|equity|stock options?|compensation)\\b"],
     risk_if_absent: "No equity compensation defined — agreement has no enforceable consideration.",
     review_threshold: "blocked",
@@ -446,8 +573,8 @@ const CLAUSE_INVENTORIES: Record<DocClass, ExpectedClause[]> = {
 interface UnsupportedPattern {
   id: string;
   heading: string;
-  patterns: string[];           // any match triggers detection
-  heading_patterns: string[];   // regex heading patterns
+  patterns: string[];
+  heading_patterns: string[];
   reason: string;
   review_threshold: ReviewThreshold;
   category: "material" | "boilerplate";
@@ -458,7 +585,18 @@ const UNSUPPORTED_PATTERNS: UnsupportedPattern[] = [
   {
     id: "indemnification",
     heading: "Indemnification",
-    patterns: ["indemnif", "hold harmless", "indemnitor", "indemnitee"],
+    // Fix 6: replaced weak stem "indemnif" with full high-specificity phrases.
+    // Existing logic requires headingMatch OR patternHits.length >= 2.
+    patterns: [
+      "shall indemnify",
+      "agrees to indemnify",
+      "indemnify and hold harmless",
+      "indemnification obligations",
+      "indemnitor shall",
+      "indemnitee shall",
+      "defend, indemnify",
+      "indemnify, defend",
+    ],
     heading_patterns: ["^\\s*(indemnification|indemnity|hold harmless)\\b"],
     reason: "Indemnification clause is not modeled — liability exposure is unreviewed.",
     review_threshold: "counsel_review_required",
@@ -566,11 +704,11 @@ const UNSUPPORTED_PATTERNS: UnsupportedPattern[] = [
   },
 ];
 
-// ── Clause detection — precision rules ───────────────────────────────────────
+// ── Fix 2: Negation-aware clause detection ────────────────────────────────────
 // A clause is detected if ANY of:
-//   (a) a heading_pattern matches a line in the text
-//   (b) a high_specificity_phrase is found in the text
-//   (c) 2+ keyword_patterns are found in the text
+//   (a) a heading_pattern matches a line in the text (with negation check on heading text)
+//   (b) a high_specificity_phrase is found in the text (with isNegated check)
+//   (c) 2+ keyword_patterns are found in the text (each with isNegated check)
 
 function detectClause(
   text: string,
@@ -580,26 +718,36 @@ function detectClause(
   const lower = text; // already lowercased by caller
   const matched: string[] = [];
 
-  // (a) Heading match
+  // (a) Heading match — skip if the matched heading line itself contains a negation prefix
   for (const hp of clause.heading_patterns) {
     const re = new RegExp(hp, "im");
-    if (re.test(lines.join("\n"))) {
-      matched.push(`heading: ${hp}`);
-      break;
+    const joinedLines = lines.join("\n");
+    const match = re.exec(joinedLines);
+    if (match) {
+      const headingLine = match[0].toLowerCase();
+      const headingNegated = NEGATION_PREFIXES.some(
+        (p) => headingLine.startsWith(p.trim()) || headingLine.includes(" " + p.trim() + " "),
+      ) || NEGATION_SUFFIXES.some(
+        (s) => headingLine.includes(s.trimStart()),
+      );
+      if (!headingNegated) {
+        matched.push(`heading: ${hp}`);
+        break;
+      }
     }
   }
 
-  // (b) High-specificity phrase match
+  // (b) High-specificity phrase match — scan ALL occurrences, detect if ANY is non-negated
   for (const phrase of clause.high_specificity_phrases) {
-    if (lower.includes(phrase.toLowerCase())) {
+    if (hasNonNegatedOccurrence(lower, phrase)) {
       matched.push(`phrase: "${phrase}"`);
     }
   }
 
-  // (c) Keyword pattern count
+  // (c) Keyword pattern count — scan ALL occurrences, count if ANY is non-negated
   const keywordHits: string[] = [];
   for (const kw of clause.keyword_patterns) {
-    if (lower.includes(kw.toLowerCase())) {
+    if (hasNonNegatedOccurrence(lower, kw)) {
       keywordHits.push(kw);
     }
   }
@@ -608,6 +756,13 @@ function detectClause(
   }
 
   if (matched.length === 0) return null;
+
+  // Heading alone (no corroborating phrase or keyword) is not sufficient —
+  // a section heading like "2. INTELLECTUAL PROPERTY" with only negated body text
+  // must not produce a false positive.
+  const headingOnlyMatch =
+    matched.every((m) => m.startsWith("heading:"));
+  if (headingOnlyMatch) return null;
 
   // Confidence: heading or high-specificity phrase → high; 3+ keywords → medium; 2 keywords → low
   const hasHeading = matched.some((m) => m.startsWith("heading:"));
@@ -628,13 +783,11 @@ function detectClause(
     label: clause.label,
     required: clause.required,
     confidence,
-    matched_patterns: matched.slice(0, 6), // cap for response size
+    matched_patterns: matched.slice(0, 6),
   };
 }
 
 // ── Unsupported section detection ─────────────────────────────────────────────
-// Fires when: heading_pattern matches OR 2+ patterns match.
-// Suppressed for patterns that are part of the expected clause inventory for this doc_class.
 
 function detectUnsupportedSections(
   text: string,
@@ -646,13 +799,9 @@ function detectUnsupportedSections(
   const lower = text;
 
   for (const up of UNSUPPORTED_PATTERNS) {
-    // Skip if this pattern maps to an expected clause for this doc_class
     if (expectedClauseIds.has(up.id)) continue;
-    // Also skip representations_warranties_material if representations_and_warranties is expected
     if (up.id === "representations_warranties_material" && expectedClauseIds.has("representations_and_warranties")) continue;
-    // Skip non_compete_material if non_compete is expected
     if (up.id === "non_compete_material" && expectedClauseIds.has("non_compete")) continue;
-    // Skip arbitration_material if deadlock_resolution is expected (it covers dispute resolution)
     if (up.id === "arbitration_material" && expectedClauseIds.has("deadlock_resolution")) continue;
 
     const headingMatch = up.heading_patterns.some((hp) =>
@@ -677,10 +826,218 @@ function detectUnsupportedSections(
   return { material, boilerplate };
 }
 
+// ── Fix 3: Contradiction and multi-jurisdiction detection ─────────────────────
+// Scope (this release):
+//   - Multi-jurisdiction / multiple governing-law values detected via regex
+//   - Repeated clause-family headings (same heading pattern fires 2+ times)
+// Does NOT claim full semantic contradiction detection. Semantic contradictions
+// (e.g., vesting described as "4 years" in one clause and "3 years" in another)
+// are not detected. See docs/release-checklist.md — Known Gaps.
+
+const GOV_LAW_STATE_RE = /(?:governed by|laws of|jurisdiction of)\s+(?:the\s+)?(?:state\s+of\s+)?([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/g;
+
+function detectContradictions(
+  text: string,
+  lines: string[],
+  inventory: ExpectedClause[],
+): ContradictionWarning[] {
+  const warnings: ContradictionWarning[] = [];
+  const joinedLines = lines.join("\n");
+
+  // (1) Governing law value conflict
+  const stateMatches = [...text.matchAll(GOV_LAW_STATE_RE)];
+  const states = new Set<string>();
+  for (const m of stateMatches) {
+    const state = m[1].trim();
+    // Filter out common false positives (articles, prepositions that slip through)
+    if (state.length > 2 && !/^(The|This|Any|Each|All|Such|Said)$/i.test(state)) {
+      states.add(state);
+    }
+  }
+  if (states.size >= 2) {
+    const stateList = [...states];
+    warnings.push({
+      clause_family: "governing_law",
+      detected_values: stateList,
+      warning: `Multiple governing law jurisdictions detected in the same document: ${stateList.join(", ")}. This may indicate contradictory or inconsistent governing law clauses.`,
+    });
+  }
+
+  // (2) Repeated clause-family headings
+  for (const clause of inventory) {
+    let headingMatchCount = 0;
+    for (const hp of clause.heading_patterns) {
+      const re = new RegExp(hp, "gim");
+      const matches = [...joinedLines.matchAll(re)];
+      headingMatchCount += matches.length;
+    }
+    if (headingMatchCount >= 2) {
+      warnings.push({
+        clause_family: clause.clause_id,
+        detected_values: [`${headingMatchCount} occurrences`],
+        warning: `Multiple "${clause.label}" headings detected (${headingMatchCount} occurrences) — possible contradictory or duplicate clauses.`,
+      });
+    }
+  }
+
+  return warnings;
+}
+
+// ── Fix 4: Mixed-document contamination detection ─────────────────────────────
+
+interface CrossClassSignal {
+  clause_family: string;
+  label: string;
+  foreign_doc_class: DocClass;
+  phrases: string[];
+  heading_patterns: string[];
+}
+
+const CROSS_CLASS_SIGNALS: Record<DocClass, CrossClassSignal[]> = {
+  co_founder_agreement: [
+    {
+      clause_family: "advisory_services",
+      label: "Advisory Services",
+      foreign_doc_class: "advisor_agreement",
+      phrases: [
+        "advisory services",
+        "advisor shall provide",
+        "services as an advisor",
+        "scope of advisory services",
+        "advisor agrees to provide",
+      ],
+      heading_patterns: ["^\\s*(advisory services?|advisor obligations?)\\b"],
+    },
+    {
+      clause_family: "equity_compensation_advisor",
+      label: "Equity Compensation (Advisor)",
+      foreign_doc_class: "advisor_agreement",
+      phrases: [
+        "advisor equity",
+        "advisory equity",
+        "equity for advisory",
+        "equity in exchange for advisory",
+        "equity grant to advisor",
+      ],
+      heading_patterns: ["^\\s*(advisor equity|advisory equity|equity compensation for advisor)\\b"],
+    },
+    {
+      clause_family: "scope_of_work_contractor",
+      label: "Scope of Work / Payment Terms",
+      foreign_doc_class: "contractor_ip_assignment",
+      phrases: [
+        "scope of work",
+        "statement of work",
+        "payment terms",
+        "net 30",
+        "net-30",
+        "invoice upon completion",
+      ],
+      heading_patterns: ["^\\s*(scope of work|statement of work|payment terms|invoicing)\\b"],
+    },
+  ],
+  contractor_ip_assignment: [
+    {
+      clause_family: "advisory_services",
+      label: "Advisory Services",
+      foreign_doc_class: "advisor_agreement",
+      phrases: [
+        "advisory services",
+        "advisor shall provide",
+        "services as an advisor",
+      ],
+      heading_patterns: ["^\\s*(advisory services?|advisor obligations?)\\b"],
+    },
+    {
+      clause_family: "equity_split_cofounder",
+      label: "Equity Split (Co-Founder)",
+      foreign_doc_class: "co_founder_agreement",
+      phrases: [
+        "equity split",
+        "founder shares",
+        "co-founder equity",
+        "ownership percentage between founders",
+      ],
+      heading_patterns: ["^\\s*(equity split|founder equity|co-founder equity)\\b"],
+    },
+  ],
+  advisor_agreement: [
+    {
+      clause_family: "equity_split_cofounder",
+      label: "Equity Split (Co-Founder)",
+      foreign_doc_class: "co_founder_agreement",
+      phrases: [
+        "equity split",
+        "founder shares",
+        "co-founder equity",
+        "ownership percentage between founders",
+      ],
+      heading_patterns: ["^\\s*(equity split|founder equity|co-founder equity)\\b"],
+    },
+    {
+      clause_family: "scope_of_work_contractor",
+      label: "Scope of Work / Payment Terms",
+      foreign_doc_class: "contractor_ip_assignment",
+      phrases: [
+        "scope of work",
+        "statement of work",
+        "net 30",
+        "net-30",
+      ],
+      heading_patterns: ["^\\s*(scope of work|statement of work|payment terms)\\b"],
+    },
+  ],
+};
+
+function detectMixedDocument(
+  text: string,
+  lines: string[],
+  doc_class: DocClass,
+): MixedDocumentWarning[] {
+  const warnings: MixedDocumentWarning[] = [];
+  const lower = text;
+  const joinedLines = lines.join("\n");
+  const signals = CROSS_CLASS_SIGNALS[doc_class] ?? [];
+
+  for (const signal of signals) {
+    let evidence = "";
+
+    // Check heading patterns first
+    for (const hp of signal.heading_patterns) {
+      const re = new RegExp(hp, "im");
+      const match = re.exec(joinedLines);
+      if (match) {
+        evidence = `heading: "${match[0].trim()}"`;
+        break;
+      }
+    }
+
+    // Check phrases — scan ALL occurrences, detect if ANY is non-negated
+    if (!evidence) {
+      for (const phrase of signal.phrases) {
+        if (hasNonNegatedOccurrence(lower, phrase)) {
+          evidence = `phrase: "${phrase}"`;
+          break;
+        }
+      }
+    }
+
+    if (evidence) {
+      warnings.push({
+        foreign_clause_family: signal.clause_family,
+        foreign_doc_class: signal.foreign_doc_class,
+        evidence,
+        warning: `"${signal.label}" language (typical of ${signal.foreign_doc_class.replace(/_/g, " ")}) detected in a ${doc_class.replace(/_/g, " ")} — possible mixed-document contamination. Review: ${evidence}.`,
+      });
+    }
+  }
+
+  return warnings;
+}
+
 // ── Schedule / exhibit / cross-reference detection ────────────────────────────
 
 const EXHIBIT_RE = /\b(schedule\s+[a-z]|exhibit\s+[a-z]|annex\s+[a-z])\b/gi;
-const XREF_RE    = /\b(section\s+\d+[\.\d]*|pursuant to section|as defined in section|see section)\b/gi;
 
 function detectExhibitsAndCrossRefs(
   text: string,
@@ -688,7 +1045,6 @@ function detectExhibitsAndCrossRefs(
   const exhibits: string[] = [];
   const crossRefWarnings: CrossReferenceWarning[] = [];
 
-  // Exhibits
   const exhibitMatches = [...text.matchAll(EXHIBIT_RE)];
   const seen = new Set<string>();
   for (const m of exhibitMatches) {
@@ -698,8 +1054,6 @@ function detectExhibitsAndCrossRefs(
       seen.add(normalized);
       exhibits.push(display);
 
-      // Cross-reference warning: referenced but content not present
-      // Heuristic: if the exhibit name appears only once, it's referenced but not attached
       const occurrences = (text.match(new RegExp(m[0].replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi")) ?? []).length;
       if (occurrences <= 1) {
         const idx = text.toLowerCase().indexOf(normalized);
@@ -713,9 +1067,6 @@ function detectExhibitsAndCrossRefs(
     }
   }
 
-  // Section cross-references (informational — no warning unless dangling)
-  // We only surface these if they reference a section number > total line count / 30
-  // (rough heuristic for "section that probably doesn't exist")
   const lineCount = text.split("\n").length;
   const xrefMatches = [...text.matchAll(/\bsection\s+(\d+)/gi)];
   for (const m of xrefMatches) {
@@ -738,36 +1089,41 @@ function detectExhibitsAndCrossRefs(
 }
 
 // ── Coverage threshold logic ──────────────────────────────────────────────────
-// Considers: coverage_score, material_missing_clause_ids, material_unsupported_sections,
-// and the incoming Lane A threshold.
 
 function computeCoverageThreshold(
   coverageScore: number,
   materialMissingIds: string[],
   materialUnsupported: UnsupportedSection[],
+  contradictionWarnings: ContradictionWarning[],
+  mixedDocWarnings: MixedDocumentWarning[],
 ): ReviewThreshold {
-  // Any material missing clause → at minimum counsel_review_required
   if (materialMissingIds.length > 0) {
     return maxThreshold("counsel_review_required",
       coverageScore < 0.5 ? "blocked" : "counsel_review_required"
     );
   }
-
-  // Material unsupported sections → counsel_review_required
   if (materialUnsupported.length > 0) {
     return maxThreshold("counsel_review_required",
       coverageScore < 0.5 ? "blocked" : "counsel_review_required"
     );
   }
+  // Fix 3 + Fix 4: contradiction and mixed-doc warnings elevate to business_review_required
+  let threshold: ReviewThreshold =
+    coverageScore < 0.5 ? "blocked" :
+    coverageScore < 0.7 ? "counsel_review_required" :
+    coverageScore < 0.9 ? "business_review_required" :
+    "self_review_ok";
 
-  // Coverage score alone
-  if (coverageScore < 0.5) return "blocked";
-  if (coverageScore < 0.7) return "counsel_review_required";
-  if (coverageScore < 0.9) return "business_review_required";
-  return "self_review_ok";
+  if (contradictionWarnings.length > 0) {
+    threshold = maxThreshold(threshold, "business_review_required");
+  }
+  if (mixedDocWarnings.length > 0) {
+    threshold = maxThreshold(threshold, "business_review_required");
+  }
+  return threshold;
 }
 
-// ── Material clause IDs (clauses whose absence is always material) ────────────
+// ── Material clause IDs ───────────────────────────────────────────────────────
 
 const MATERIAL_CLAUSE_IDS = new Set([
   "preamble",
@@ -790,7 +1146,7 @@ export function reviewDocumentCoverage(
   const inventory = CLAUSE_INVENTORIES[doc_class] ?? [];
   const expectedClauseIds = new Set(inventory.map((c) => c.clause_id));
 
-  // ── Detect expected clauses ───────────────────────────────────────────────
+  // ── Detect expected clauses (Fix 2: negation-aware) ───────────────────────
   const detectedClauses: DetectedClause[] = [];
   const missingExpected: ExpectedClause[] = [];
 
@@ -829,27 +1185,56 @@ export function reviewDocumentCoverage(
   // ── Exhibits + cross-references ───────────────────────────────────────────
   const { exhibits, crossRefWarnings } = detectExhibitsAndCrossRefs(text);
 
+  // ── Fix 3: Contradiction detection ───────────────────────────────────────
+  const contradictionWarnings = detectContradictions(text, lines, inventory);
+
+  // ── Fix 4: Mixed-document detection ──────────────────────────────────────
+  const mixedDocWarnings = detectMixedDocument(lower, lines, doc_class);
+
   // ── Coverage threshold ────────────────────────────────────────────────────
   const coverageThreshold = computeCoverageThreshold(
     coverageScore,
     materialMissingIds,
     materialUnsupported,
+    contradictionWarnings,
+    mixedDocWarnings,
   );
 
-  // ── Coverage summary ──────────────────────────────────────────────────────
+  // ── Fix 5: Coverage summary honesty ──────────────────────────────────────
+  // "No material gaps identified" is prohibited when any warning bucket is non-empty.
   const detectedRequired = detectedClauses.filter((d) => d.required).length;
   const totalRequired = requiredClauses.length;
   const pct = Math.round(coverageScore * 100);
 
+  const hasWarnings =
+    crossRefWarnings.length > 0 ||
+    contradictionWarnings.length > 0 ||
+    mixedDocWarnings.length > 0 ||
+    materialUnsupported.length > 0 ||
+    missingExpected.length > 0;
+
   let summary: string;
-  if (missingRequiredIds.length === 0 && materialUnsupported.length === 0) {
+  if (!hasWarnings && missingRequiredIds.length === 0) {
+    // Only safe to claim "no material gaps" when ALL warning buckets are empty
     summary = `All ${totalRequired} required clauses detected (${pct}% coverage) — no material gaps identified.`;
   } else if (materialMissingIds.length > 0) {
-    summary = `${detectedRequired}/${totalRequired} required clauses detected (${pct}% coverage) — ${materialMissingIds.length} material clause(s) absent: ${materialMissingIds.join(", ")}.`;
+    const warningNote = hasWarnings ? ` Additional warnings require review.` : "";
+    summary = `${detectedRequired}/${totalRequired} required clauses detected (${pct}% coverage) — ${materialMissingIds.length} material clause(s) absent: ${materialMissingIds.join(", ")}.${warningNote}`;
   } else if (missingRequiredIds.length > 0) {
-    summary = `${detectedRequired}/${totalRequired} required clauses detected (${pct}% coverage) — ${missingRequiredIds.length} required clause(s) not found.`;
-  } else {
+    const warningNote = hasWarnings ? ` Additional warnings require review.` : "";
+    summary = `${detectedRequired}/${totalRequired} required clauses detected (${pct}% coverage) — ${missingRequiredIds.length} required clause(s) not found.${warningNote}`;
+  } else if (materialUnsupported.length > 0) {
     summary = `${detectedRequired}/${totalRequired} required clauses detected (${pct}% coverage) — ${materialUnsupported.length} unmodeled material section(s) require review.`;
+  } else {
+    // All required clauses detected but warnings present
+    const warningParts: string[] = [];
+    if (contradictionWarnings.length > 0)
+      warningParts.push(`${contradictionWarnings.length} contradiction(s)`);
+    if (mixedDocWarnings.length > 0)
+      warningParts.push(`${mixedDocWarnings.length} mixed-document signal(s)`);
+    if (crossRefWarnings.length > 0)
+      warningParts.push(`${crossRefWarnings.length} unresolved cross-reference(s)`);
+    summary = `${detectedRequired}/${totalRequired} required clauses detected (${pct}% coverage) — review required: ${warningParts.join(", ")}.`;
   }
 
   return {
@@ -865,5 +1250,7 @@ export function reviewDocumentCoverage(
     cross_reference_warnings: crossRefWarnings,
     exhibits_detected: exhibits,
     coverage_summary: summary,
+    contradiction_warnings: contradictionWarnings,
+    mixed_document_warnings: mixedDocWarnings,
   };
 }

@@ -997,7 +997,26 @@ interface AnalyzeApiResponse {
   boilerplate_unsupported_sections: UnsupportedSection[];
   cross_reference_warnings: CrossReferenceWarning[];
   exhibits_detected: string[];
-  redraft_available: boolean;
+  // Fix 3: contradiction warnings
+  contradiction_warnings: Array<{
+    clause_family: string;
+    detected_values: string[];
+    warning: string;
+  }>;
+  // Fix 4: mixed-document warnings
+  mixed_document_warnings: Array<{
+    foreign_clause_family: string;
+    foreign_doc_class: string;
+    evidence: string;
+    warning: string;
+  }>;
+  // Fix 1: authoritative draft generation gate (replaces local draftBlocked reconstruction)
+  draft_generation_gate: {
+    allowed: boolean;
+    blocking_reasons: string[];
+    threshold: ReviewThreshold;
+  };
+  redraft_available: boolean; // backward compat only — use draft_generation_gate.allowed
   trace: {
     latency_ms: number;
     model_used: string;
@@ -1181,12 +1200,9 @@ function AnalysisResultCard({
   const normJurisdiction = (data.normalized_intake as any)?.jurisdiction as string | undefined;
   const hasIncompleteSplit = data.normalization_notes.some((n) => n.field === "equity.split");
 
-  // Draft generation gate: threshold + coverage
-  const threshold = data.governance.review_threshold;
-  const draftBlocked =
-    threshold === "blocked" ||
-    threshold === "counsel_review_required" ||
-    data.coverage_score < 0.7;
+  // Fix 1: Use backend-computed gate — do NOT reconstruct locally.
+  // The backend is the single source of truth for draft generation eligibility.
+  const draftBlocked = !data.draft_generation_gate.allowed;
 
   return (
     <div className="space-y-3">
@@ -1695,7 +1711,7 @@ function AnalysisResultCard({
         {draftBlocked ? (
           <div className={[
             "w-full px-3 py-2.5 rounded text-[10px] font-mono text-center border",
-            threshold === "blocked"
+            data.draft_generation_gate.threshold === "blocked"
               ? "bg-red-500/8 border-red-500/20 text-red-600"
               : "bg-amber-500/8 border-amber-500/20 text-amber-700 dark:text-amber-400",
           ].join(" ")}>
@@ -1704,7 +1720,7 @@ function AnalysisResultCard({
               <span className="font-semibold">Human review required before draft generation</span>
             </div>
             <span className="text-[9px] opacity-80">
-              Threshold: {threshold} · Coverage: {Math.round(data.coverage_score * 100)}%
+              {data.draft_generation_gate.blocking_reasons.join(" · ")}
             </span>
           </div>
         ) : (

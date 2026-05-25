@@ -483,13 +483,35 @@ router.post("/v1/legal/draft/analyze", async (req: Request, res: Response) => {
     const analysis_id = crypto.randomUUID();
     const sourceHash  = hashText(contract_text).slice(0, 16);
 
-    // Draft generation gate: threshold must be self_review_ok or business_review_required
-    // AND coverage_score >= 0.7. Source text is never logged — hash only.
-    const redraft_available =
+    // ── Fix 1: Single gate source of truth ────────────────────────────────────
+    // Backend computes the gate once. UI must use draft_generation_gate.allowed only.
+    // redraft_available is kept for backward compatibility but is no longer authoritative.
+    const gateAllowed =
       extractResult.extraction_confidence >= 0.5 &&
       verifierResult.passed &&
       (finalThreshold === "self_review_ok" || finalThreshold === "business_review_required") &&
       coverageResult.coverage_score >= 0.7;
+
+    const gateBlockingReasons: string[] = [];
+    if (extractResult.extraction_confidence < 0.5)
+      gateBlockingReasons.push(`extraction_confidence ${extractResult.extraction_confidence.toFixed(2)} < 0.5`);
+    if (!verifierResult.passed)
+      gateBlockingReasons.push("verifier did not pass");
+    if (finalThreshold === "counsel_review_required")
+      gateBlockingReasons.push("threshold is counsel_review_required");
+    if (finalThreshold === "blocked")
+      gateBlockingReasons.push("threshold is blocked");
+    if (coverageResult.coverage_score < 0.7)
+      gateBlockingReasons.push(`coverage_score ${coverageResult.coverage_score.toFixed(2)} < 0.7`);
+
+    const draft_generation_gate = {
+      allowed:          gateAllowed,
+      blocking_reasons: gateBlockingReasons,
+      threshold:        finalThreshold,
+    };
+
+    // Backward-compat mirror — not authoritative
+    const redraft_available = gateAllowed;
 
     return res.status(200).json({
       analysis_id,
@@ -521,19 +543,23 @@ router.post("/v1/legal/draft/analyze", async (req: Request, res: Response) => {
         not_legal_advice:  true,
         privilege_warning: PRIVILEGE_WARNING,
       },
-      // Coverage (Lane B)
-      coverage_score:                  coverageResult.coverage_score,
-      coverage_summary:                coverageResult.coverage_summary,
-      expected_clauses:                coverageResult.expected_clauses,
-      detected_clauses:                coverageResult.detected_clauses,
-      missing_expected_clauses:        coverageResult.missing_expected_clauses,
-      missing_required_clause_ids:     coverageResult.missing_required_clause_ids,
-      material_missing_clause_ids:     coverageResult.material_missing_clause_ids,
-      material_unsupported_sections:   coverageResult.material_unsupported_sections,
+      // Fix 1: authoritative draft generation gate
+      draft_generation_gate,
+      redraft_available,   // backward compat only — use draft_generation_gate.allowed
+      // Coverage (Lane B) — Fixes 3 + 4: new warning fields
+      coverage_score:                   coverageResult.coverage_score,
+      coverage_summary:                 coverageResult.coverage_summary,
+      expected_clauses:                 coverageResult.expected_clauses,
+      detected_clauses:                 coverageResult.detected_clauses,
+      missing_expected_clauses:         coverageResult.missing_expected_clauses,
+      missing_required_clause_ids:      coverageResult.missing_required_clause_ids,
+      material_missing_clause_ids:      coverageResult.material_missing_clause_ids,
+      material_unsupported_sections:    coverageResult.material_unsupported_sections,
       boilerplate_unsupported_sections: coverageResult.boilerplate_unsupported_sections,
-      cross_reference_warnings:        coverageResult.cross_reference_warnings,
-      exhibits_detected:               coverageResult.exhibits_detected,
-      redraft_available,
+      cross_reference_warnings:         coverageResult.cross_reference_warnings,
+      exhibits_detected:                coverageResult.exhibits_detected,
+      contradiction_warnings:           coverageResult.contradiction_warnings,
+      mixed_document_warnings:          coverageResult.mixed_document_warnings,
       trace: {
         latency_ms:            Date.now() - start,
         model_used:            extractResult.model_used,

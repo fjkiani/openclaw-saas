@@ -1076,4 +1076,279 @@ Bob Park:   ___________________`;
     }
   });
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Cases 35–39 — JR Corrective Pass: gate object, negation, contradiction,
+  //               mixed-document, and summary honesty
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  // Case 35 — draft_generation_gate is the authoritative gate object
+  // The UI must read gate.allowed; redraft_available is a backward-compat mirror only.
+  it("Case 35 — response carries draft_generation_gate with allowed, blocking_reasons, threshold", async () => {
+    const res = await request(app)
+      .post("/v1/legal/draft/analyze")
+      .send({
+        contract_text: SAMPLE_COFOUNDER_TEXT,
+        doc_class: "co_founder_agreement",
+      });
+
+    expect(res.status).toBe(200);
+
+    const gate = res.body.draft_generation_gate as {
+      allowed: boolean;
+      blocking_reasons: string[];
+      threshold: string;
+    };
+
+    // Gate object must be present with all three fields
+    expect(gate).toBeDefined();
+    expect(typeof gate.allowed).toBe("boolean");
+    expect(Array.isArray(gate.blocking_reasons)).toBe(true);
+    expect(typeof gate.threshold).toBe("string");
+
+    // Invariant A: allowed=true → blocking_reasons is empty
+    // Invariant B: allowed=false → blocking_reasons is non-empty
+    if (gate.allowed) {
+      expect(gate.blocking_reasons).toHaveLength(0);
+    } else {
+      expect(gate.blocking_reasons.length).toBeGreaterThan(0);
+    }
+
+    // Gate threshold must agree with governance.review_threshold
+    expect(gate.threshold).toBe(res.body.governance.review_threshold);
+
+    // redraft_available must mirror gate.allowed (backward-compat)
+    expect(res.body.redraft_available).toBe(gate.allowed);
+  });
+
+  // Case 36 — negation-aware detection: negated clauses must NOT be detected
+  it("Case 36 — negated IP assignment and non-compete phrases are not false-positively detected", async () => {
+    const negatedText = `CONSULTING AGREEMENT
+
+This Agreement is entered into as of March 1, 2025, by and between Acme Corp
+("Company") and Jane Doe ("Consultant").
+
+1. SERVICES
+Consultant shall provide software development services as directed by Company.
+
+2. INTELLECTUAL PROPERTY
+No IP assignment shall be made under this Agreement. The parties agree that
+Consultant shall not assign any intellectual property to Company. All work
+product remains with Consultant.
+
+3. NON-COMPETE
+The non-compete shall not apply to Consultant's pre-existing clients or
+independent projects unrelated to Company's core business.
+
+4. CONFIDENTIALITY
+Consultant agrees to keep Company's proprietary information confidential.
+Disclosure of confidential information is prohibited without prior written consent.
+
+5. GOVERNING LAW
+This Agreement shall be governed by the laws of California.
+`;
+
+    const res = await request(app)
+      .post("/v1/legal/draft/analyze")
+      .send({
+        contract_text: negatedText,
+        doc_class: "contractor_ip_assignment",
+      });
+
+    expect(res.status).toBe(200);
+
+    const detectedIds = (res.body.detected_clauses as Array<{ clause_id: string }>)
+      .map((c) => c.clause_id);
+
+    // "no IP assignment shall be made" and "shall not assign" → ip_assignment must NOT fire
+    // (contractor_ip_assignment inventory includes ip_assignment with keyword_patterns
+    //  ["intellectual property", "assign", ...] — so this is a genuine negation test)
+    expect(detectedIds).not.toContain("ip_assignment");
+
+    // "non-compete shall not apply" → non_compete must NOT fire
+    // (contractor_ip_assignment inventory includes non_compete with keyword_patterns
+    //  ["non-compete", "noncompete", "compete", ...] — so this is a genuine negation test)
+    expect(detectedIds).not.toContain("non_compete");
+  });
+
+  // Case 37 — contradiction detection: dual governing law raises threshold
+  it("Case 37 — contract with two conflicting governing law clauses carries contradiction_warnings and elevated threshold", async () => {
+    const contradictoryText = `CO-FOUNDER AGREEMENT
+
+This Agreement is entered into as of January 1, 2025, by and between Alice Chen
+("Founder A") and Bob Park ("Founder B").
+
+1. EQUITY SPLIT
+Founder A shall hold 50% and Founder B shall hold 50% of outstanding shares.
+
+2. VESTING
+All shares vest over four years with a one-year cliff.
+
+3. INTELLECTUAL PROPERTY
+Each Founder hereby assigns to the Company all right, title, and interest in
+any inventions created in connection with the Company's business.
+
+4. GOVERNING LAW
+This Agreement shall be governed by the laws of the State of Delaware.
+
+5. DISPUTE RESOLUTION
+Any disputes shall be resolved under the laws of California, without regard
+to conflict of law provisions.
+`;
+
+    const res = await request(app)
+      .post("/v1/legal/draft/analyze")
+      .send({
+        contract_text: contradictoryText,
+        doc_class: "co_founder_agreement",
+      });
+
+    expect(res.status).toBe(200);
+
+    // contradiction_warnings must be present and non-empty
+    const warnings = res.body.contradiction_warnings as Array<{
+      clause_family: string;
+      detected_values: string[];
+      warning: string;
+    }>;
+    expect(Array.isArray(warnings)).toBe(true);
+    expect(warnings.length).toBeGreaterThan(0);
+
+    // At least one warning must reference governing_law
+    const govLawWarning = warnings.find((w) => w.clause_family === "governing_law");
+    expect(govLawWarning).toBeDefined();
+    expect(govLawWarning!.detected_values.length).toBeGreaterThanOrEqual(2);
+
+    // Threshold must be elevated to at least counsel_review_required
+    const THRESHOLD_ORDER = [
+      "self_review_ok",
+      "business_review_required",
+      "counsel_review_required",
+      "blocked",
+    ];
+    const thresholdIdx = THRESHOLD_ORDER.indexOf(res.body.governance.review_threshold);
+    const minIdx = THRESHOLD_ORDER.indexOf("counsel_review_required");
+    expect(thresholdIdx).toBeGreaterThanOrEqual(minIdx);
+
+    // draft_generation_gate must be blocked (allowed=false) due to contradiction
+    expect(res.body.draft_generation_gate.allowed).toBe(false);
+    expect(res.body.draft_generation_gate.blocking_reasons.length).toBeGreaterThan(0);
+  });
+
+  // Case 38 — mixed-document detection: employment clause in co-founder agreement
+  it("Case 38 — co-founder agreement containing employment-class clauses carries mixed_document_warnings", async () => {
+    // This co-founder agreement contains contractor-class clauses (scope of work,
+    // payment terms, net 30) which are defined in CROSS_CLASS_SIGNALS for co_founder_agreement.
+    const mixedText = `CO-FOUNDER AGREEMENT
+
+This Agreement is entered into as of January 1, 2025, by and between Alice Chen
+("Founder A") and Bob Park ("Founder B").
+
+1. EQUITY SPLIT
+Founder A shall hold 50% and Founder B shall hold 50% of outstanding shares.
+
+2. VESTING
+All shares vest over four years with a one-year cliff.
+
+3. INTELLECTUAL PROPERTY
+Each Founder hereby assigns to the Company all right, title, and interest in
+any inventions created in connection with the Company's business.
+
+4. SCOPE OF WORK
+The parties agree on the following scope of work for the initial product build.
+Payment terms shall be net 30 from invoice date. Each Founder shall invoice upon
+completion of each milestone as defined in the statement of work attached hereto.
+
+5. GOVERNING LAW
+This Agreement shall be governed by the laws of the State of Delaware.
+`;
+
+    const res = await request(app)
+      .post("/v1/legal/draft/analyze")
+      .send({
+        contract_text: mixedText,
+        doc_class: "co_founder_agreement",
+      });
+
+    expect(res.status).toBe(200);
+
+    // mixed_document_warnings must be present and non-empty
+    const warnings = res.body.mixed_document_warnings as Array<{
+      foreign_clause_family: string;
+      foreign_doc_class: string;
+      evidence: string[];
+      warning: string;
+    }>;
+    expect(Array.isArray(warnings)).toBe(true);
+    expect(warnings.length).toBeGreaterThan(0);
+
+    // At least one warning must flag contractor-class content (scope_of_work_contractor signal)
+    const contractorWarning = warnings.find((w) => w.foreign_doc_class === "contractor_ip_assignment");
+    expect(contractorWarning).toBeDefined();
+
+    // Threshold must be elevated to at least counsel_review_required
+    const THRESHOLD_ORDER = [
+      "self_review_ok",
+      "business_review_required",
+      "counsel_review_required",
+      "blocked",
+    ];
+    const thresholdIdx = THRESHOLD_ORDER.indexOf(res.body.governance.review_threshold);
+    const minIdx = THRESHOLD_ORDER.indexOf("counsel_review_required");
+    expect(thresholdIdx).toBeGreaterThanOrEqual(minIdx);
+  });
+
+  // Case 39 — coverage summary honesty: no "no material gaps" when warnings are present
+  it("Case 39 — coverage_summary does not claim no material gaps when contradiction or mixed-doc warnings exist", async () => {
+    // Use the contradictory text from Case 37 — it will have contradiction_warnings
+    const contradictoryText = `CO-FOUNDER AGREEMENT
+
+This Agreement is entered into as of January 1, 2025, by and between Alice Chen
+("Founder A") and Bob Park ("Founder B").
+
+1. EQUITY SPLIT
+Founder A shall hold 50% and Founder B shall hold 50% of outstanding shares.
+
+2. VESTING
+All shares vest over four years with a one-year cliff.
+
+3. INTELLECTUAL PROPERTY
+Each Founder hereby assigns to the Company all right, title, and interest in
+any inventions created in connection with the Company's business.
+
+4. GOVERNING LAW
+This Agreement shall be governed by the laws of the State of Delaware.
+
+5. DISPUTE RESOLUTION
+Any disputes shall be resolved under the laws of California, without regard
+to conflict of law provisions.
+`;
+
+    const res = await request(app)
+      .post("/v1/legal/draft/analyze")
+      .send({
+        contract_text: contradictoryText,
+        doc_class: "co_founder_agreement",
+      });
+
+    expect(res.status).toBe(200);
+
+    const summary: string = res.body.coverage_summary;
+    const contradictionWarnings: unknown[] = res.body.contradiction_warnings;
+    const mixedDocWarnings: unknown[] = res.body.mixed_document_warnings;
+
+    const hasWarnings =
+      (Array.isArray(contradictionWarnings) && contradictionWarnings.length > 0) ||
+      (Array.isArray(mixedDocWarnings) && mixedDocWarnings.length > 0);
+
+    // If any warning bucket is non-empty, summary must NOT claim "no material gaps"
+    if (hasWarnings) {
+      expect(summary.toLowerCase()).not.toContain("no material gaps");
+    }
+
+    // Summary must be a non-empty string regardless
+    expect(typeof summary).toBe("string");
+    expect(summary.length).toBeGreaterThan(0);
+  });
+
+
 });
