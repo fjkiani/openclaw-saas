@@ -32,7 +32,7 @@ services:
         value: https://openclaw-benchmark.onrender.com
       # CORS: set to the exact URL of the openclaw-saas static site on Render
       - key: FRONTEND_URL
-        value: https://openclaw-saas-z2j8.onrender.com
+        value: https://openclaw-lfky.onrender.com
 
   - type: web
     name: openclaw-saas
@@ -48,9 +48,9 @@ services:
       # which forwards them to Clerk with the correct Clerk-Proxy-Url header.
       # IMPORTANT: replace the hostname below with your actual openclaw-api Render URL.
       - key: VITE_CLERK_PROXY_URL
-        value: https://openclaw-api-8j2z.onrender.com/api/__clerk
+        value: https://openclaw-api-b9wb.onrender.com/api/__clerk
       - key: VITE_API_URL
-        value: https://openclaw-api-8j2z.onrender.com
+        value: https://openclaw-api-b9wb.onrender.com
       - key: VITE_ZOA_SERVICE_URL
         value: https://openclaw-benchmark.onrender.com/api/v1/zoa
       - key: VITE_ARCHON_FACTORY_URL
@@ -100,7 +100,7 @@ services:
       - key: BENCHMARK_SERVICE_URL
         value: https://openclaw-benchmark.onrender.com
       - key: OPENCLAW_API_URL
-        value: https://openclaw-api-8j2z.onrender.com
+        value: https://openclaw-api-b9wb.onrender.com
       - key: ARCHON_SERVICE_URL
         value: https://archon-zeta.onrender.com
 
