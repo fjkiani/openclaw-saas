@@ -936,4 +936,144 @@ Bob Park:   ___________________`;
     expect(Array.isArray(res.body.not_applicable_fields)).toBe(true);
   });
 
+  // Case 26 — coverage fields present in 200 response
+  it("Case 26 — coverage fields present in 200 response", async () => {
+    const res = await request(app)
+      .post("/v1/legal/draft/analyze")
+      .send({
+        contract_text: SAMPLE_COFOUNDER_TEXT,
+        doc_class: "co_founder_agreement",
+      });
+
+    expect(res.status).toBe(200);
+
+    // coverage_score: number 0–1
+    expect(typeof res.body.coverage_score).toBe("number");
+    expect(res.body.coverage_score).toBeGreaterThanOrEqual(0);
+    expect(res.body.coverage_score).toBeLessThanOrEqual(1);
+
+    // coverage_summary: non-empty string
+    expect(typeof res.body.coverage_summary).toBe("string");
+    expect(res.body.coverage_summary.length).toBeGreaterThan(0);
+
+    // expected_clauses: array with entries
+    expect(Array.isArray(res.body.expected_clauses)).toBe(true);
+    expect(res.body.expected_clauses.length).toBeGreaterThan(0);
+
+    // detected_clauses: array
+    expect(Array.isArray(res.body.detected_clauses)).toBe(true);
+
+    // missing_expected_clauses: array
+    expect(Array.isArray(res.body.missing_expected_clauses)).toBe(true);
+
+    // missing_required_clause_ids: array of strings
+    expect(Array.isArray(res.body.missing_required_clause_ids)).toBe(true);
+
+    // material_missing_clause_ids: array of strings
+    expect(Array.isArray(res.body.material_missing_clause_ids)).toBe(true);
+
+    // material_unsupported_sections: array
+    expect(Array.isArray(res.body.material_unsupported_sections)).toBe(true);
+
+    // boilerplate_unsupported_sections: array
+    expect(Array.isArray(res.body.boilerplate_unsupported_sections)).toBe(true);
+
+    // cross_reference_warnings: array
+    expect(Array.isArray(res.body.cross_reference_warnings)).toBe(true);
+
+    // exhibits_detected: array
+    expect(Array.isArray(res.body.exhibits_detected)).toBe(true);
+
+    // vendor_policy_version in trace
+    expect(res.body.trace).toBeDefined();
+    expect(typeof res.body.trace.vendor_policy_version).toBe("string");
+    expect(res.body.trace.vendor_policy_version).toBe("v1.0.0");
+  });
+
+  // Case 27 — SAMPLE_COFOUNDER_TEXT detects preamble, equity_split, vesting_schedule,
+  //           ip_assignment, and governing_law; does NOT detect election_83b
+  it("Case 27 — SAMPLE_COFOUNDER_TEXT detects expected clauses with precision", async () => {
+    const res = await request(app)
+      .post("/v1/legal/draft/analyze")
+      .send({
+        contract_text: SAMPLE_COFOUNDER_TEXT,
+        doc_class: "co_founder_agreement",
+      });
+
+    expect(res.status).toBe(200);
+
+    const detectedIds = (res.body.detected_clauses as Array<{ clause_id: string }>)
+      .map((c) => c.clause_id);
+
+    // These clauses are unambiguously present in SAMPLE_COFOUNDER_TEXT
+    expect(detectedIds).toContain("preamble");
+    expect(detectedIds).toContain("equity_split");
+    expect(detectedIds).toContain("vesting_schedule");
+    expect(detectedIds).toContain("ip_assignment");
+    expect(detectedIds).toContain("governing_law");
+
+    // These clauses are NOT in SAMPLE_COFOUNDER_TEXT — must be in missing_expected_clauses
+    const missingIds = (res.body.missing_expected_clauses as Array<{ clause_id: string }>)
+      .map((c) => c.clause_id);
+    expect(missingIds).toContain("election_83b");
+    expect(missingIds).toContain("deadlock_resolution");
+    expect(missingIds).toContain("termination_and_buyout");
+
+    // Detected clauses must have confidence field with valid value
+    const preamble = (res.body.detected_clauses as Array<{ clause_id: string; confidence: string }>)
+      .find((c) => c.clause_id === "preamble");
+    expect(preamble).toBeDefined();
+    expect(["high", "medium", "low"]).toContain(preamble!.confidence);
+
+    // Precision check: election_83b must NOT be detected (no 83(b) language in sample)
+    expect(detectedIds).not.toContain("election_83b");
+  });
+
+  // Case 28 — coverage threshold escalates final governance threshold
+  it("Case 28 — low coverage or material missing clauses escalate governance.review_threshold", async () => {
+    const res = await request(app)
+      .post("/v1/legal/draft/analyze")
+      .send({
+        contract_text: SAMPLE_COFOUNDER_TEXT,
+        doc_class: "co_founder_agreement",
+      });
+
+    expect(res.status).toBe(200);
+
+    const THRESHOLD_ORDER = [
+      "self_review_ok",
+      "business_review_required",
+      "counsel_review_required",
+      "blocked",
+    ];
+
+    const coverageScore: number = res.body.coverage_score;
+    const threshold: string = res.body.governance.review_threshold;
+    const materialMissing: string[] = res.body.material_missing_clause_ids;
+
+    // governance.review_threshold must be a valid value
+    expect(THRESHOLD_ORDER).toContain(threshold);
+
+    // If coverage_score < 0.7 OR material clauses are missing,
+    // threshold must be at least business_review_required
+    if (coverageScore < 0.7 || materialMissing.length > 0) {
+      const thresholdIdx = THRESHOLD_ORDER.indexOf(threshold);
+      const minIdx = THRESHOLD_ORDER.indexOf("business_review_required");
+      expect(thresholdIdx).toBeGreaterThanOrEqual(minIdx);
+    }
+
+    // If material_missing_clause_ids is non-empty, threshold must be
+    // at least counsel_review_required
+    if (materialMissing.length > 0) {
+      const thresholdIdx = THRESHOLD_ORDER.indexOf(threshold);
+      const minIdx = THRESHOLD_ORDER.indexOf("counsel_review_required");
+      expect(thresholdIdx).toBeGreaterThanOrEqual(minIdx);
+    }
+
+    // redraft_available must be false when coverage_score < 0.7
+    if (coverageScore < 0.7) {
+      expect(res.body.redraft_available).toBe(false);
+    }
+  });
+
 });

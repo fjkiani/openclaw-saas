@@ -921,6 +921,34 @@ interface MissingRequiredField {
   risk_if_absent: string;
 }
 
+interface DetectedClause {
+  clause_id: string;
+  label: string;
+  required: boolean;
+  confidence: "high" | "medium" | "low";
+  matched_patterns: string[];
+}
+
+interface UnsupportedSection {
+  heading: string;
+  reason: string;
+  review_threshold: ReviewThreshold;
+}
+
+interface CrossReferenceWarning {
+  reference: string;
+  context: string;
+  warning: string;
+}
+
+interface ExpectedClause {
+  clause_id: string;
+  label: string;
+  required: boolean;
+  risk_if_absent: string;
+  review_threshold: ReviewThreshold;
+}
+
 interface AnalyzeApiResponse {
   analysis_id: string;
   doc_class: DocClass;
@@ -957,11 +985,24 @@ interface AnalyzeApiResponse {
     not_legal_advice: boolean;
     privilege_warning: string;
   };
+  // Coverage (Lane B)
+  coverage_score: number;
+  coverage_summary: string;
+  expected_clauses: ExpectedClause[];
+  detected_clauses: DetectedClause[];
+  missing_expected_clauses: ExpectedClause[];
+  missing_required_clause_ids: string[];
+  material_missing_clause_ids: string[];
+  material_unsupported_sections: UnsupportedSection[];
+  boilerplate_unsupported_sections: UnsupportedSection[];
+  cross_reference_warnings: CrossReferenceWarning[];
+  exhibits_detected: string[];
   redraft_available: boolean;
   trace: {
     latency_ms: number;
     model_used: string;
     fallback_used: boolean;
+    vendor_policy_version?: string;
   };
 }
 
@@ -1103,6 +1144,22 @@ function CollapsibleSection({
   );
 }
 
+function CoverageScoreBar({ score }: { score: number }) {
+  const pct = Math.round(score * 100);
+  const color =
+    pct >= 90 ? "bg-green-500" :
+    pct >= 70 ? "bg-amber-400" :
+    pct >= 50 ? "bg-orange-500" : "bg-red-500";
+  return (
+    <div className="flex items-center gap-2">
+      <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
+        <div className={`h-full rounded-full ${color}`} style={{ width: `${pct}%` }} />
+      </div>
+      <span className="text-[10px] font-mono text-muted-foreground shrink-0">{pct}%</span>
+    </div>
+  );
+}
+
 function AnalysisResultCard({
   data,
   onGenerateDraft,
@@ -1124,8 +1181,24 @@ function AnalysisResultCard({
   const normJurisdiction = (data.normalized_intake as any)?.jurisdiction as string | undefined;
   const hasIncompleteSplit = data.normalization_notes.some((n) => n.field === "equity.split");
 
+  // Draft generation gate: threshold + coverage
+  const threshold = data.governance.review_threshold;
+  const draftBlocked =
+    threshold === "blocked" ||
+    threshold === "counsel_review_required" ||
+    data.coverage_score < 0.7;
+
   return (
     <div className="space-y-3">
+      {/* ── Extraction completeness disclaimer (persistent, non-dismissable) ── */}
+      <div className="flex items-start gap-2 px-2.5 py-2 rounded bg-amber-500/8 border border-amber-500/20">
+        <AlertTriangle className="w-3 h-3 text-amber-500 mt-0.5 shrink-0" />
+        <p className="text-[10px] font-mono text-amber-700 dark:text-amber-400 leading-relaxed">
+          Structured extraction covers only recognized fields. Review Document Coverage
+          and Governance sections before relying on this analysis.
+        </p>
+      </div>
+
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div className="flex items-center gap-2">
@@ -1378,7 +1451,155 @@ function AnalysisResultCard({
         </div>
       </CollapsibleSection>
 
-      {/* 3. Governance + Verification */}
+      {/* 3. Document Coverage */}
+      <CollapsibleSection title="Document Coverage" defaultOpen>
+        <div className="space-y-3">
+          {/* Score bar + summary */}
+          <div className="space-y-1.5">
+            <CoverageScoreBar score={data.coverage_score} />
+            <p className="text-[10px] font-mono text-muted-foreground leading-relaxed">
+              {data.coverage_summary}
+            </p>
+            <ThresholdBadge threshold={data.governance.review_threshold} />
+          </div>
+
+          {/* Detected clauses */}
+          {data.detected_clauses.length > 0 && (
+            <div>
+              <p className="text-[9px] font-mono text-muted-foreground uppercase tracking-widest mb-1">
+                Detected ({data.detected_clauses.filter((c) => c.required).length}/{data.expected_clauses.filter((c) => c.required).length} required)
+              </p>
+              <div className="flex flex-wrap gap-1">
+                {data.detected_clauses.map((c) => (
+                  <span
+                    key={c.clause_id}
+                    title={`Confidence: ${c.confidence} · ${c.matched_patterns.slice(0, 2).join(", ")}`}
+                    className={[
+                      "inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono border cursor-help",
+                      c.confidence === "high"
+                        ? "bg-green-500/10 text-green-700 border-green-500/20"
+                        : c.confidence === "medium"
+                        ? "bg-blue-500/10 text-blue-600 border-blue-500/20"
+                        : "bg-muted text-muted-foreground border-border",
+                    ].join(" ")}
+                  >
+                    <span className="opacity-60">{c.confidence === "high" ? "✓" : "~"}</span>
+                    {c.label}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Missing expected clauses */}
+          {data.missing_expected_clauses.filter((c) => c.required).length > 0 && (
+            <div>
+              <p className="text-[9px] font-mono text-muted-foreground uppercase tracking-widest mb-1">
+                Missing required clauses
+              </p>
+              <div className="flex flex-wrap gap-1">
+                {data.missing_expected_clauses
+                  .filter((c) => c.required)
+                  .map((c) => (
+                    <span
+                      key={c.clause_id}
+                      title={c.risk_if_absent}
+                      className={[
+                        "inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-mono border cursor-help",
+                        data.material_missing_clause_ids.includes(c.clause_id)
+                          ? "bg-red-500/10 text-red-500 border-red-500/20"
+                          : "bg-amber-500/10 text-amber-600 border-amber-500/20",
+                      ].join(" ")}
+                    >
+                      {data.material_missing_clause_ids.includes(c.clause_id) && (
+                        <AlertTriangle className="w-2.5 h-2.5 mr-0.5 shrink-0" />
+                      )}
+                      {c.label}
+                    </span>
+                  ))}
+              </div>
+            </div>
+          )}
+
+          {/* Material unsupported sections */}
+          {data.material_unsupported_sections.length > 0 && (
+            <div>
+              <p className="text-[9px] font-mono text-muted-foreground uppercase tracking-widest mb-1">
+                Unmodeled material sections
+              </p>
+              <div className="space-y-1">
+                {data.material_unsupported_sections.map((s, i) => (
+                  <div key={i} className="flex items-start gap-1.5 text-[10px] font-mono">
+                    <ShieldAlert className="w-3 h-3 text-red-500 mt-0.5 shrink-0" />
+                    <div>
+                      <span className="text-foreground font-semibold">{s.heading}</span>
+                      <span className="text-muted-foreground"> — {s.reason}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Boilerplate unsupported sections */}
+          {data.boilerplate_unsupported_sections.length > 0 && (
+            <div>
+              <p className="text-[9px] font-mono text-muted-foreground uppercase tracking-widest mb-1">
+                Boilerplate sections (not modeled)
+              </p>
+              <div className="flex flex-wrap gap-1">
+                {data.boilerplate_unsupported_sections.map((s, i) => (
+                  <span
+                    key={i}
+                    title={s.reason}
+                    className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-mono bg-muted text-muted-foreground border border-border cursor-help"
+                  >
+                    {s.heading}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Exhibits */}
+          {data.exhibits_detected.length > 0 && (
+            <div>
+              <p className="text-[9px] font-mono text-muted-foreground uppercase tracking-widest mb-1">
+                Schedules / Exhibits detected
+              </p>
+              <div className="flex flex-wrap gap-1">
+                {data.exhibits_detected.map((e) => (
+                  <span
+                    key={e}
+                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono bg-muted text-muted-foreground border border-border"
+                  >
+                    📎 {e}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Cross-reference warnings */}
+          {data.cross_reference_warnings.length > 0 && (
+            <div>
+              <p className="text-[9px] font-mono text-muted-foreground uppercase tracking-widest mb-1">
+                Cross-reference warnings
+              </p>
+              <div className="space-y-1">
+                {data.cross_reference_warnings.map((w, i) => (
+                  <div key={i} className="flex items-start gap-1.5 text-[10px] font-mono">
+                    <AlertTriangle className="w-3 h-3 text-amber-500 mt-0.5 shrink-0" />
+                    <span className="text-muted-foreground">{w.warning}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </CollapsibleSection>
+
+      {/* 4. Governance + Verification */}
       <CollapsibleSection title="Governance + Verification" defaultOpen>
         <div className="space-y-2">
           <div className="flex items-center gap-2 flex-wrap">
@@ -1445,7 +1666,7 @@ function AnalysisResultCard({
         </div>
       </CollapsibleSection>
 
-      {/* 4. Assumptions */}
+      {/* 5. Assumptions */}
       {data.assumptions.length > 0 && (
         <CollapsibleSection title="Assumptions">
           <ul className="space-y-0.5">
@@ -1459,7 +1680,7 @@ function AnalysisResultCard({
         </CollapsibleSection>
       )}
 
-      {/* 5. Source Text */}
+      {/* 6. Source Text */}
       <CollapsibleSection title="Source Text">
         <pre className="text-[9px] font-mono text-muted-foreground whitespace-pre-wrap break-words max-h-72 overflow-y-auto leading-relaxed">
           {data.source.text}
@@ -1469,9 +1690,24 @@ function AnalysisResultCard({
         </p>
       </CollapsibleSection>
 
-      {/* Generate Clean Draft */}
-      {data.redraft_available && (
-        <div className="pt-1 border-t border-border">
+      {/* Generate Clean Draft — gated on threshold + coverage */}
+      <div className="pt-1 border-t border-border">
+        {draftBlocked ? (
+          <div className={[
+            "w-full px-3 py-2.5 rounded text-[10px] font-mono text-center border",
+            threshold === "blocked"
+              ? "bg-red-500/8 border-red-500/20 text-red-600"
+              : "bg-amber-500/8 border-amber-500/20 text-amber-700 dark:text-amber-400",
+          ].join(" ")}>
+            <div className="flex items-center justify-center gap-1.5 mb-0.5">
+              <ShieldAlert className="w-3.5 h-3.5 shrink-0" />
+              <span className="font-semibold">Human review required before draft generation</span>
+            </div>
+            <span className="text-[9px] opacity-80">
+              Threshold: {threshold} · Coverage: {Math.round(data.coverage_score * 100)}%
+            </span>
+          </div>
+        ) : (
           <Button
             className="w-full text-xs font-mono"
             variant="outline"
@@ -1490,8 +1726,8 @@ function AnalysisResultCard({
               </>
             )}
           </Button>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }
