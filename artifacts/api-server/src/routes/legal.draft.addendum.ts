@@ -190,13 +190,28 @@ router.post("/v1/legal/draft", async (req: Request, res: Response) => {
 
     DraftArtifactStore.put(artifact);
 
+    // ── Attach verified_rationale to each section (v0.6) ─────────────────────
+    const sectionsWithVerifiedRationale = buildResult.sections.map((section) => {
+      const variant = section.variant_used
+        ? (CLAUSE_LIBRARY.find((v) => v.variant_id === section.variant_used) ?? null)
+        : null;
+      const verifiedRationale = buildVerifiedRationale(variant, intake.jurisdiction);
+      if (section.rationale) {
+        return {
+          ...section,
+          rationale: { ...section.rationale, verified_rationale: verifiedRationale },
+        };
+      }
+      return section;
+    });
+
     return res.status(200).json({
       draft_id,
       draft_receipt_token,
       doc_class: intake.doc_class,
       draft: {
         title,
-        sections: buildResult.sections,
+        sections: sectionsWithVerifiedRationale,
         full_text: buildResult.full_text,
       },
       section_map: buildResult.section_map,
