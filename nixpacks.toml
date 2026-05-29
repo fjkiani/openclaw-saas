@@ -1,10 +1,11 @@
-# Railway/Nixpacks build config — overrides auto-detected pnpm install step
-# to avoid lockfile version mismatch between Nixpacks pnpm and repo pnpm.
+# Railway/Nixpacks build config
+# - Skips typecheck (CI gate only; tsc not on PATH in Railway build env)
+# - Uses --no-frozen-lockfile to handle pnpm version differences
 [phases.install]
-cmds = ["npm install -g pnpm@latest && pnpm install --no-frozen-lockfile"]
+cmds = ["pnpm install --no-frozen-lockfile"]
 
 [phases.build]
-cmds = ["pnpm run typecheck:libs && pnpm --filter @workspace/api-server run build"]
+cmds = ["pnpm --filter @workspace/api-server run build"]
 
 [start]
 cmd = "node artifacts/api-server/dist/index.mjs"
