@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import type { VerifiedRationale } from "./verifiedRationale.js";
 
 // ── Doc classes ───────────────────────────────────────────────────────────────
 export type DocClass =
@@ -95,7 +96,7 @@ export interface VerifierResult {
   jurisdiction_escalations: JurisdictionFlag[];
 }
 
-// ── SectionRationale (v0.5) ───────────────────────────────────────────────────
+// ── SectionRationale (v0.6) ───────────────────────────────────────────────────
 // Defined here alongside DraftSection to avoid a circular import.
 // draftEngine.ts imports this type and re-exports it for convenience.
 export interface SectionRationale {
@@ -104,6 +105,7 @@ export interface SectionRationale {
   jurisdiction_note_applied: string | null;   // null = no note; never ""
   review_threshold: ReviewThreshold;
   assumptions_applied: string[];
+  verified_rationale?: VerifiedRationale;     // v0.6 — optional, backward-compatible
 }
 
 // ── DraftSection ──────────────────────────────────────────────────────────────

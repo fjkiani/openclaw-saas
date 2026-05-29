@@ -35,6 +35,10 @@ import { extractIntakeFromText } from "../lib/contractExtractor";
 import { normalizeExtractedIntake } from "../lib/contractNormalizer";
 import { reviewDocumentCoverage } from "../lib/documentCoverage";
 import type { UncertainField } from "../lib/contractExtractor";
+import { assessThreats } from "../lib/threatEscalation";
+import { evaluateAsymmetric } from "../lib/asymmetricEval";
+import { buildVerifiedRationale } from "../lib/verifiedRationale";
+import { CLAUSE_LIBRARY } from "../lib/clauseLibrary";
 
 const router = Router();
 // ── Safe-default substitution for normalized intake ──────────────────────────
@@ -479,7 +483,39 @@ router.post("/v1/legal/draft/analyze", async (req: Request, res: Response) => {
       coverageResult.review_threshold,
     );
 
-    // ── 7. Compose response ─────────────────────────────────────────────────
+    // ── 7a. Threat assessment ──────────────────────────────────────────────
+    const threatAssessment = assessThreats(contract_text, validDocClass);
+
+    // If auto_block, elevate governance threshold to blocked
+    const effectiveThreshold: import("../lib/draftReceiptEngine").ReviewThreshold =
+      threatAssessment.auto_block
+        ? "blocked"
+        : finalThreshold;
+
+    // ── 7b. Asymmetric evaluation ───────────────────────────────────────────
+    const asymmetricEval = evaluateAsymmetric(
+      contract_text,
+      coverageResult.detected_clauses,
+      validDocClass,
+    );
+
+    // ── 7c. Verified rationale — attach per section ─────────────────────────
+    const jurisdiction = draftReadyIntake.jurisdiction ?? "DE";
+    const sectionsWithRationale = buildResult.sections.map((section) => {
+      const variant = section.variant_used
+        ? (CLAUSE_LIBRARY.find((v) => v.variant_id === section.variant_used) ?? null)
+        : null;
+      const verifiedRationale = buildVerifiedRationale(variant, jurisdiction);
+      if (section.rationale) {
+        return {
+          ...section,
+          rationale: { ...section.rationale, verified_rationale: verifiedRationale },
+        };
+      }
+      return section;
+    });
+
+    // ── 8. Compose response ─────────────────────────────────────────────────
     const analysis_id = crypto.randomUUID();
     const sourceHash  = hashText(contract_text).slice(0, 16);
 
@@ -489,7 +525,7 @@ router.post("/v1/legal/draft/analyze", async (req: Request, res: Response) => {
     const gateAllowed =
       extractResult.extraction_confidence >= 0.5 &&
       verifierResult.passed &&
-      (finalThreshold === "self_review_ok" || finalThreshold === "business_review_required") &&
+      (effectiveThreshold === "self_review_ok" || effectiveThreshold === "business_review_required") &&
       coverageResult.coverage_score >= 0.7;
 
     const gateBlockingReasons: string[] = [];
@@ -497,17 +533,19 @@ router.post("/v1/legal/draft/analyze", async (req: Request, res: Response) => {
       gateBlockingReasons.push(`extraction_confidence ${extractResult.extraction_confidence.toFixed(2)} < 0.5`);
     if (!verifierResult.passed)
       gateBlockingReasons.push("verifier did not pass");
-    if (finalThreshold === "counsel_review_required")
+    if (effectiveThreshold === "counsel_review_required")
       gateBlockingReasons.push("threshold is counsel_review_required");
-    if (finalThreshold === "blocked")
+    if (effectiveThreshold === "blocked")
       gateBlockingReasons.push("threshold is blocked");
+    if (threatAssessment.auto_block)
+      gateBlockingReasons.push("threat_assessment auto_block: critical trigger detected");
     if (coverageResult.coverage_score < 0.7)
       gateBlockingReasons.push(`coverage_score ${coverageResult.coverage_score.toFixed(2)} < 0.7`);
 
     const draft_generation_gate = {
       allowed:          gateAllowed,
       blocking_reasons: gateBlockingReasons,
-      threshold:        finalThreshold,
+      threshold:        effectiveThreshold,
     };
 
     // Backward-compat mirror — not authoritative
@@ -533,12 +571,12 @@ router.post("/v1/legal/draft/analyze", async (req: Request, res: Response) => {
       uncertain_fields:         normalizeResult.uncertain_fields,
       // Draft pipeline
       draft_ready_intake:       draftReadyIntake,
-      sections:                 buildResult.sections,
+      sections:                 sectionsWithRationale,
       assumptions:              buildResult.assumptions,
       missing_decision_prompts: buildResult.missing_decision_prompts,
       verifier:                 verifierResult,
       governance: {
-        review_threshold:  finalThreshold,
+        review_threshold:  effectiveThreshold,
         artifact_status:   governanceResult.artifact_status,
         not_legal_advice:  true,
         privilege_warning: PRIVILEGE_WARNING,
@@ -560,6 +598,10 @@ router.post("/v1/legal/draft/analyze", async (req: Request, res: Response) => {
       exhibits_detected:                coverageResult.exhibits_detected,
       contradiction_warnings:           coverageResult.contradiction_warnings,
       mixed_document_warnings:          coverageResult.mixed_document_warnings,
+      // Threat assessment (Lane C)
+      threat_assessment:                threatAssessment,
+      // Asymmetric evaluation (Lane D)
+      asymmetric_eval:                  asymmetricEval,
       trace: {
         latency_ms:            Date.now() - start,
         model_used:            extractResult.model_used,

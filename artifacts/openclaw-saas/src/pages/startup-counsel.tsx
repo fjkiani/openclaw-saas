@@ -48,6 +48,14 @@ interface DraftSection {
     jurisdiction_note_applied: string | null;
     review_threshold: ReviewThreshold;
     assumptions_applied: string[];
+    verified_rationale?: {
+      rationale_type: "playbook" | "internal_business" | "counsel_authored" | "unverified";
+      rationale_text: string;
+      rationale_source: string;
+      verified: boolean;
+      auto_insert_allowed: boolean;
+      counsel_review_required: boolean;
+    };
   };
 }
 
@@ -782,6 +790,9 @@ function DraftResultCard({
                         Assumptions: {section.rationale.assumptions_applied.join("; ")}
                       </p>
                     )}
+                    {section.rationale.verified_rationale && (
+                      <VerifiedRationaleTag vr={section.rationale.verified_rationale} />
+                    )}
                   </div>
                 )}
               </div>
@@ -1017,6 +1028,54 @@ interface AnalyzeApiResponse {
     threshold: ReviewThreshold;
   };
   redraft_available: boolean; // backward compat only — use draft_generation_gate.allowed
+  // Threat assessment (Lane C)
+  threat_assessment?: {
+    triggers: Array<{
+      trigger_id: string;
+      category: string;
+      label: string;
+      matched_text: string;
+      matched_patterns: string[];
+      trigger_source_section: string | null;
+      confidence: "signal" | "review" | "strong";
+      severity: "info" | "high" | "critical";
+      escalation_required: boolean;
+      recommended_action: string;
+    }>;
+    posture_markers: Array<{
+      trigger_id: string;
+      category: string;
+      label: string;
+      matched_text: string;
+      matched_patterns: string[];
+      trigger_source_section: string | null;
+      confidence: "signal" | "review" | "strong";
+      severity: "info" | "high" | "critical";
+      escalation_required: boolean;
+      recommended_action: string;
+    }>;
+    overall_threat_level: "none" | "elevated" | "critical";
+    auto_block: boolean;
+  };
+  // Asymmetric evaluation (Lane D)
+  asymmetric_eval?: {
+    evaluations: Array<{
+      clause_id: string;
+      label: string;
+      position: "high_leverage" | "acceptable" | "below_minimum" | "absent" | "needs_review" | "unknown";
+      benchmark_confidence: "strong" | "moderate" | "weak";
+      deviation_from_ideal: string | null;
+      deviation_from_minimum: string | null;
+      matched_high_leverage: string[];
+      matched_minimum: string[];
+      missing_minimum_terms: string[];
+    }>;
+    below_minimum_count: number;
+    high_leverage_count: number;
+    acceptable_count: number;
+    absent_count: number;
+    needs_review_count: number;
+  };
   trace: {
     latency_ms: number;
     model_used: string;
@@ -1120,6 +1179,251 @@ function AnalyzeComposer({
           </>
         )}
       </Button>
+    </div>
+  );
+}
+
+
+// ── ThreatAssessmentPanel ─────────────────────────────────────────────────────
+
+function ThreatAssessmentPanel({ data }: { data: NonNullable<AnalyzeApiResponse["threat_assessment"]> }) {
+  const actionableTriggers = data.triggers.filter((t) => t.severity !== "info");
+  const hasThreats = actionableTriggers.length > 0;
+  const hasPosture = data.posture_markers.length > 0;
+
+  if (!hasThreats && !hasPosture) return null;
+
+  const levelBadge =
+    data.overall_threat_level === "critical"
+      ? "bg-red-500/15 text-red-600 border-red-500/30"
+      : data.overall_threat_level === "elevated"
+      ? "bg-amber-500/15 text-amber-700 border-amber-500/30"
+      : "bg-muted text-muted-foreground border-border";
+
+  const confidenceColor = (c: string) =>
+    c === "strong" ? "bg-red-500/10 text-red-600 border-red-500/20" :
+    c === "review" ? "bg-amber-500/10 text-amber-700 border-amber-500/20" :
+    "bg-muted text-muted-foreground border-border";
+
+  return (
+    <CollapsibleSection title="Threat Assessment" defaultOpen>
+      <div className="space-y-3">
+        {/* Level badge */}
+        <div className="flex items-center gap-2">
+          <span className={`inline-flex items-center px-2 py-0.5 rounded text-[9px] font-mono font-semibold border uppercase tracking-wider ${levelBadge}`}>
+            {data.overall_threat_level === "none" ? "No Threats" : data.overall_threat_level}
+          </span>
+          {data.auto_block && (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-mono font-semibold border bg-red-500/15 text-red-600 border-red-500/30">
+              <ShieldAlert className="w-2.5 h-2.5" />
+              AUTO-BLOCK
+            </span>
+          )}
+        </div>
+
+        {/* Threat triggers */}
+        {hasThreats && (
+          <div className="space-y-2">
+            {actionableTriggers.map((trigger) => (
+              <div
+                key={trigger.trigger_id}
+                className={`rounded border p-2.5 space-y-1.5 ${
+                  trigger.severity === "critical"
+                    ? "border-red-500/30 bg-red-500/5"
+                    : "border-amber-500/25 bg-amber-500/5"
+                }`}
+              >
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-mono border ${confidenceColor(trigger.confidence)}`}>
+                    {trigger.confidence.toUpperCase()}
+                  </span>
+                  <span className="text-[10px] font-mono font-semibold text-foreground">{trigger.label}</span>
+                  {trigger.trigger_source_section && (
+                    <span className="text-[9px] font-mono text-muted-foreground">§ {trigger.trigger_source_section}</span>
+                  )}
+                </div>
+                <p className="text-[9px] font-mono text-muted-foreground italic leading-relaxed">
+                  &ldquo;{trigger.matched_text}&rdquo;
+                </p>
+                <p className="text-[10px] font-mono text-foreground/80 leading-relaxed">
+                  → {trigger.recommended_action}
+                </p>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Posture markers */}
+        {hasPosture && (
+          <div className="space-y-1.5">
+            <p className="text-[9px] font-mono text-muted-foreground uppercase tracking-widest">
+              Posture Markers (company-protective language)
+            </p>
+            {data.posture_markers.map((marker) => (
+              <div key={marker.trigger_id} className="flex items-start gap-2 text-[10px] font-mono text-muted-foreground">
+                <Info className="w-3 h-3 mt-0.5 shrink-0 text-blue-400" />
+                <div>
+                  <span className="font-semibold text-foreground/70">{marker.label}</span>
+                  {marker.trigger_source_section && (
+                    <span className="ml-1.5 text-[9px]">§ {marker.trigger_source_section}</span>
+                  )}
+                  <p className="text-[9px] italic mt-0.5 leading-relaxed">&ldquo;{marker.matched_text}&rdquo;</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </CollapsibleSection>
+  );
+}
+
+// ── AsymmetricEvalPanel ───────────────────────────────────────────────────────
+
+function AsymmetricEvalPanel({ data }: { data: NonNullable<AnalyzeApiResponse["asymmetric_eval"]> }) {
+  if (data.evaluations.length === 0) return null;
+
+  const positionBadge = (pos: string) => {
+    if (pos === "high_leverage") return "bg-green-500/15 text-green-700 border-green-500/25";
+    if (pos === "acceptable")    return "bg-blue-500/10 text-blue-600 border-blue-500/20";
+    if (pos === "below_minimum") return "bg-red-500/10 text-red-600 border-red-500/20";
+    if (pos === "absent")        return "bg-red-500/10 text-red-600 border-red-500/20";
+    if (pos === "needs_review")  return "bg-amber-500/10 text-amber-700 border-amber-500/20";
+    return "bg-muted text-muted-foreground border-border";
+  };
+
+  const positionLabel = (pos: string) => {
+    if (pos === "high_leverage") return "IDEAL";
+    if (pos === "acceptable")    return "ACCEPTABLE";
+    if (pos === "below_minimum") return "BELOW MIN";
+    if (pos === "absent")        return "ABSENT";
+    if (pos === "needs_review")  return "NEEDS REVIEW";
+    return "UNKNOWN";
+  };
+
+  return (
+    <CollapsibleSection title="Clause Position Analysis" defaultOpen>
+      <div className="space-y-3">
+        {/* Summary counts */}
+        <div className="flex flex-wrap gap-1.5">
+          {data.high_leverage_count > 0 && (
+            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-mono border bg-green-500/10 text-green-700 border-green-500/20">
+              {data.high_leverage_count} ideal
+            </span>
+          )}
+          {data.acceptable_count > 0 && (
+            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-mono border bg-blue-500/10 text-blue-600 border-blue-500/20">
+              {data.acceptable_count} acceptable
+            </span>
+          )}
+          {data.needs_review_count > 0 && (
+            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-mono border bg-amber-500/10 text-amber-700 border-amber-500/20">
+              {data.needs_review_count} needs review
+            </span>
+          )}
+          {data.below_minimum_count > 0 && (
+            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-mono border bg-red-500/10 text-red-600 border-red-500/20">
+              {data.below_minimum_count} below minimum
+            </span>
+          )}
+          {data.absent_count > 0 && (
+            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-mono border bg-red-500/10 text-red-600 border-red-500/20">
+              {data.absent_count} absent
+            </span>
+          )}
+        </div>
+
+        {/* Evaluation table */}
+        <div className="overflow-x-auto">
+          <table className="w-full text-[10px] font-mono">
+            <thead>
+              <tr className="text-muted-foreground border-b border-border">
+                <th className="text-left font-normal pb-1 pr-2">Clause</th>
+                <th className="text-left font-normal pb-1 pr-2">Position</th>
+                <th className="text-left font-normal pb-1 pr-2">vs Ideal</th>
+                <th className="text-left font-normal pb-1">vs Minimum</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border/50">
+              {data.evaluations.map((ev) => (
+                <tr key={ev.clause_id} className="align-top">
+                  <td className="py-1.5 pr-2 font-semibold text-foreground/80 whitespace-nowrap">{ev.label}</td>
+                  <td className="py-1.5 pr-2">
+                    <div className="flex items-center gap-1">
+                      <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9px] border ${positionBadge(ev.position)}`}>
+                        {positionLabel(ev.position)}
+                      </span>
+                      {ev.benchmark_confidence === "weak" && (
+                        <span className="text-[8px] text-amber-600 font-mono">heuristic</span>
+                      )}
+                    </div>
+                  </td>
+                  <td className="py-1.5 pr-2 text-muted-foreground max-w-[140px]">
+                    {ev.deviation_from_ideal
+                      ? <span className="text-amber-600/80">{ev.deviation_from_ideal.replace("Missing high-leverage terms: ", "").slice(0, 60)}{ev.deviation_from_ideal.length > 60 ? "…" : ""}</span>
+                      : <span className="text-green-600">—</span>
+                    }
+                  </td>
+                  <td className="py-1.5 text-muted-foreground max-w-[140px]">
+                    {ev.deviation_from_minimum
+                      ? <span className="text-red-600">{ev.deviation_from_minimum.replace("Missing minimum terms: ", "").slice(0, 60)}{ev.deviation_from_minimum.length > 60 ? "…" : ""}</span>
+                      : <span className="text-green-600">—</span>
+                    }
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </CollapsibleSection>
+  );
+}
+
+// ── VerifiedRationaleTag ──────────────────────────────────────────────────────
+
+function VerifiedRationaleTag({
+  vr,
+}: {
+  vr: NonNullable<NonNullable<DraftSection["rationale"]>["verified_rationale"]>;
+}) {
+  return (
+    <div className={`mt-1.5 rounded border p-2 space-y-1 text-[9px] font-mono ${
+      vr.verified
+        ? vr.counsel_review_required
+          ? "border-amber-500/25 bg-amber-500/5"
+          : "border-green-500/20 bg-green-500/5"
+        : "border-red-500/25 bg-red-500/5"
+    }`}>
+      <div className="flex items-center gap-1.5 flex-wrap">
+        {vr.verified ? (
+          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded border bg-green-500/10 text-green-700 border-green-500/20">
+            ✓ Verified
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded border bg-red-500/10 text-red-600 border-red-500/20">
+            ⚠ Unverified
+          </span>
+        )}
+        <span className="text-muted-foreground">{vr.rationale_type}</span>
+        <span className="text-muted-foreground/60">· {vr.rationale_source}</span>
+      </div>
+      <p className="text-foreground/70 leading-relaxed">{vr.rationale_text}</p>
+      {!vr.verified && (
+        <p className="text-red-600 font-semibold">No verified rationale on file — counsel review required</p>
+      )}
+      {vr.counsel_review_required && vr.verified && (
+        <p className="text-amber-700">Counsel review required before execution</p>
+      )}
+      <div className="flex items-center gap-1.5 pt-0.5">
+        <span className={`px-1.5 py-0.5 rounded border text-[8px] ${
+          vr.auto_insert_allowed
+            ? "bg-green-500/10 text-green-700 border-green-500/20"
+            : "bg-muted text-muted-foreground border-border line-through"
+        }`}>
+          auto-insert {vr.auto_insert_allowed ? "enabled" : "disabled"}
+        </span>
+      </div>
     </div>
   );
 }
@@ -1615,7 +1919,17 @@ function AnalysisResultCard({
         </div>
       </CollapsibleSection>
 
-      {/* 4. Governance + Verification */}
+      {/* 4. Threat Assessment (Lane C) */}
+      {data.threat_assessment && (data.threat_assessment.triggers.filter((t) => t.severity !== "info").length > 0 || data.threat_assessment.posture_markers.length > 0) && (
+        <ThreatAssessmentPanel data={data.threat_assessment} />
+      )}
+
+      {/* 5. Clause Position Analysis (Lane D) */}
+      {data.asymmetric_eval && data.asymmetric_eval.evaluations.length > 0 && (
+        <AsymmetricEvalPanel data={data.asymmetric_eval} />
+      )}
+
+      {/* 6. Governance + Verification */}
       <CollapsibleSection title="Governance + Verification" defaultOpen>
         <div className="space-y-2">
           <div className="flex items-center gap-2 flex-wrap">
