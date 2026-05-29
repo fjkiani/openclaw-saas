@@ -1,8 +1,8 @@
 # Railway/Nixpacks build config
-# - Skips typecheck (CI gate only; tsc not on PATH in Railway build env)
-# - Uses --no-frozen-lockfile to handle pnpm version differences
+# NODE_ENV must not be "production" during install or pnpm skips devDependencies.
+# typecheck:libs is omitted — tsc is a devDep and this is a deploy build, not CI.
 [phases.install]
-cmds = ["pnpm install --no-frozen-lockfile"]
+cmds = ["NODE_ENV=development pnpm install --no-frozen-lockfile"]
 
 [phases.build]
 cmds = ["pnpm --filter @workspace/api-server run build"]
