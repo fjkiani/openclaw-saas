@@ -26,3 +26,6 @@ export * from "./modelUsageEvents";
 export * from "./modelPolicies";
 export * from "./modelApprovals";
 export * from "./legalReceiptNonces";
+export * from "./semanticClauseAnalysisRuns";
+export * from "./semanticClauseAnalyses";
+export * from "./semanticClauseAnalysisAttempts";

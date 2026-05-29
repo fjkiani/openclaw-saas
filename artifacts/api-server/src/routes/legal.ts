@@ -75,6 +75,8 @@ import {
   type RevisionActionInput,
 } from "../lib/legalActionEngine.js";
 import draftRouter from "./legal.draft.addendum.js";
+import { logger } from "../lib/logger.js";
+import { runSemanticShadow } from "../lib/semanticLegalAnalyzer.js";
 
 const router: IRouter = Router();
 
@@ -998,6 +1000,16 @@ async function handleMatter(text: string, tenantId: string): Promise<{
   } catch {
     // Soft-fail: DB logging must never block the response
   }
+
+  // Step 4b: Semantic shadow analysis (fire-and-forget — never blocks response)
+  void runSemanticShadow({
+    matterId,
+    tenantId,
+    specialist: intake.matter_type,
+    documentText: text,
+  }).catch((err) => {
+    logger.error({ matterId, err }, "semantic shadow: unhandled top-level error");
+  });
 
   // Step 5: Sign receipt for action endpoint (HMAC-SHA256, SESSION_SECRET)
   const secret = process.env.SESSION_SECRET ?? "";
