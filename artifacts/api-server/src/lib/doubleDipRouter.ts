@@ -1,35 +1,12 @@
-/**
- * doubleDipRouter.ts
- *
- * Double-Dip Data Flywheel — The Trapdoor.
- *
- * INV-02 Speculative Routing:
- *   Fast path  — lfm-2.5-1.2b via OpenRouter (cheap, low-latency)
- *   Slow path  — openai/gpt-oss-120b:free via OpenRouter (expensive, gold)
- *
- *   Both paths fire concurrently via Promise.race.
- *   If the fast path wins with confidence >= 0.85, the slow-path AbortController
- *   is called immediately to kill the active TCP connection to OpenRouter.
- *   If the fast path loses or returns confidence < 0.85, the slow-path result
- *   is Zod-whipped and persisted into the vault.
- *
- * INV-03 Zod Whip:
- *   SlopSchema enforces evidenceSpans.min(1) and a superRefine rule that
- *   critical/high severity MUST cite evidence. Any output that fails the whip
- *   is discarded — we do not persist garbage into the training vault.
- *
- * Vault Capture:
- *   zie_training_records  — SFT gold: the validated 120B output
- *   zie_preference_pairs  — DPO: chosen=120B winner, rejected=1.2B loser
- */
-
 import crypto from "node:crypto";
 import { z } from "zod";
 import { pool } from "@workspace/db";
-import { invokeWithFallback, type ModelRouteConfig, RouterExhaustedError } from "./modelRouter.js";
+import { RouterExhaustedError } from "./modelRouter.js";
 import { logger } from "./logger.js";
 
-// ── Zod Whip (INV-03) ─────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Zod Whip (INV-03)
+// ─────────────────────────────────────────────────────────────────────────────
 
 export const SlopSchema = z
   .object({
@@ -37,7 +14,7 @@ export const SlopSchema = z
     tag: z.enum(["overclaiming", "facile_analysis", "thin_methods"]),
     evidenceSpans: z
       .array(z.string().min(1))
-      .min(1, "Must cite at least one evidence span from the source text"),
+      .min(1, "Must cite at least one verbatim evidence span"),
     confidence: z.number().min(0).max(1),
   })
   .superRefine((data, ctx) => {
@@ -47,7 +24,7 @@ export const SlopSchema = z
     ) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: `${data.severity} severity requires at least 2 evidence spans; got ${data.evidenceSpans.length}.`,
+        message: `${data.severity} severity requires >= 2 evidence spans; got ${data.evidenceSpans.length}.`,
         path: ["evidenceSpans"],
       });
     }
@@ -55,37 +32,15 @@ export const SlopSchema = z
 
 export type SlopAnalysis = z.infer<typeof SlopSchema>;
 
-// ── Model chain configs ───────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Constants
+// ─────────────────────────────────────────────────────────────────────────────
 
-const FAST_CHAIN: ModelRouteConfig[] = [
-  {
-    id: "liquid/lfm-2.5-1.2b",
-    provider: "openrouter",
-    apiKeyEnv: "OPENROUTER_API_KEY",
-    maxTokens: 512,
-    timeoutMs: 8_000,
-    tags: ["fast-tier"],
-  },
-];
+export const CONFIDENCE_THRESHOLD = 0.85;
 
-const SLOW_CHAIN: ModelRouteConfig[] = [
-  {
-    id: "openai/gpt-4o",
-    provider: "openrouter",
-    apiKeyEnv: "OPENROUTER_API_KEY",
-    maxTokens: 1024,
-    timeoutMs: 45_000,
-    tags: ["premium-tier"],
-  },
-  {
-    id: "openai/gpt-4o",
-    provider: "openrouter",
-    apiKeyEnv: "OPENROUTER_API_KEY_2",
-    maxTokens: 1024,
-    timeoutMs: 45_000,
-    tags: ["premium-tier", "fallback"],
-  },
-];
+const OPENROUTER_BASE = "https://openrouter.ai/api/v1/chat/completions";
+const OPENROUTER_REFERER =
+  process.env.OPENROUTER_REFERER ?? "https://openclaw-api-k30t.onrender.com";
 
 const SLOP_SYSTEM_PROMPT = `You are a manuscript quality auditor. Analyze the provided text for scientific writing deficiencies.
 
@@ -98,18 +53,73 @@ Return a JSON object with EXACTLY these fields and no others:
 }
 
 Hard rules:
-- evidenceSpans MUST contain verbatim quotes copied from the input. Paraphrasing is rejected.
+- evidenceSpans MUST be verbatim quotes from the input. Paraphrasing is rejected.
 - high or critical severity MUST have at least 2 evidence spans.
-- confidence reflects your certainty that this is the dominant deficiency (0=uncertain, 1=certain).
-- Respond with valid JSON only. No markdown fences, no prose, no explanation.`;
+- confidence is your certainty this is the dominant deficiency (0=uncertain, 1=certain).
+- Respond with valid JSON only. No markdown fences, no prose.`;
 
-// ── Prompt hash ───────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Low-level fetch — accepts an AbortSignal directly
+// ─────────────────────────────────────────────────────────────────────────────
 
-export function hashPrompt(content: string): string {
-  return crypto.createHash("sha256").update(content).digest("hex");
+async function fetchCompletion(
+  modelId: string,
+  apiKey: string,
+  userContent: string,
+  maxTokens: number,
+  signal: AbortSignal,
+): Promise<SlopAnalysis> {
+  const response = await fetch(OPENROUTER_BASE, {
+    method: "POST",
+    signal,
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+      "HTTP-Referer": OPENROUTER_REFERER,
+      "X-Title": "OpenClaw Manuscript Slop Check",
+    },
+    body: JSON.stringify({
+      model: modelId,
+      messages: [
+        { role: "system", content: SLOP_SYSTEM_PROMPT },
+        { role: "user", content: userContent },
+      ],
+      temperature: 0,
+      max_tokens: maxTokens,
+    }),
+  });
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    throw new Error(`OpenRouter ${response.status}: ${body.slice(0, 200)}`);
+  }
+
+  const data = (await response.json()) as {
+    choices?: Array<{ message?: { content?: string } }>;
+  };
+  const raw = data.choices?.[0]?.message?.content ?? "";
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error(`JSON parse failed: ${raw.slice(0, 120)}`);
+  }
+
+  return SlopSchema.parse(parsed);
 }
 
-// ── Vault persistence ─────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Prompt hash
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function hashPrompt(text: string): string {
+  return crypto.createHash("sha256").update(text, "utf8").digest("hex");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Vault persistence
+// ─────────────────────────────────────────────────────────────────────────────
 
 async function persistToVault(
   promptHash: string,
@@ -145,88 +155,97 @@ async function persistToVault(
   ]);
 }
 
-// ── Core: speculative concurrent execution (INV-02) ───────────────────────────
-
-export const CONFIDENCE_THRESHOLD = 0.85;
+// ─────────────────────────────────────────────────────────────────────────────
+// executeDoubleDip — speculative concurrent execution (INV-02)
+// ─────────────────────────────────────────────────────────────────────────────
 
 export async function executeDoubleDip(
   promptJson: unknown,
   promptHash: string,
 ): Promise<SlopAnalysis> {
   const userContent = JSON.stringify(promptJson);
-  const invocationBase = {
-    systemPrompt: SLOP_SYSTEM_PROMPT,
-    userContent,
-    title: "OpenClaw Manuscript Slop Check",
-  };
 
-  // AbortController for the slow path — killed if fast path wins
+  const fastApiKey = process.env.OPENROUTER_API_KEY ?? "";
+  const slowApiKey1 = process.env.OPENROUTER_API_KEY ?? "";
+  const slowApiKey2 = process.env.OPENROUTER_API_KEY_2 ?? "";
+
+  if (!fastApiKey) {
+    throw new Error("OPENROUTER_API_KEY is not set");
+  }
+
+  // AbortController for the slow path.
+  // .abort() is called the moment the fast path returns confidence >= 0.85,
+  // killing the active TCP connection to OpenRouter.
   const slowAbort = new AbortController();
 
-  // ── Fast path: 1.2B ──────────────────────────────────────────────────────
+  // Fast path: liquid/lfm-2.5-1.2b — cheap, 8 s timeout
+  const fastSignal = AbortSignal.timeout(8_000);
+
   const fastPromise: Promise<{ result: SlopAnalysis; won: "fast" } | null> =
-    invokeWithFallback<SlopAnalysis>(
-      { ...invocationBase, maxTokens: 512, temperature: 0 },
-      FAST_CHAIN,
-      {
-        validator: (raw) => SlopSchema.parse(raw),
-        routeChainId: "fast-1b-slop",
-        schemaType: "standard",
-      },
-    )
-      .then((r) => {
-        if (r.parsed.confidence >= CONFIDENCE_THRESHOLD) {
-          // Kill the slow path TCP connection immediately
+    fetchCompletion("liquid/lfm-2.5-1.2b", fastApiKey, userContent, 512, fastSignal)
+      .then((result) => {
+        if (result.confidence >= CONFIDENCE_THRESHOLD) {
+          // Fast path won — kill the slow path TCP connection immediately
           slowAbort.abort("fast-path-won");
-          return { result: r.parsed, won: "fast" as const };
+          return { result, won: "fast" as const };
         }
-        // Fast path ran but confidence too low — let slow path win
+        // Ran but confidence too low — slow path continues
         return null;
       })
-      .catch(() => null); // fast path failure is non-fatal
-
-  // ── Slow path: 120B ──────────────────────────────────────────────────────
-  // AbortSignal is threaded into the fetch via the modelRouter's timeout mechanism.
-  // We patch the chain's timeoutMs to respect the abort signal by wrapping the
-  // slow chain entries with the abort signal check.
-  const slowChainWithAbort: ModelRouteConfig[] = SLOW_CHAIN.map((entry) => ({
-    ...entry,
-    // Store the abort signal reference — modelRouter checks AbortSignal.timeout
-    // internally; we override timeoutMs to a sentinel and rely on the signal.
-    // The actual abort is handled by the fetch() call inside invokeWithFallback
-    // which uses AbortSignal.timeout(entry.timeoutMs). We inject our controller
-    // by replacing the timeout with a combined signal via AbortSignal.any().
-    _abortSignal: slowAbort.signal,
-  }));
-
-  const slowPromise: Promise<{ result: SlopAnalysis; won: "slow" } | null> =
-    invokeWithFallback<SlopAnalysis>(
-      { ...invocationBase, maxTokens: 1024, temperature: 0 },
-      slowChainWithAbort,
-      {
-        validator: (raw) => SlopSchema.parse(raw),
-        routeChainId: "slow-120b-slop",
-        schemaType: "premium",
-      },
-    )
-      .then((r) => ({ result: r.parsed, won: "slow" as const }))
       .catch((err: unknown) => {
-        // Aborted because fast path won — not an error
+        logger.warn({ err }, "doubleDipRouter: fast path failed");
+        return null;
+      });
+
+  // Slow path: openai/gpt-4o (120B proxy) — 45 s timeout, killed by slowAbort
+  // AbortSignal.any() combines the 45 s timeout with the manual abort controller,
+  // whichever fires first wins and cancels the fetch.
+  const slowTimeoutSignal = AbortSignal.timeout(45_000);
+  const slowSignal = AbortSignal.any([slowAbort.signal, slowTimeoutSignal]);
+
+  const activeSlowKey = slowApiKey1 || slowApiKey2;
+  const slowPromise: Promise<{ result: SlopAnalysis; won: "slow" } | null> =
+    fetchCompletion("openai/gpt-4o", activeSlowKey, userContent, 1024, slowSignal)
+      .then((result) => ({ result, won: "slow" as const }))
+      .catch((err: unknown) => {
         if (
           slowAbort.signal.aborted ||
-          (err instanceof Error && err.name === "AbortError")
+          (err instanceof Error &&
+            (err.name === "AbortError" || err.name === "TimeoutError"))
         ) {
+          // Aborted by fast-path win or timeout — not an error
           return null;
+        }
+        // Try fallback key if primary failed for a non-abort reason
+        if (slowApiKey2 && slowApiKey2 !== slowApiKey1) {
+          const fallbackSignal = AbortSignal.any([
+            slowAbort.signal,
+            AbortSignal.timeout(45_000),
+          ]);
+          return fetchCompletion(
+            "openai/gpt-4o",
+            slowApiKey2,
+            userContent,
+            1024,
+            fallbackSignal,
+          )
+            .then((result) => ({ result, won: "slow" as const }))
+            .catch((fallbackErr: unknown) => {
+              logger.warn(
+                { err: fallbackErr },
+                "doubleDipRouter: slow path fallback also failed",
+              );
+              return null;
+            });
         }
         logger.warn({ err }, "doubleDipRouter: slow path failed");
         return null;
       });
 
-  // ── Race ─────────────────────────────────────────────────────────────────
-  // We use Promise.all and take the first non-null result, preferring fast.
+  // Both paths run concurrently. Promise.all waits for both to settle.
+  // We prefer fast if it won; otherwise take slow.
   const [fastOutcome, slowOutcome] = await Promise.all([fastPromise, slowPromise]);
 
-  // Fast path won with high confidence — return immediately, slow path aborted
   if (fastOutcome?.won === "fast") {
     logger.info(
       { confidence: fastOutcome.result.confidence, promptHash },
@@ -235,18 +254,32 @@ export async function executeDoubleDip(
     return fastOutcome.result;
   }
 
-  // Slow path produced a result
   if (slowOutcome?.won === "slow") {
     const winner = slowOutcome.result;
-    // Use fast path output as the rejected sample if available, else synthesize
-    const loser: SlopAnalysis = fastOutcome === null
-      ? { severity: "low", tag: "facile_analysis", evidenceSpans: ["[fast-path-failed]"], confidence: 0 }
-      : { ...winner, confidence: 0, evidenceSpans: ["[fast-path-low-confidence]"] };
+    const loser: SlopAnalysis =
+      fastOutcome === null
+        ? {
+            severity: "low",
+            tag: "facile_analysis",
+            evidenceSpans: ["[fast-path-failed]"],
+            confidence: 0,
+          }
+        : {
+            severity: fastOutcome.result?.severity ?? "low",
+            tag: fastOutcome.result?.tag ?? "facile_analysis",
+            evidenceSpans: fastOutcome.result?.evidenceSpans ?? ["[fast-path-low-confidence]"],
+            confidence: fastOutcome.result?.confidence ?? 0,
+          };
 
-    // Vault capture — fire-and-forget, never block the response
-    void persistToVault(promptHash, promptJson, winner, loser).catch((err: unknown) => {
-      logger.error({ err, promptHash }, "doubleDipRouter: vault persistence failed");
-    });
+    // Fire-and-forget vault capture — never blocks the HTTP response
+    void persistToVault(promptHash, promptJson, winner, loser).catch(
+      (err: unknown) => {
+        logger.error(
+          { err, promptHash },
+          "doubleDipRouter: vault persistence failed",
+        );
+      },
+    );
 
     logger.info(
       { confidence: winner.confidence, promptHash },
@@ -255,6 +288,5 @@ export async function executeDoubleDip(
     return winner;
   }
 
-  // Both paths failed
   throw new RouterExhaustedError([]);
 }
