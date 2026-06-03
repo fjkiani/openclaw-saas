@@ -29,3 +29,5 @@ export * from "./legalReceiptNonces";
 export * from "./semanticClauseAnalysisRuns";
 export * from "./semanticClauseAnalyses";
 export * from "./semanticClauseAnalysisAttempts";
+export * from "./zieTrainingRecords";
+export * from "./ziePreferencePairs";
