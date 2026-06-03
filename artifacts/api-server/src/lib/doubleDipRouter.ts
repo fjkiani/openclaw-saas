@@ -5,6 +5,48 @@ import { RouterExhaustedError } from "./modelRouter.js";
 import { logger } from "./logger.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Policy lookup — reads zie_router_policies to resolve the current fast-path
+// model for a given task_type. Falls back to the hardcoded default if the
+// table doesn't exist yet or has no row for this task_type.
+// After Modal completes a LoRA fine-tune, updateRoutingPolicy() writes here
+// and the next invocation automatically uses the trained model.
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface FastPathPolicy {
+  fast_model_id: string;
+  fast_provider: string;
+  fast_api_key_env: string;
+  fast_max_tokens: number;
+  fast_timeout_ms: number;
+}
+
+const DEFAULT_FAST_POLICY: FastPathPolicy = {
+  fast_model_id: "liquid/lfm-2.5-1.2b:free",
+  fast_provider: "openrouter",
+  fast_api_key_env: "OPENROUTER_API_KEY",
+  fast_max_tokens: 512,
+  fast_timeout_ms: 8_000,
+};
+
+async function resolveFastPolicy(taskType: string): Promise<FastPathPolicy> {
+  try {
+    const res = await pool.query<FastPathPolicy>(
+      `SELECT fast_model_id, fast_provider, fast_api_key_env, fast_max_tokens, fast_timeout_ms
+       FROM zie_router_policies
+       WHERE task_type = $1
+       LIMIT 1`,
+      [taskType],
+    );
+    if (res.rows.length > 0) {
+      return res.rows[0];
+    }
+  } catch {
+    // Table may not exist yet — fall through to default
+  }
+  return DEFAULT_FAST_POLICY;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Zod Whip (INV-03)
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -162,10 +204,15 @@ async function persistToVault(
 export async function executeDoubleDip(
   promptJson: unknown,
   promptHash: string,
+  taskType = "manuscript_slop_check",
 ): Promise<SlopAnalysis> {
   const userContent = JSON.stringify(promptJson);
 
-  const fastApiKey = process.env.OPENROUTER_API_KEY ?? "";
+  // Resolve fast-path model from zie_router_policies.
+  // After a LoRA fine-tune completes, this returns the trained model ID
+  // instead of the base liquid/lfm-2.5-1.2b — the flywheel closes.
+  const fastPolicy = await resolveFastPolicy(taskType);
+  const fastApiKey = process.env[fastPolicy.fast_api_key_env] ?? process.env.OPENROUTER_API_KEY ?? "";
   const slowApiKey1 = process.env.OPENROUTER_API_KEY ?? "";
   const slowApiKey2 = process.env.OPENROUTER_API_KEY_2 ?? "";
 
@@ -173,16 +220,22 @@ export async function executeDoubleDip(
     throw new Error("OPENROUTER_API_KEY is not set");
   }
 
+  logger.info(
+    { taskType, fastModel: fastPolicy.fast_model_id, promptHash },
+    "doubleDipRouter: executing double-dip",
+  );
+
   // AbortController for the slow path.
   // .abort() is called the moment the fast path returns confidence >= 0.85,
   // killing the active TCP connection to OpenRouter.
   const slowAbort = new AbortController();
 
-  // Fast path: liquid/lfm-2.5-1.2b — cheap, 8 s timeout
-  const fastSignal = AbortSignal.timeout(8_000);
+  // Fast path: model from zie_router_policies (starts as liquid/lfm-2.5-1.2b:free,
+  // upgrades to fine-tuned LoRA after first successful training run)
+  const fastSignal = AbortSignal.timeout(fastPolicy.fast_timeout_ms);
 
   const fastPromise: Promise<{ result: SlopAnalysis; won: "fast" } | null> =
-    fetchCompletion("liquid/lfm-2.5-1.2b", fastApiKey, userContent, 512, fastSignal)
+    fetchCompletion(fastPolicy.fast_model_id, fastApiKey, userContent, fastPolicy.fast_max_tokens, fastSignal)
       .then((result) => {
         if (result.confidence >= CONFIDENCE_THRESHOLD) {
           // Fast path won — kill the slow path TCP connection immediately
