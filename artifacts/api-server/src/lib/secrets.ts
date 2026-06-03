@@ -38,7 +38,9 @@ const MOCK_VALUES: Record<SecretKey, string> = {
 export function createSecretProvider(env: NodeJS.ProcessEnv = process.env): SecretProvider {
   const globalDryRun = env.DRY_RUN === "1";
   return {
-    isDryRun: (k) => globalDryRun || !env[k],
+    // Dry-run is driven ONLY by the explicit DRY_RUN flag. A missing key in a real
+    // run is NOT dry-run — it must surface as a 401/blocker, never an auto-stub.
+    isDryRun: () => globalDryRun,
     get(k) {
       return env[k] ?? (globalDryRun ? MOCK_VALUES[k] : undefined);
     },
@@ -64,11 +66,12 @@ export interface ProviderResponse<T> {
 }
 
 /**
- * Wraps any authed provider call. Behavior:
- *  - key absent  + dry-run -> returns stub (status 200-equivalent, stubbed=true)
- *  - key absent  + real    -> { ok:false, status:401 }  (caller raises BLOCKED_PENDING_*_KEY)
- *  - real 401    + dry-run -> degrades to stub so the state machine still advances
- *  - real 401    + real    -> { ok:false, status:401 }
+ * Wraps any authed provider call. Behavior (dry-run is decided FIRST so a mock
+ * token is never transmitted to a live provider):
+ *  - dry-run             -> returns stub, never calls fn (stubbed=true)
+ *  - real + key absent   -> { ok:false, status:401 }  (caller raises BLOCKED_PENDING_*_KEY)
+ *  - real + live 401     -> { ok:false, status:401 }
+ *  - real + success      -> passthrough of fn()'s response
  */
 export async function callWithAuthGuard<T>(
   key: SecretKey,
@@ -76,22 +79,16 @@ export async function callWithAuthGuard<T>(
   dryRunStub: () => T,
   provider: SecretProvider = secrets,
 ): Promise<ProviderResponse<T>> {
+  // Dry-run short-circuit: do not call the real provider with a mock token.
+  if (provider.isDryRun(key)) {
+    return { ok: true, status: 200, data: dryRunStub(), stubbed: true, reason: `dry-run:${key}` };
+  }
   const token = provider.get(key);
   if (!token) {
-    const dry = provider.isDryRun(key);
-    return {
-      ok: dry,
-      status: dry ? 200 : 401,
-      data: dry ? dryRunStub() : undefined,
-      stubbed: dry,
-      reason: `absent:${key}`,
-    };
+    return { ok: false, status: 401, stubbed: false, reason: `absent:${key}` };
   }
   const res = await fn(token);
   if (res.status === 401) {
-    if (provider.isDryRun(key)) {
-      return { ok: true, status: 200, data: dryRunStub(), stubbed: true, reason: `401->stub:${key}` };
-    }
     return { ok: false, status: 401, reason: `unauthorized:${key}` };
   }
   return res;

@@ -7,7 +7,7 @@
 // NOTE: `modal` is not yet a workspace dependency — it is imported lazily inside
 // the real branch (`await import("modal")`) so this module evaluates without it,
 // and `pnpm add modal` (Node 22+) wires the live path when secrets land.
-import { callWithAuthGuard, secrets, type SecretProvider } from "./secrets";
+import { callWithAuthGuard, createSecretProvider, type SecretProvider } from "./secrets";
 
 export interface TrainerArgs {
   datasetVersionId: number;
@@ -34,8 +34,11 @@ export interface DispatchResult {
 export async function dispatchTraining(
   args: TrainerArgs,
   env: NodeJS.ProcessEnv = process.env,
-  provider: SecretProvider = secrets,
+  provider?: SecretProvider,
 ): Promise<DispatchResult> {
+  // Derive the provider from the supplied env so DRY_RUN/keys set after module
+  // import are honored (the global `secrets` singleton is import-time bound).
+  const sec = provider ?? createSecretProvider(env);
   const appName = env.MODAL_APP_NAME ?? "manuscript-trainer";
 
   const res = await callWithAuthGuard<{ functionCallId: string }>(
@@ -49,7 +52,7 @@ export async function dispatchTraining(
       return { ok: true, status: 200, data: { functionCallId: `fc_${appName}_real` } };
     },
     () => ({ functionCallId: `fc_${appName}_DRYRUN` }), // DRY_RUN / absent-secret stub
-    provider,
+    sec,
   );
 
   if (!res.ok || !res.data) {
