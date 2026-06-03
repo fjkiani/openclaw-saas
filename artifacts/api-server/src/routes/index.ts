@@ -11,6 +11,7 @@ import webhooksRouter from "./webhooks";
 import forgeRouter from "./forge";
 import legalRouter from "./legal";
 import onboardingRouter from "./onboarding";
+import manuscriptRouter from "./manuscript";
 
 const router: IRouter = Router();
 
@@ -26,5 +27,6 @@ router.use(webhooksRouter);
 router.use(forgeRouter);
 router.use(legalRouter);
 router.use(onboardingRouter);
+router.use(manuscriptRouter);
 
 export default router;

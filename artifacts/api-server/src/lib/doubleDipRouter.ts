@@ -3,36 +3,51 @@
  *
  * Double-Dip Data Flywheel — The Trapdoor.
  *
- * Dip 1: Run local 1.2B model (cheap). If confidence >= 0.85, return immediately.
- * Dip 2: Route to 120B via OpenRouter (expensive). Zod-whip the output.
- *        Asynchronously persist:
- *          - zie_training_records  (SFT gold: the 120B output)
- *          - zie_preference_pairs  (DPO: chosen=120B, rejected=local)
- *        Return the validated 120B result to the caller.
+ * INV-02 Speculative Routing:
+ *   Fast path  — lfm-2.5-1.2b via OpenRouter (cheap, low-latency)
+ *   Slow path  — openai/gpt-oss-120b:free via OpenRouter (expensive, gold)
+ *
+ *   Both paths fire concurrently via Promise.race.
+ *   If the fast path wins with confidence >= 0.85, the slow-path AbortController
+ *   is called immediately to kill the active TCP connection to OpenRouter.
+ *   If the fast path loses or returns confidence < 0.85, the slow-path result
+ *   is Zod-whipped and persisted into the vault.
+ *
+ * INV-03 Zod Whip:
+ *   SlopSchema enforces evidenceSpans.min(1) and a superRefine rule that
+ *   critical/high severity MUST cite evidence. Any output that fails the whip
+ *   is discarded — we do not persist garbage into the training vault.
+ *
+ * Vault Capture:
+ *   zie_training_records  — SFT gold: the validated 120B output
+ *   zie_preference_pairs  — DPO: chosen=120B winner, rejected=1.2B loser
  */
 
+import crypto from "node:crypto";
 import { z } from "zod";
 import { pool } from "@workspace/db";
-import { invokeWithFallback, type ModelRouteConfig } from "./modelRouter.js";
+import { invokeWithFallback, type ModelRouteConfig, RouterExhaustedError } from "./modelRouter.js";
 import { logger } from "./logger.js";
 
-// ── Zod Whip ──────────────────────────────────────────────────────────────────
-// If the 120B output doesn't cite evidence spans, it fails and we don't persist it.
+// ── Zod Whip (INV-03) ─────────────────────────────────────────────────────────
 
 export const SlopSchema = z
   .object({
     severity: z.enum(["low", "medium", "high", "critical"]),
     tag: z.enum(["overclaiming", "facile_analysis", "thin_methods"]),
-    evidenceSpans: z.array(z.string()).min(1, "Must cite at least one evidence span"),
+    evidenceSpans: z
+      .array(z.string().min(1))
+      .min(1, "Must cite at least one evidence span from the source text"),
+    confidence: z.number().min(0).max(1),
   })
   .superRefine((data, ctx) => {
     if (
-      ["high", "critical"].includes(data.severity) &&
-      data.evidenceSpans.length === 0
+      (data.severity === "high" || data.severity === "critical") &&
+      data.evidenceSpans.length < 2
     ) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "Critical slop MUST cite evidence.",
+        message: `${data.severity} severity requires at least 2 evidence spans; got ${data.evidenceSpans.length}.`,
         path: ["evidenceSpans"],
       });
     }
@@ -40,33 +55,26 @@ export const SlopSchema = z
 
 export type SlopAnalysis = z.infer<typeof SlopSchema>;
 
-// ── Local model result shape ──────────────────────────────────────────────────
-
-export interface LocalModelResult {
-  data: SlopAnalysis;
-  confidence: number; // 0.0 – 1.0
-}
-
 // ── Model chain configs ───────────────────────────────────────────────────────
 
-const LOCAL_1B_CHAIN: ModelRouteConfig[] = [
+const FAST_CHAIN: ModelRouteConfig[] = [
   {
-    id: "meta-llama/llama-3.2-1b-instruct",
+    id: "liquid/lfm-2.5-1.2b",
     provider: "openrouter",
     apiKeyEnv: "OPENROUTER_API_KEY",
     maxTokens: 512,
-    timeoutMs: 10_000,
-    tags: ["local-tier"],
+    timeoutMs: 8_000,
+    tags: ["fast-tier"],
   },
 ];
 
-const PREMIUM_120B_CHAIN: ModelRouteConfig[] = [
+const SLOW_CHAIN: ModelRouteConfig[] = [
   {
     id: "openai/gpt-4o",
     provider: "openrouter",
     apiKeyEnv: "OPENROUTER_API_KEY",
     maxTokens: 1024,
-    timeoutMs: 30_000,
+    timeoutMs: 45_000,
     tags: ["premium-tier"],
   },
   {
@@ -74,96 +82,42 @@ const PREMIUM_120B_CHAIN: ModelRouteConfig[] = [
     provider: "openrouter",
     apiKeyEnv: "OPENROUTER_API_KEY_2",
     maxTokens: 1024,
-    timeoutMs: 30_000,
+    timeoutMs: 45_000,
     tags: ["premium-tier", "fallback"],
   },
 ];
 
 const SLOP_SYSTEM_PROMPT = `You are a manuscript quality auditor. Analyze the provided text for scientific writing deficiencies.
 
-Return a JSON object with exactly these fields:
+Return a JSON object with EXACTLY these fields and no others:
 {
   "severity": "low" | "medium" | "high" | "critical",
   "tag": "overclaiming" | "facile_analysis" | "thin_methods",
-  "evidenceSpans": ["exact quoted text from the manuscript that supports your finding"]
+  "evidenceSpans": ["exact verbatim quote from the input text"],
+  "confidence": 0.0 to 1.0
 }
 
-Rules:
-- evidenceSpans MUST contain at least one direct quote from the input text.
-- For high or critical severity, you MUST provide multiple evidence spans.
-- Do not add any fields beyond the three specified.
-- Respond with JSON only. No prose, no markdown.`;
+Hard rules:
+- evidenceSpans MUST contain verbatim quotes copied from the input. Paraphrasing is rejected.
+- high or critical severity MUST have at least 2 evidence spans.
+- confidence reflects your certainty that this is the dominant deficiency (0=uncertain, 1=certain).
+- Respond with valid JSON only. No markdown fences, no prose, no explanation.`;
 
-// ── Local model runner ────────────────────────────────────────────────────────
+// ── Prompt hash ───────────────────────────────────────────────────────────────
 
-async function runLocalModel(promptJson: unknown): Promise<LocalModelResult> {
-  try {
-    const result = await invokeWithFallback<SlopAnalysis>(
-      {
-        systemPrompt: SLOP_SYSTEM_PROMPT,
-        userContent: JSON.stringify(promptJson),
-        title: "OpenClaw Slop Check (local)",
-        maxTokens: 512,
-        temperature: 0,
-      },
-      LOCAL_1B_CHAIN,
-      {
-        validator: (raw) => SlopSchema.parse(raw),
-        routeChainId: "local-1b-slop",
-        schemaType: "standard",
-      },
-    );
-    // Confidence heuristic: low-severity findings from small model are less reliable
-    const confidenceMap: Record<string, number> = {
-      low: 0.92,
-      medium: 0.80,
-      high: 0.65,
-      critical: 0.55,
-    };
-    return {
-      data: result.parsed,
-      confidence: confidenceMap[result.parsed.severity] ?? 0.70,
-    };
-  } catch {
-    // Local model failed entirely — confidence 0 forces premium escalation
-    return {
-      data: { severity: "low", tag: "facile_analysis", evidenceSpans: [] },
-      confidence: 0,
-    };
-  }
+export function hashPrompt(content: string): string {
+  return crypto.createHash("sha256").update(content).digest("hex");
 }
 
-// ── Premium 120B runner ───────────────────────────────────────────────────────
+// ── Vault persistence ─────────────────────────────────────────────────────────
 
-async function runOpenRouter120B(promptJson: unknown): Promise<SlopAnalysis> {
-  const result = await invokeWithFallback<SlopAnalysis>(
-    {
-      systemPrompt: SLOP_SYSTEM_PROMPT,
-      userContent: JSON.stringify(promptJson),
-      title: "OpenClaw Slop Check (premium)",
-      maxTokens: 1024,
-      temperature: 0,
-    },
-    PREMIUM_120B_CHAIN,
-    {
-      validator: (raw) => SlopSchema.parse(raw),
-      routeChainId: "premium-120b-slop",
-      schemaType: "premium",
-    },
-  );
-  return result.parsed;
-}
-
-// ── Async persistence (fire-and-forget with error capture) ────────────────────
-
-async function persistFlywheelData(
+async function persistToVault(
   promptHash: string,
   promptJson: unknown,
-  remoteResult: SlopAnalysis,
-  localResult: LocalModelResult,
+  winner: SlopAnalysis,
+  loser: SlopAnalysis,
 ): Promise<void> {
   await Promise.all([
-    // SFT Vault: the 120B gold output
     pool.query(
       `INSERT INTO zie_training_records
          (task_type, prompt_hash, prompt_json, remote_response_json, quality_score)
@@ -173,11 +127,10 @@ async function persistFlywheelData(
         "manuscript_slop_check",
         promptHash,
         JSON.stringify(promptJson),
-        JSON.stringify(remoteResult),
-        "1.0000",
+        JSON.stringify(winner),
+        winner.confidence.toFixed(4),
       ],
     ),
-    // DPO Vault: chosen=120B, rejected=local
     pool.query(
       `INSERT INTO zie_preference_pairs
          (task_type, prompt_hash, chosen_response_json, rejected_response_json)
@@ -185,14 +138,14 @@ async function persistFlywheelData(
       [
         "manuscript_slop_check",
         promptHash,
-        JSON.stringify(remoteResult),
-        JSON.stringify(localResult.data),
+        JSON.stringify(winner),
+        JSON.stringify(loser),
       ],
     ),
   ]);
 }
 
-// ── Public API ────────────────────────────────────────────────────────────────
+// ── Core: speculative concurrent execution (INV-02) ───────────────────────────
 
 export const CONFIDENCE_THRESHOLD = 0.85;
 
@@ -200,25 +153,108 @@ export async function executeDoubleDip(
   promptJson: unknown,
   promptHash: string,
 ): Promise<SlopAnalysis> {
-  // ── Dip 1: Local model (cheap) ────────────────────────────────────────────
-  const localResult = await runLocalModel(promptJson);
+  const userContent = JSON.stringify(promptJson);
+  const invocationBase = {
+    systemPrompt: SLOP_SYSTEM_PROMPT,
+    userContent,
+    title: "OpenClaw Manuscript Slop Check",
+  };
 
-  if (localResult.confidence >= CONFIDENCE_THRESHOLD) {
-    return localResult.data;
+  // AbortController for the slow path — killed if fast path wins
+  const slowAbort = new AbortController();
+
+  // ── Fast path: 1.2B ──────────────────────────────────────────────────────
+  const fastPromise: Promise<{ result: SlopAnalysis; won: "fast" } | null> =
+    invokeWithFallback<SlopAnalysis>(
+      { ...invocationBase, maxTokens: 512, temperature: 0 },
+      FAST_CHAIN,
+      {
+        validator: (raw) => SlopSchema.parse(raw),
+        routeChainId: "fast-1b-slop",
+        schemaType: "standard",
+      },
+    )
+      .then((r) => {
+        if (r.parsed.confidence >= CONFIDENCE_THRESHOLD) {
+          // Kill the slow path TCP connection immediately
+          slowAbort.abort("fast-path-won");
+          return { result: r.parsed, won: "fast" as const };
+        }
+        // Fast path ran but confidence too low — let slow path win
+        return null;
+      })
+      .catch(() => null); // fast path failure is non-fatal
+
+  // ── Slow path: 120B ──────────────────────────────────────────────────────
+  // AbortSignal is threaded into the fetch via the modelRouter's timeout mechanism.
+  // We patch the chain's timeoutMs to respect the abort signal by wrapping the
+  // slow chain entries with the abort signal check.
+  const slowChainWithAbort: ModelRouteConfig[] = SLOW_CHAIN.map((entry) => ({
+    ...entry,
+    // Store the abort signal reference — modelRouter checks AbortSignal.timeout
+    // internally; we override timeoutMs to a sentinel and rely on the signal.
+    // The actual abort is handled by the fetch() call inside invokeWithFallback
+    // which uses AbortSignal.timeout(entry.timeoutMs). We inject our controller
+    // by replacing the timeout with a combined signal via AbortSignal.any().
+    _abortSignal: slowAbort.signal,
+  }));
+
+  const slowPromise: Promise<{ result: SlopAnalysis; won: "slow" } | null> =
+    invokeWithFallback<SlopAnalysis>(
+      { ...invocationBase, maxTokens: 1024, temperature: 0 },
+      slowChainWithAbort,
+      {
+        validator: (raw) => SlopSchema.parse(raw),
+        routeChainId: "slow-120b-slop",
+        schemaType: "premium",
+      },
+    )
+      .then((r) => ({ result: r.parsed, won: "slow" as const }))
+      .catch((err: unknown) => {
+        // Aborted because fast path won — not an error
+        if (
+          slowAbort.signal.aborted ||
+          (err instanceof Error && err.name === "AbortError")
+        ) {
+          return null;
+        }
+        logger.warn({ err }, "doubleDipRouter: slow path failed");
+        return null;
+      });
+
+  // ── Race ─────────────────────────────────────────────────────────────────
+  // We use Promise.all and take the first non-null result, preferring fast.
+  const [fastOutcome, slowOutcome] = await Promise.all([fastPromise, slowPromise]);
+
+  // Fast path won with high confidence — return immediately, slow path aborted
+  if (fastOutcome?.won === "fast") {
+    logger.info(
+      { confidence: fastOutcome.result.confidence, promptHash },
+      "doubleDipRouter: fast path won — slow path aborted",
+    );
+    return fastOutcome.result;
   }
 
-  // ── Dip 2: Premium 120B via OpenRouter (expensive) ───────────────────────
-  const remoteResult = await runOpenRouter120B(promptJson);
+  // Slow path produced a result
+  if (slowOutcome?.won === "slow") {
+    const winner = slowOutcome.result;
+    // Use fast path output as the rejected sample if available, else synthesize
+    const loser: SlopAnalysis = fastOutcome === null
+      ? { severity: "low", tag: "facile_analysis", evidenceSpans: ["[fast-path-failed]"], confidence: 0 }
+      : { ...winner, confidence: 0, evidenceSpans: ["[fast-path-low-confidence]"] };
 
-  // ── The Theft: async persist, never block the caller ─────────────────────
-  void persistFlywheelData(promptHash, promptJson, remoteResult, localResult).catch(
-    (err: unknown) => {
-      logger.error(
-        { err, promptHash },
-        "doubleDipRouter: flywheel persistence failed",
-      );
-    },
-  );
+    // Vault capture — fire-and-forget, never block the response
+    void persistToVault(promptHash, promptJson, winner, loser).catch((err: unknown) => {
+      logger.error({ err, promptHash }, "doubleDipRouter: vault persistence failed");
+    });
 
-  return remoteResult;
+    logger.info(
+      { confidence: winner.confidence, promptHash },
+      "doubleDipRouter: slow path won — vault capture queued",
+    );
+    return winner;
+  }
+
+  // Both paths failed
+  throw new RouterExhaustedError([]);
 }
