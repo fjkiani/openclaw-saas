@@ -28,6 +28,7 @@
  */
 
 import { Router, type IRouter, type Request, type Response } from "express";
+import { pool } from "@workspace/db";
 import { z } from "zod";
 import {
   persistSeoFlywheelData,
@@ -468,5 +469,112 @@ router.post(
     res.status(200).json(response);
   },
 );
+
+// ── GET /api/v1/seo/benchmark ─────────────────────────────────────────────────
+//
+// Returns the top 10 domains in zie_training_records where domain='seo',
+// ranked by avg(quality_score), with their sci_normalized scores extracted
+// from the prompt_json payload.
+//
+// This is the moat endpoint: every new audit makes the benchmark more accurate.
+// User audits their site → sees "your ODI is 18.9"
+// Benchmark shows: "Top performers in your keyword category have ODI 8-12"
+// That gap = the product's value proposition, shown with real data.
+//
+// Response shape:
+// {
+//   total_audits: 12,
+//   benchmark: [
+//     {
+//       rank: 1,
+//       domain: "stripe.com",
+//       avg_quality_score: 1.0,
+//       audit_count: 3,
+//       best_sci_normalized: 100,
+//       best_odi_display: 8.2,
+//       verdict: "LOW",
+//       latest_audit_at: "2026-06-04T..."
+//     },
+//     ...
+//   ]
+// }
+
+router.get(
+  "/v1/seo/benchmark",
+  async (_req: Request, res: Response): Promise<void> => {
+    try {
+      // Pull all remote_promoted seo_audit records.
+      // Extract sci_normalized and odi_display from the stored prompt_json
+      // (which contains sci_rankings array) and remote_response_json (verdict).
+      const result = await pool.query<{
+        domain: string;
+        avg_quality_score: string;
+        audit_count: string;
+        best_sci_normalized: string;
+        best_odi_display: string;
+        verdict: string;
+        latest_audit_at: string;
+      }>(
+        `SELECT
+           prompt_json->>'domain'                                          AS domain,
+           AVG(quality_score)::numeric(5,4)                               AS avg_quality_score,
+           COUNT(*)                                                        AS audit_count,
+           MAX(
+             COALESCE(
+               (prompt_json->'sci_rankings'->0->>'sci_normalized')::numeric,
+               0
+             )
+           )                                                               AS best_sci_normalized,
+           MIN(
+             COALESCE(
+               (prompt_json->'sci_rankings'->0->>'odi_display')::numeric,
+               999
+             )
+           )                                                               AS best_odi_display,
+           (array_agg(
+             remote_response_json->>'verdict'
+             ORDER BY created_at DESC
+           ))[1]                                                           AS verdict,
+           MAX(created_at)                                                 AS latest_audit_at
+         FROM zie_training_records
+         WHERE domain = 'seo'
+           AND source_kind = 'remote_promoted'
+           AND task_type = 'seo_audit'
+           AND prompt_json->>'domain' IS NOT NULL
+         GROUP BY prompt_json->>'domain'
+         ORDER BY avg_quality_score DESC, audit_count DESC
+         LIMIT 10`,
+      );
+
+      // Total unique audits across all domains
+      const countResult = await pool.query<{ total: string }>(
+        `SELECT COUNT(*) AS total
+         FROM zie_training_records
+         WHERE domain = 'seo'
+           AND source_kind = 'remote_promoted'
+           AND task_type = 'seo_audit'`,
+      );
+
+      const totalAudits = parseInt(countResult.rows[0]?.total ?? "0", 10);
+
+      const benchmark = result.rows.map((row, idx) => ({
+        rank: idx + 1,
+        domain: row.domain,
+        avg_quality_score: parseFloat(row.avg_quality_score),
+        audit_count: parseInt(row.audit_count, 10),
+        best_sci_normalized: parseFloat(row.best_sci_normalized ?? "0"),
+        best_odi_display: parseFloat(row.best_odi_display ?? "0"),
+        verdict: row.verdict ?? "UNKNOWN",
+        latest_audit_at: row.latest_audit_at ?? null,
+      }));
+
+      res.status(200).json({ total_audits: totalAudits, benchmark });
+    } catch (err: unknown) {
+      logger.error({ err }, "seo.ts: benchmark query failed");
+      res.status(500).json({ error: "Benchmark query failed" });
+    }
+  },
+);
+
 
 export default router;
