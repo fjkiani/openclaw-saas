@@ -647,8 +647,16 @@ app.listen(port, (err) => {
   logger.info({ port }, "Server listening");
 
   // Run migrations + seed after server is up (non-blocking)
-  runMigrations()
-    .then(() => runZieMigration())
+  // Run migrations independently so ZIE tables are always created even if
+  // the main migration partially fails. Both run in parallel, then seed + scheduler.
+  Promise.allSettled([
+    runMigrations().catch((err) => {
+      logger.error({ err }, "runMigrations failed — server continues");
+    }),
+    runZieMigration().catch((err) => {
+      logger.error({ err }, "runZieMigration failed — ZIE tables may be missing");
+    }),
+  ])
     .then(() => runSeed())
     .then(() => {
       logger.info("DB migrations and seed complete.");
@@ -660,7 +668,7 @@ app.listen(port, (err) => {
     })
     .catch((err) => {
       // Soft-fail: log the error but do NOT crash the server.
-      logger.error({ err }, "DB migrations/seed/scheduler failed — server continues.");
+      logger.error({ err }, "DB seed/scheduler failed — server continues.");
     });
 
   // Graceful shutdown — stop pg-boss before process exits
