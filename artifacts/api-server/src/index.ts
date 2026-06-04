@@ -467,8 +467,31 @@ async function runMigrations(): Promise<void> {
         "remote_response_json" jsonb,
         "workspace_id" text,
         "tenant_id" text,
+        "dataset_version_id" integer,
+        "model_version_id" integer,
+        "source_run_id" uuid,
+        "source_analysis_ref" text,
         "created_at" timestamptz NOT NULL DEFAULT now()
       )
+    `);
+
+    // Idempotent reconciliation for zie_training_records: the SEO factory adapter
+    // (seoFactoryAdapter.persistSeoFlywheelData) INSERTs source_run_id,
+    // source_analysis_ref and the dataset/model version FKs. A pre-existing
+    // partial table (e.g. created before these columns existed) would make that
+    // fire-and-forget INSERT throw "column does not exist", silently dropping the
+    // training record AND blocking the dependent preference-pair insert.
+    await client.query(`
+      ALTER TABLE "zie_training_records"
+        ADD COLUMN IF NOT EXISTS "prompt_json" jsonb,
+        ADD COLUMN IF NOT EXISTS "remote_response_json" jsonb,
+        ADD COLUMN IF NOT EXISTS "quality_score" real,
+        ADD COLUMN IF NOT EXISTS "workspace_id" text,
+        ADD COLUMN IF NOT EXISTS "tenant_id" text,
+        ADD COLUMN IF NOT EXISTS "dataset_version_id" integer,
+        ADD COLUMN IF NOT EXISTS "model_version_id" integer,
+        ADD COLUMN IF NOT EXISTS "source_run_id" uuid,
+        ADD COLUMN IF NOT EXISTS "source_analysis_ref" text
     `);
 
     // zie_preference_pairs — judge.ts contract. prompt_hash, source_kind,
@@ -492,6 +515,8 @@ async function runMigrations(): Promise<void> {
         "judge_run_id" integer,
         "tenant_id" text,
         "workspace_id" text,
+        "chosen_training_record_id" uuid,
+        "rejected_training_record_id" uuid,
         "created_at" timestamptz NOT NULL DEFAULT now()
       )
     `);
@@ -512,6 +537,8 @@ async function runMigrations(): Promise<void> {
         ADD COLUMN IF NOT EXISTS "judge_run_id" integer,
         ADD COLUMN IF NOT EXISTS "tenant_id" text,
         ADD COLUMN IF NOT EXISTS "workspace_id" text,
+        ADD COLUMN IF NOT EXISTS "chosen_training_record_id" uuid,
+        ADD COLUMN IF NOT EXISTS "rejected_training_record_id" uuid,
         ADD COLUMN IF NOT EXISTS "created_at" timestamptz NOT NULL DEFAULT now()
     `);
 
