@@ -292,7 +292,7 @@ const router: IRouter = Router();
  * double-dip ZIE flywheel for LLM synthesis.
  */
 router.post(
-  "/api/v1/seo/audit",
+  "/v1/seo/audit",
   requireWorkspaceMember,
   async (req: Request, res: Response): Promise<void> => {
     // ── 1. Validate request body ────────────────────────────────────────────
