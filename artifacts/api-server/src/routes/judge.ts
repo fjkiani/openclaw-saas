@@ -9,9 +9,14 @@
  *   1. Fetch zie_preference_pairs row by UUID.
  *   2. Send chosen + rejected responses to the judge LLM (GROQ llama-3.3-70b).
  *   3. Parse judge scores (0.0–1.0 each) + reasoning.
- *   4. UPDATE zie_preference_pairs SET judge_verified, judge_score_chosen,
- *      judge_score_rejected, judge_reasoning WHERE id = :pairId.
- *   5. Return receipt JSON.
+ *   4. In ONE transaction: insert an evaluation_run, insert its evaluation_metrics
+ *      (judge_score_chosen, judge_score_rejected, judge_delta), then UPDATE
+ *      zie_preference_pairs SET judge_verified, judge_score_*, judge_reasoning,
+ *      judge_run_id = <evaluation_run.id> WHERE id = :pairId.
+ *   5. Return receipt JSON (includes judge_run_id).
+ *
+ * Requires migration 0007_judge_evaluation_bridge.sql (evaluation_metrics table
+ * + zie_preference_pairs.judge_* columns incl. judge_run_id).
  *
  * Judge schema (strict JSON output):
  *   { "score_chosen": 0.0–1.0, "score_rejected": 0.0–1.0, "reasoning": "<string>" }
@@ -88,10 +93,11 @@ router.post(
       rejected_response_json: unknown;
       preference_source: string;
       judge_verified: boolean;
+      tenant_id: string | null;
     }>(
       `SELECT id, domain, task_type, prompt_hash,
               chosen_response_json, rejected_response_json,
-              preference_source, judge_verified
+              preference_source, judge_verified, tenant_id
        FROM zie_preference_pairs
        WHERE id = $1`,
       [pairId],
@@ -150,24 +156,74 @@ router.post(
       return;
     }
 
-    // ── 4. Persist judge verdict ──────────────────────────────────────────────
+    // ── 4. Persist judge verdict + evaluation bridge (atomic) ─────────────────
+    // The judge writes three coupled records inside one transaction so the
+    // flywheel is observable: an evaluation_run, its evaluation_metrics, and the
+    // back-reference (judge_run_id) on the preference pair. Either all land or none.
     const judgeVerified = judgeOutput.score_chosen > judgeOutput.score_rejected;
+    const judgeDelta = judgeOutput.score_chosen - judgeOutput.score_rejected;
+    // evaluation_runs.tenant_id is NOT NULL; judge is a system process, so fall
+    // back to a system tenant when the pair has no tenant attached.
+    const tenantId = pair.tenant_id ?? "system";
 
-    await pool.query(
-      `UPDATE zie_preference_pairs
-       SET judge_verified      = $1,
-           judge_score_chosen  = $2,
-           judge_score_rejected = $3,
-           judge_reasoning     = $4
-       WHERE id = $5`,
-      [
-        judgeVerified,
-        judgeOutput.score_chosen,
-        judgeOutput.score_rejected,
-        judgeOutput.reasoning,
-        pairId,
-      ],
-    );
+    const client = await pool.connect();
+    let evalRunId: number;
+    try {
+      await client.query("BEGIN");
+
+      // 4a. evaluation_run — id is SERIAL (integer), capture it via RETURNING.
+      const runInsert = await client.query<{ id: number }>(
+        `INSERT INTO evaluation_runs (tenant_id, domain, task_type, status, completed_at)
+         VALUES ($1, $2, $3, 'completed', NOW())
+         RETURNING id`,
+        [tenantId, pair.domain, pair.task_type],
+      );
+      evalRunId = runInsert.rows[0].id;
+
+      // 4b. evaluation_metrics — FK column is eval_run_id (integer); value is `value`.
+      await client.query(
+        `INSERT INTO evaluation_metrics (tenant_id, eval_run_id, metric_name, value)
+         VALUES
+           ($1, $2, 'judge_score_chosen',   $3),
+           ($1, $2, 'judge_score_rejected', $4),
+           ($1, $2, 'judge_delta',          $5)`,
+        [
+          tenantId,
+          evalRunId,
+          judgeOutput.score_chosen,
+          judgeOutput.score_rejected,
+          judgeDelta,
+        ],
+      );
+
+      // 4c. preference pair — include judge_run_id (integer FK -> evaluation_runs.id).
+      await client.query(
+        `UPDATE zie_preference_pairs
+         SET judge_verified       = $1,
+             judge_score_chosen   = $2,
+             judge_score_rejected = $3,
+             judge_reasoning      = $4,
+             judge_run_id         = $5
+         WHERE id = $6`,
+        [
+          judgeVerified,
+          judgeOutput.score_chosen,
+          judgeOutput.score_rejected,
+          judgeOutput.reasoning,
+          evalRunId,
+          pairId,
+        ],
+      );
+
+      await client.query("COMMIT");
+    } catch (err: unknown) {
+      await client.query("ROLLBACK");
+      logger.error({ err, pairId }, "judge.ts: evaluation-bridge transaction failed");
+      res.status(500).json({ error: "Failed to persist judge evaluation bridge" });
+      return;
+    } finally {
+      client.release();
+    }
 
     logger.info(
       {
@@ -190,7 +246,9 @@ router.post(
       judge_verified:      judgeVerified,
       judge_score_chosen:  judgeOutput.score_chosen,
       judge_score_rejected: judgeOutput.score_rejected,
+      judge_delta:         judgeDelta,
       judge_reasoning:     judgeOutput.reasoning,
+      judge_run_id:        evalRunId,
       model_used:          modelUsed,
     });
   },

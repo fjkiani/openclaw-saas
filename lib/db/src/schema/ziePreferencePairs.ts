@@ -5,6 +5,7 @@ import {
   jsonb,
   boolean,
   integer,
+  real,
   timestamp,
   index,
 } from "drizzle-orm/pg-core";
@@ -44,6 +45,18 @@ export const ziePreferencePairsTable = pgTable(
      * Must differ from chosenTrainingRecordId — enforced at application layer.
      */
     rejectedTrainingRecordId: uuid("rejected_training_record_id"),
+
+    // ── LLM-as-judge columns (migration 0007) ──────────────────────────────
+    /** True iff the judge scored chosen strictly higher than rejected. */
+    judgeVerified: boolean("judge_verified").notNull().default(false),
+    /** Judge score (0.0–1.0) for the chosen response. */
+    judgeScoreChosen: real("judge_score_chosen"),
+    /** Judge score (0.0–1.0) for the rejected response. */
+    judgeScoreRejected: real("judge_score_rejected"),
+    /** One-sentence judge rationale. */
+    judgeReasoning: text("judge_reasoning"),
+    /** FK → evaluation_runs(id) (integer SERIAL) for the judge run that scored this pair. */
+    judgeRunId: integer("judge_run_id"),
   },
   (table) => ({
     taskTypeIdx: index("idx_zie_preference_pairs_task_type").on(table.taskType),
