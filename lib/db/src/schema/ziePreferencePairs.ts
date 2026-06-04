@@ -16,6 +16,9 @@ export const ziePreferencePairsTable = pgTable(
       .primaryKey()
       .default(sql`gen_random_uuid()`),
     taskType: text("task_type").notNull(),
+    domain: text("domain").notNull().default("unknown"),
+    sourceKind: text("source_kind").notNull().default("direct_call"),
+    preferenceSource: text("preference_source").notNull().default("path_race"),
     promptHash: text("prompt_hash").notNull(),
     chosenResponseJson: jsonb("chosen_response_json").notNull(),
     rejectedResponseJson: jsonb("rejected_response_json").notNull(),
@@ -26,6 +29,7 @@ export const ziePreferencePairsTable = pgTable(
   },
   (table) => ({
     taskTypeIdx: index("idx_zie_preference_pairs_task_type").on(table.taskType),
+    domainIdx: index("idx_zie_preference_pairs_domain").on(table.domain, table.createdAt),
     promptHashIdx: index("idx_zie_preference_pairs_prompt_hash").on(table.promptHash),
     createdAtIdx: index("idx_zie_preference_pairs_created_at").on(table.createdAt),
   }),

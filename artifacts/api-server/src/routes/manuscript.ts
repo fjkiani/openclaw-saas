@@ -12,7 +12,7 @@
 
 import { Router, type IRouter } from "express";
 import { z } from "zod";
-import { executeDoubleDip, hashPrompt } from "../lib/doubleDipRouter.js";
+import { executeDoubleDip, hashPrompt, SlopSchema } from "../lib/doubleDipRouter.js";
 import { RouterExhaustedError } from "../lib/modelRouter.js";
 import { logger } from "../lib/logger.js";
 
@@ -59,17 +59,30 @@ router.post("/v1/manuscript/review", async (req, res): Promise<void> => {
   logger.info(logCtx, "manuscript/review: executing double-dip");
 
   try {
-    const analysis = await executeDoubleDip({ text, submission_id, tenant_id }, promptHash);
+    const { analysis, path_taken } = await executeDoubleDip(
+      { text, submission_id, tenant_id },
+      promptHash,
+      "manuscript_slop_check",
+      {
+        domain: "manuscript",
+        sourceKind: "direct_call",
+        outputSchema: SlopSchema,
+      },
+    );
+
+    // analysis is validated by SlopSchema inside executeDoubleDip
+    const slopResult = SlopSchema.parse(analysis);
 
     logger.info(
-      { ...logCtx, severity: analysis.severity, confidence: analysis.confidence },
+      { ...logCtx, severity: slopResult.severity, confidence: slopResult.confidence, path_taken },
       "manuscript/review: complete",
     );
 
     res.json({
       ok: true,
       prompt_hash: promptHash,
-      analysis,
+      path_taken,
+      analysis: slopResult,
     });
   } catch (err: unknown) {
     if (err instanceof RouterExhaustedError) {

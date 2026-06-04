@@ -110,7 +110,8 @@ async function fetchCompletion(
   userContent: string,
   maxTokens: number,
   signal: AbortSignal,
-): Promise<SlopAnalysis> {
+  systemPromptOverride?: string,
+): Promise<unknown> {
   const response = await fetch(OPENROUTER_BASE, {
     method: "POST",
     signal,
@@ -118,12 +119,12 @@ async function fetchCompletion(
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
       "HTTP-Referer": OPENROUTER_REFERER,
-      "X-Title": "OpenClaw Manuscript Slop Check",
+      "X-Title": "OpenClaw Double-Dip Router",
     },
     body: JSON.stringify({
       model: modelId,
       messages: [
-        { role: "system", content: SLOP_SYSTEM_PROMPT },
+        { role: "system", content: systemPromptOverride ?? SLOP_SYSTEM_PROMPT },
         { role: "user", content: userContent },
       ],
       temperature: 0,
@@ -148,7 +149,7 @@ async function fetchCompletion(
     throw new Error(`JSON parse failed: ${raw.slice(0, 120)}`);
   }
 
-  return SlopSchema.parse(parsed);
+  return parsed;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -160,41 +161,73 @@ export function hashPrompt(text: string): string {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Vault options — passed through from domain-specific callers
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface VaultOptions {
+  domain?: string;
+  sourceKind?: string;
+  preferenceSource?: string;
+  systemPrompt?: string;
+  /** Zod schema to validate model output. Defaults to SlopSchema. */
+  outputSchema?: z.ZodTypeAny;
+  /** Confidence threshold override. Defaults to CONFIDENCE_THRESHOLD (0.85). */
+  confidenceThreshold?: number;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Vault persistence
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function persistToVault(
+  taskType: string,
   promptHash: string,
   promptJson: unknown,
-  winner: SlopAnalysis,
-  loser: SlopAnalysis,
+  winner: unknown,
+  loser: unknown,
+  opts: Required<Pick<VaultOptions, "domain" | "sourceKind" | "preferenceSource">>,
+  qualityScore: number,
 ): Promise<void> {
   await Promise.all([
     pool.query(
       `INSERT INTO zie_training_records
-         (task_type, prompt_hash, prompt_json, remote_response_json, quality_score)
-       VALUES ($1, $2, $3, $4, $5)
+         (task_type, domain, source_kind, prompt_hash, prompt_json, remote_response_json, quality_score)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
        ON CONFLICT (prompt_hash) DO NOTHING`,
       [
-        "manuscript_slop_check",
+        taskType,
+        opts.domain,
+        opts.sourceKind,
         promptHash,
         JSON.stringify(promptJson),
         JSON.stringify(winner),
-        winner.confidence.toFixed(4),
+        qualityScore.toFixed(4),
       ],
     ),
     pool.query(
       `INSERT INTO zie_preference_pairs
-         (task_type, prompt_hash, chosen_response_json, rejected_response_json)
-       VALUES ($1, $2, $3, $4)`,
+         (task_type, domain, source_kind, preference_source, prompt_hash, chosen_response_json, rejected_response_json)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
       [
-        "manuscript_slop_check",
+        taskType,
+        opts.domain,
+        opts.sourceKind,
+        opts.preferenceSource,
         promptHash,
         JSON.stringify(winner),
         JSON.stringify(loser),
       ],
     ),
   ]);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DoubleDipResult — returned to all callers
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface DoubleDipResult {
+  analysis: unknown;
+  path_taken: "fast" | "slow";
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -205,12 +238,17 @@ export async function executeDoubleDip(
   promptJson: unknown,
   promptHash: string,
   taskType = "manuscript_slop_check",
-): Promise<SlopAnalysis> {
+  vaultOpts: VaultOptions = {},
+): Promise<DoubleDipResult> {
   const userContent = JSON.stringify(promptJson);
+  const domain = vaultOpts.domain ?? "manuscript";
+  const sourceKind = vaultOpts.sourceKind ?? "direct_call";
+  const preferenceSource = vaultOpts.preferenceSource ?? "path_race";
+  const systemPrompt = vaultOpts.systemPrompt;
+  const outputSchema: z.ZodTypeAny = vaultOpts.outputSchema ?? SlopSchema;
+  const confidenceThreshold = vaultOpts.confidenceThreshold ?? CONFIDENCE_THRESHOLD;
 
   // Resolve fast-path model from zie_router_policies.
-  // After a LoRA fine-tune completes, this returns the trained model ID
-  // instead of the base liquid/lfm-2.5-1.2b — the flywheel closes.
   const fastPolicy = await resolveFastPolicy(taskType);
   const fastApiKey = process.env[fastPolicy.fast_api_key_env] ?? process.env.OPENROUTER_API_KEY ?? "";
   const slowApiKey1 = process.env.OPENROUTER_API_KEY ?? "";
@@ -221,28 +259,27 @@ export async function executeDoubleDip(
   }
 
   logger.info(
-    { taskType, fastModel: fastPolicy.fast_model_id, promptHash },
+    { taskType, domain, fastModel: fastPolicy.fast_model_id, promptHash },
     "doubleDipRouter: executing double-dip",
   );
 
-  // AbortController for the slow path.
-  // .abort() is called the moment the fast path returns confidence >= 0.85,
-  // killing the active TCP connection to OpenRouter.
   const slowAbort = new AbortController();
-
-  // Fast path: model from zie_router_policies (starts as liquid/lfm-2.5-1.2b:free,
-  // upgrades to fine-tuned LoRA after first successful training run)
   const fastSignal = AbortSignal.timeout(fastPolicy.fast_timeout_ms);
 
-  const fastPromise: Promise<{ result: SlopAnalysis; won: "fast" } | null> =
-    fetchCompletion(fastPolicy.fast_model_id, fastApiKey, userContent, fastPolicy.fast_max_tokens, fastSignal)
-      .then((result) => {
-        if (result.confidence >= CONFIDENCE_THRESHOLD) {
-          // Fast path won — kill the slow path TCP connection immediately
-          slowAbort.abort("fast-path-won");
-          return { result, won: "fast" as const };
+  const fastPromise: Promise<{ result: unknown; confidence: number; won: "fast" } | null> =
+    fetchCompletion(fastPolicy.fast_model_id, fastApiKey, userContent, fastPolicy.fast_max_tokens, fastSignal, systemPrompt)
+      .then((raw) => {
+        const parsed = outputSchema.safeParse(raw);
+        if (!parsed.success) {
+          logger.warn({ issues: parsed.error.issues }, "doubleDipRouter: fast path schema invalid");
+          return null;
         }
-        // Ran but confidence too low — slow path continues
+        const result = parsed.data as { confidence?: number };
+        const confidence = typeof result.confidence === "number" ? result.confidence : 0;
+        if (confidence >= confidenceThreshold) {
+          slowAbort.abort("fast-path-won");
+          return { result: parsed.data, confidence, won: "fast" as const };
+        }
         return null;
       })
       .catch((err: unknown) => {
@@ -250,44 +287,42 @@ export async function executeDoubleDip(
         return null;
       });
 
-  // Slow path: openai/gpt-4o (120B proxy) — 45 s timeout, killed by slowAbort
-  // AbortSignal.any() combines the 45 s timeout with the manual abort controller,
-  // whichever fires first wins and cancels the fetch.
   const slowTimeoutSignal = AbortSignal.timeout(45_000);
   const slowSignal = AbortSignal.any([slowAbort.signal, slowTimeoutSignal]);
-
   const activeSlowKey = slowApiKey1 || slowApiKey2;
-  const slowPromise: Promise<{ result: SlopAnalysis; won: "slow" } | null> =
-    fetchCompletion("openai/gpt-4o", activeSlowKey, userContent, 1024, slowSignal)
-      .then((result) => ({ result, won: "slow" as const }))
+
+  const slowPromise: Promise<{ result: unknown; confidence: number; won: "slow" } | null> =
+    fetchCompletion("openai/gpt-4o", activeSlowKey, userContent, 1024, slowSignal, systemPrompt)
+      .then((raw) => {
+        const parsed = outputSchema.safeParse(raw);
+        if (!parsed.success) {
+          logger.warn({ issues: parsed.error.issues }, "doubleDipRouter: slow path schema invalid");
+          return null;
+        }
+        const result = parsed.data as { confidence?: number };
+        const confidence = typeof result.confidence === "number" ? result.confidence : 1;
+        return { result: parsed.data, confidence, won: "slow" as const };
+      })
       .catch((err: unknown) => {
         if (
           slowAbort.signal.aborted ||
           (err instanceof Error &&
             (err.name === "AbortError" || err.name === "TimeoutError"))
         ) {
-          // Aborted by fast-path win or timeout — not an error
           return null;
         }
-        // Try fallback key if primary failed for a non-abort reason
         if (slowApiKey2 && slowApiKey2 !== slowApiKey1) {
-          const fallbackSignal = AbortSignal.any([
-            slowAbort.signal,
-            AbortSignal.timeout(45_000),
-          ]);
-          return fetchCompletion(
-            "openai/gpt-4o",
-            slowApiKey2,
-            userContent,
-            1024,
-            fallbackSignal,
-          )
-            .then((result) => ({ result, won: "slow" as const }))
+          const fallbackSignal = AbortSignal.any([slowAbort.signal, AbortSignal.timeout(45_000)]);
+          return fetchCompletion("openai/gpt-4o", slowApiKey2, userContent, 1024, fallbackSignal, systemPrompt)
+            .then((raw) => {
+              const parsed = outputSchema.safeParse(raw);
+              if (!parsed.success) return null;
+              const result = parsed.data as { confidence?: number };
+              const confidence = typeof result.confidence === "number" ? result.confidence : 1;
+              return { result: parsed.data, confidence, won: "slow" as const };
+            })
             .catch((fallbackErr: unknown) => {
-              logger.warn(
-                { err: fallbackErr },
-                "doubleDipRouter: slow path fallback also failed",
-              );
+              logger.warn({ err: fallbackErr }, "doubleDipRouter: slow path fallback also failed");
               return null;
             });
         }
@@ -295,50 +330,39 @@ export async function executeDoubleDip(
         return null;
       });
 
-  // Both paths run concurrently. Promise.all waits for both to settle.
-  // We prefer fast if it won; otherwise take slow.
   const [fastOutcome, slowOutcome] = await Promise.all([fastPromise, slowPromise]);
 
   if (fastOutcome?.won === "fast") {
     logger.info(
-      { confidence: fastOutcome.result.confidence, promptHash },
+      { confidence: fastOutcome.confidence, promptHash },
       "doubleDipRouter: fast path won — slow path aborted",
     );
-    return fastOutcome.result;
+    return { analysis: fastOutcome.result, path_taken: "fast" };
   }
 
   if (slowOutcome?.won === "slow") {
     const winner = slowOutcome.result;
-    const loser: SlopAnalysis =
-      fastOutcome === null
-        ? {
-            severity: "low",
-            tag: "facile_analysis",
-            evidenceSpans: ["[fast-path-failed]"],
-            confidence: 0,
-          }
-        : {
-            severity: fastOutcome.result?.severity ?? "low",
-            tag: fastOutcome.result?.tag ?? "facile_analysis",
-            evidenceSpans: fastOutcome.result?.evidenceSpans ?? ["[fast-path-low-confidence]"],
-            confidence: fastOutcome.result?.confidence ?? 0,
-          };
+    const loser = fastOutcome === null
+      ? { severity: "low", tag: "facile_analysis", evidenceSpans: ["[fast-path-failed]"], confidence: 0 }
+      : fastOutcome.result;
 
-    // Fire-and-forget vault capture — never blocks the HTTP response
-    void persistToVault(promptHash, promptJson, winner, loser).catch(
-      (err: unknown) => {
-        logger.error(
-          { err, promptHash },
-          "doubleDipRouter: vault persistence failed",
-        );
-      },
-    );
+    void persistToVault(
+      taskType,
+      promptHash,
+      promptJson,
+      winner,
+      loser,
+      { domain, sourceKind, preferenceSource },
+      slowOutcome.confidence,
+    ).catch((err: unknown) => {
+      logger.error({ err, promptHash }, "doubleDipRouter: vault persistence failed");
+    });
 
     logger.info(
-      { confidence: winner.confidence, promptHash },
+      { confidence: slowOutcome.confidence, promptHash },
       "doubleDipRouter: slow path won — vault capture queued",
     );
-    return winner;
+    return { analysis: winner, path_taken: "slow" };
   }
 
   throw new RouterExhaustedError([]);

@@ -61,25 +61,33 @@ export async function startForgeScheduler(): Promise<void> {
     },
   );
 
-  // Register the worker that processes the scheduled jobs
+  // Register the worker that processes the scheduled jobs.
+  // pg-boss v10: WorkHandler receives Job<T>[] (array), batchSize=1 ensures
+  // at most one job is delivered per invocation.
   await boss.work<Record<string, never>>(
     "hourly-forge-check",
-    { teamSize: 1, teamConcurrency: 1 },
-    async (job) => {
+    { batchSize: 1 },
+    async (jobs: PgBoss.Job<Record<string, never>>[]) => {
+      const job = jobs[0];
+      if (!job) return;
+
       logger.info({ jobId: job.id }, "forgeScheduler: hourly-forge-check fired");
       try {
-        const result = await checkThresholdsAndDispatch();
-        logger.info(
-          {
-            jobId: job.id,
-            dispatched: result.dispatched,
-            sftCount: result.sftCount,
-            dpoCount: result.dpoCount,
-            trainingJobId: result.jobId ?? null,
-            dryRun: result.dryRun ?? false,
-          },
-          "forgeScheduler: hourly-forge-check complete",
-        );
+        const results = await checkThresholdsAndDispatch();
+        for (const result of results) {
+          logger.info(
+            {
+              jobId: job.id,
+              taskType: result.task_type,
+              dispatched: result.dispatched,
+              sftCount: result.sftCount,
+              dpoCount: result.dpoCount,
+              trainingJobId: result.jobId ?? null,
+              dryRun: result.dryRun ?? false,
+            },
+            "forgeScheduler: hourly-forge-check complete",
+          );
+        }
       } catch (err: unknown) {
         logger.error(
           { err, jobId: job.id },

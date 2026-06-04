@@ -12,6 +12,7 @@ import forgeRouter from "./forge";
 import legalRouter from "./legal";
 import onboardingRouter from "./onboarding";
 import manuscriptRouter from "./manuscript";
+import seoRouter from "./seo";
 
 const router: IRouter = Router();
 
@@ -28,5 +29,6 @@ router.use(forgeRouter);
 router.use(legalRouter);
 router.use(onboardingRouter);
 router.use(manuscriptRouter);
+router.use(seoRouter);
 
 export default router;

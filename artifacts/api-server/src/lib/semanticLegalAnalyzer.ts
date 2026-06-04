@@ -50,7 +50,7 @@ import {
   type SemanticDocClass,
 } from "./routePolicy.js";
 import type { DocClass } from "./draftReceiptEngine.js";
-import { executeDoubleDip, hashPrompt, type SlopAnalysis } from "./doubleDipRouter.js";
+import { executeDoubleDip, hashPrompt } from "./doubleDipRouter.js";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -298,7 +298,7 @@ function captureClauseForVault(
     `${LEGAL_TASK_TYPE}:${docClass}:${clauseLabel}:${clauseText.slice(0, 500)}`,
   );
 
-  void executeDoubleDip(payload, promptHash).catch((err: unknown) => {
+  void executeDoubleDip(payload, promptHash, LEGAL_TASK_TYPE, { domain: "legal", sourceKind: "shadow_hook" }).catch((err: unknown) => {
     logger.warn(
       { err, clauseLabel, docClass },
       "semanticLegalAnalyzer: ZIE vault capture failed for clause (non-fatal)",

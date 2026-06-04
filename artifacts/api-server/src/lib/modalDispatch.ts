@@ -70,6 +70,7 @@ export async function dispatchTraining(
   }
 
   // Live path — requires @modal-labs/modal + MODAL_TOKEN_ID + MODAL_TOKEN_SECRET
+  // @ts-ignore — @modal-labs/modal is an optional runtime dep; not installed in dev
   const modal = await import("@modal-labs/modal").catch(() => {
     throw new Error(
       "Modal SDK not installed. Run: pnpm add @modal-labs/modal in artifacts/api-server",
