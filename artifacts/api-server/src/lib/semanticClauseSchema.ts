@@ -246,8 +246,10 @@ export function classifyModelResponse(raw: string): ResponseClassification {
  */
 export function detectUnusableOutput(
   parsed: unknown,
-  schemaType: "standard" | "premium",
+  schemaType: "standard" | "premium" | "seo",
 ): string | null {
+  // Non-legal schemas have their own validators — skip legal-specific field checks.
+  if (schemaType === "seo") return null;
   const p = parsed as Record<string, unknown>;
   if (!p.rationale_summary || String(p.rationale_summary).trim().length === 0)
     return "empty rationale_summary";

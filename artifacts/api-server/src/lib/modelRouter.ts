@@ -91,8 +91,8 @@ export interface InvokeOptions<T> {
   validator?: (parsed: unknown) => T;
   /** Passed through to result.route_chain_id. */
   routeChainId?: string;
-  /** "standard" | "premium" — used by detectUnusableOutput. Defaults to "standard". */
-  schemaType?: "standard" | "premium";
+  /** "standard" | "premium" | "seo" — used by detectUnusableOutput. Defaults to "standard". */
+  schemaType?: "standard" | "premium" | "seo";
 }
 
 // ── Provider config resolution ────────────────────────────────────────────────

@@ -208,7 +208,7 @@ async function runDip1(
       {
         validator: (raw) => SeoSynthesisSchema.parse(raw),
         routeChainId: "seo-dip1-20b",
-        schemaType: "standard",
+        schemaType: "seo",
       },
     );
 
@@ -277,7 +277,7 @@ async function runDip2(
     {
       validator: (raw) => SeoSynthesisSchema.parse(raw),
       routeChainId: "seo-dip2-120b",
-      schemaType: "premium",
+      schemaType: "seo",
     },
   );
 
