@@ -158,14 +158,41 @@ async function runZieMigration(): Promise<void> {
   // columns and relax job_id so the judge INSERT can succeed. Forge code keeps
   // working against its columns; judge writes its own. Full unification of these
   // tables is tracked separately and intentionally not done here.
-  await client.query(`ALTER TABLE "evaluation_runs" ADD COLUMN IF NOT EXISTS "domain" text`);
-  await client.query(`ALTER TABLE "evaluation_runs" ADD COLUMN IF NOT EXISTS "task_type" text`);
-  await client.query(`ALTER TABLE "evaluation_runs" ALTER COLUMN "job_id" DROP NOT NULL`);
-  await client.query(`ALTER TABLE "evaluation_metrics" ADD COLUMN IF NOT EXISTS "metric_value" real`);
-  await client.query(`ALTER TABLE "evaluation_metrics" ADD COLUMN IF NOT EXISTS "metadata" jsonb DEFAULT '{}'::jsonb`);
-  // value is NOT NULL in the forge shape; the judge does not write it. Relax it
-  // so a judge-only INSERT (which omits value) does not violate the constraint.
-  await client.query(`ALTER TABLE "evaluation_metrics" ALTER COLUMN "value" DROP NOT NULL`);
+  // Ensure evaluation_runs and evaluation_metrics exist (may not if main migration failed)
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS "evaluation_runs" (
+      "id" serial PRIMARY KEY NOT NULL,
+      "tenant_id" text NOT NULL,
+      "job_id" integer,
+      "status" text NOT NULL DEFAULT 'pending',
+      "started_at" timestamptz,
+      "completed_at" timestamptz,
+      "created_at" timestamptz NOT NULL DEFAULT now()
+    )
+  `);
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS "evaluation_metrics" (
+      "id" serial PRIMARY KEY NOT NULL,
+      "tenant_id" text NOT NULL,
+      "eval_run_id" integer NOT NULL REFERENCES "evaluation_runs"("id"),
+      "metric_name" text NOT NULL,
+      "value" real,
+      "threshold" real,
+      "passed" boolean,
+      "created_at" timestamptz NOT NULL DEFAULT now()
+    )
+  `);
+  // Idempotent reconciliation for evaluation_runs/metrics (soft-fail if already correct)
+  try {
+    await client.query(`ALTER TABLE "evaluation_runs" ADD COLUMN IF NOT EXISTS "domain" text`);
+    await client.query(`ALTER TABLE "evaluation_runs" ADD COLUMN IF NOT EXISTS "task_type" text`);
+    await client.query(`ALTER TABLE "evaluation_runs" ALTER COLUMN "job_id" DROP NOT NULL`);
+    await client.query(`ALTER TABLE "evaluation_metrics" ADD COLUMN IF NOT EXISTS "metric_value" real`);
+    await client.query(`ALTER TABLE "evaluation_metrics" ADD COLUMN IF NOT EXISTS "metadata" jsonb DEFAULT '{}'::jsonb`);
+    await client.query(`ALTER TABLE "evaluation_metrics" ALTER COLUMN "value" DROP NOT NULL`);
+  } catch (alterErr) {
+    logger.warn({ alterErr }, "ZIE migration: evaluation_runs/metrics ALTER soft-failed — continuing");
+  }
 
   // ── Seed default router policies (idempotent) ──────────────────────────────
   await client.query(`
