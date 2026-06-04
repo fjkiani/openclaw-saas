@@ -13,7 +13,7 @@ import { sql } from "drizzle-orm";
 export const ziePreferencePairsTable = pgTable(
   "zie_preference_pairs",
   {
-    // ── Core columns (migration 0003) ──────────────────────────────────────
+    // ── Core columns ───────────────────────────────────────────────────────
     id: uuid("id")
       .primaryKey()
       .default(sql`gen_random_uuid()`),
@@ -30,8 +30,6 @@ export const ziePreferencePairsTable = pgTable(
       .defaultNow(),
 
     // ── Factory context columns (migration 0004) ───────────────────────────
-    /** Vertical domain: 'seo', 'content', 'general', etc. */
-    domain: text("domain").notNull().default("general"),
     /** Tenant identifier (null for system-level records) */
     tenantId: text("tenant_id"),
     /** Workspace FK (integer, matches workspaces.id) */
@@ -46,20 +44,12 @@ export const ziePreferencePairsTable = pgTable(
      * Must differ from chosenTrainingRecordId — enforced at application layer.
      */
     rejectedTrainingRecordId: uuid("rejected_training_record_id"),
-    /**
-     * Why the chosen response was preferred.
-     * 'remote_beats_local' = 120B output preferred over 1.2B
-     * 'human_preferred'    = human reviewer chose this response
-     */
-    preferenceSource: text("preference_source").notNull().default("remote_beats_local"),
   },
   (table) => ({
     taskTypeIdx: index("idx_zie_preference_pairs_task_type").on(table.taskType),
     domainIdx: index("idx_zie_preference_pairs_domain").on(table.domain, table.createdAt),
     promptHashIdx: index("idx_zie_preference_pairs_prompt_hash").on(table.promptHash),
     createdAtIdx: index("idx_zie_preference_pairs_created_at").on(table.createdAt),
-    // migration 0004 indexes
-    domainIdx: index("idx_zie_preference_pairs_domain").on(table.domain),
     tenantIdIdx: index("idx_zie_preference_pairs_tenant_id").on(table.tenantId),
     workspaceIdIdx: index("idx_zie_preference_pairs_workspace_id").on(table.workspaceId),
   }),
