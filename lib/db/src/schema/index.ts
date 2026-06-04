@@ -29,3 +29,15 @@ export * from "./legalReceiptNonces";
 export * from "./semanticClauseAnalysisRuns";
 export * from "./semanticClauseAnalyses";
 export * from "./semanticClauseAnalysisAttempts";
+
+// ── ZIE Factory v1 (migration 0003) ──────────────────────────────────────────
+// Generic flywheel substrate
+export * from "./zieTrainingRecords";
+export * from "./ziePreferencePairs";
+export * from "./zieRouterPolicies";
+export * from "./zieModelPromotionGates";
+// Manuscript adapter (#1)
+export * from "./manuscriptSubmissions";
+export * from "./manuscriptReviewRuns";
+export * from "./manuscriptReviewAttempts";
+export * from "./manuscriptAnalyses";
