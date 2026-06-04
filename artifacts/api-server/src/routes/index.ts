@@ -13,6 +13,7 @@ import legalRouter from "./legal";
 import onboardingRouter from "./onboarding";
 import manuscriptRouter from "./manuscript";
 import seoRouter from "./seo";
+import judgeRouter from "./judge";
 
 const router: IRouter = Router();
 
@@ -30,5 +31,6 @@ router.use(legalRouter);
 router.use(onboardingRouter);
 router.use(manuscriptRouter);
 router.use(seoRouter);
+router.use(judgeRouter);
 
 export default router;
