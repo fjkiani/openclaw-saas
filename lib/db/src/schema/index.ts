@@ -31,3 +31,13 @@ export * from "./semanticClauseAnalyses";
 export * from "./semanticClauseAnalysisAttempts";
 export * from "./zieTrainingRecords";
 export * from "./ziePreferencePairs";
+
+// ── ZIE Factory v1 (migration 0003) ──────────────────────────────────────────
+// Generic flywheel substrate
+export * from "./zieRouterPolicies";
+export * from "./zieModelPromotionGates";
+// Manuscript adapter (#1)
+export * from "./manuscriptSubmissions";
+export * from "./manuscriptReviewRuns";
+export * from "./manuscriptReviewAttempts";
+export * from "./manuscriptAnalyses";
