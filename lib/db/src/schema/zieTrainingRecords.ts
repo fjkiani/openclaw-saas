@@ -18,6 +18,8 @@ export const zieTrainingRecordsTable = pgTable(
       .primaryKey()
       .default(sql`gen_random_uuid()`),
     taskType: text("task_type").notNull(),
+    domain: text("domain").notNull().default("unknown"),
+    sourceKind: text("source_kind").notNull().default("direct_call"),
     promptHash: text("prompt_hash").notNull(),
     promptJson: jsonb("prompt_json").notNull(),
     remoteResponseJson: jsonb("remote_response_json").notNull(),
@@ -32,6 +34,7 @@ export const zieTrainingRecordsTable = pgTable(
       table.promptHash,
     ),
     taskTypeIdx: index("idx_zie_training_records_task_type").on(table.taskType),
+    domainIdx: index("idx_zie_training_records_domain").on(table.domain, table.createdAt),
     createdAtIdx: index("idx_zie_training_records_created_at").on(table.createdAt),
   }),
 );

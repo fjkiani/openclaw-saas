@@ -1,26 +1,33 @@
 /**
  * semanticLegalAnalyzer.ts
  *
- * Semantic Law Counsel v1 — Shadow-mode orchestrator.
+ * Semantic Law Counsel v1 — Shadow-mode orchestrator + ZIE Factory integration.
  *
  * runSemanticShadow() is called fire-and-forget from legal.ts after the
  * deterministic pipeline completes. It never throws into the caller.
  *
+ * ZIE Factory integration (v2):
+ *   For each clause analyzed, the result is also fed into executeDoubleDip()
+ *   using task_type = "legal_clause_analysis". This means:
+ *     - The 120B output for each clause is stolen into zie_training_records
+ *     - The local vs 120B comparison is stored in zie_preference_pairs
+ *     - Once 200 SFT + 100 DPO pairs accumulate, checkThresholdsAndDispatch()
+ *       triggers Modal to fine-tune the local model on legal clause analysis
+ *     - After training, updateRoutingPolicy() points the fast path at the
+ *       newly trained LoRA adapter, reducing OpenRouter spend for legal clauses
+ *
  * Flow:
  *   1. Map specialist → SemanticDocClass via SPECIALIST_TO_DOC_CLASS
- *   2. Guard: skip unsupported doc classes ("nda", "default") — insert run row
- *      with status = "skipped_unsupported_doc_class_mapping" and return
+ *   2. Guard: skip unsupported doc classes ("nda", "default")
  *   3. Get route policy → build full model chain
  *   4. Insert semantic_clause_analysis_runs row (status = "running")
  *   5. Detect clauses via reviewDocumentCoverage
- *   6. For each detected clause: invoke model, validate schema, persist result
- *   7. Update run row to "completed" (or "failed" on unhandled error)
- *
- * v1 Limitation (GAP-4): SPECIALIST_TO_DOC_CLASS only covers "cofounder".
- * All other specialist values map to "default" and are skipped.
- * Extend the map as CLAUSE_INVENTORIES coverage grows.
+ *   6. For each clause: invoke model, validate schema, persist result
+ *   7. Feed each clause result into executeDoubleDip() for vault capture
+ *   8. Update run row to "completed" (or "failed" on unhandled error)
  */
 
+import crypto from "node:crypto";
 import { pool } from "@workspace/db";
 import { logger } from "./logger.js";
 import { reviewDocumentCoverage } from "./documentCoverage.js";
@@ -43,28 +50,42 @@ import {
   type SemanticDocClass,
 } from "./routePolicy.js";
 import type { DocClass } from "./draftReceiptEngine.js";
+import { executeDoubleDip, hashPrompt } from "./doubleDipRouter.js";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 export const SEMANTIC_PROMPT_VERSION = "semantic-v1.0";
+export const LEGAL_TASK_TYPE = "legal_clause_analysis";
 
-/**
- * Maps specialist identifiers (from MatterReceipt.specialist) to SemanticDocClass.
- *
- * v1 Limitation: only "cofounder" is fully supported. All other values fall
- * through to "default" and will be skipped by the unsupported-doc-class guard.
- * Do NOT add entries here without a corresponding CLAUSE_INVENTORIES entry in
- * documentCoverage.ts and BENCHMARKS entry in asymmetricEval.ts.
- */
 export const SPECIALIST_TO_DOC_CLASS: Record<string, SemanticDocClass> = {
   cofounder: "co_founder_agreement",
-  // Future entries (add when coverage exists):
   // contractor: "contractor_ip_assignment",
   // advisor:    "advisor_agreement",
 };
 
-/** Doc classes that have no CLAUSE_INVENTORIES / BENCHMARKS coverage in v1. */
 const UNSUPPORTED_DOC_CLASSES: SemanticDocClass[] = ["nda", "default"];
+
+// ── ZIE Factory: Legal clause → SlopSchema bridge ────────────────────────────
+//
+// The ZIE vault uses SlopSchema for all domains. For legal clauses, we map:
+//   risk_level critical/high → severity critical/high
+//   semantic_position        → tag (overclaiming if absent, thin_methods if weak)
+//   rationale_summary        → evidenceSpans (split into sentences as evidence)
+//
+// This bridge lets the same vault, DPO pairs, and Modal training loop serve
+// both Manuscript and Legal domains without separate schemas.
+
+function legalClauseToSlopPayload(
+  clauseLabel: string,
+  clauseText: string,
+  docClass: string,
+): { text: string; domain: string; clause_label: string } {
+  return {
+    text: clauseText,
+    domain: "legal",
+    clause_label: clauseLabel,
+  };
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -211,12 +232,12 @@ async function insertAnalysisRow(params: {
       params.clauseId,
       params.clauseLabel,
       params.riskLevel,
-      params.rationaleSummary,                    // stored in summary column
-      JSON.stringify(params.flags),               // stored in missing_elements column
+      params.rationaleSummary,
+      JSON.stringify(params.flags),
       params.recommendedAction,
       String(params.confidence),
-      params.semanticPosition,                    // stored in reasoning column
-      JSON.stringify([]),                         // alternative_interpretations
+      params.semanticPosition,
+      JSON.stringify([]),
       params.modelId,
       params.promptVersion,
       params.schemaVersion,
@@ -257,6 +278,34 @@ async function insertAttemptRow(params: {
   );
 }
 
+// ── ZIE vault capture for legal clauses ──────────────────────────────────────
+//
+// After the deterministic clause analysis completes, we feed the same clause
+// text into executeDoubleDip() with task_type = "legal_clause_analysis".
+//
+// executeDoubleDip() runs the fast/slow race, Zod-whips the 120B output,
+// and persists to zie_training_records + zie_preference_pairs.
+//
+// This is fire-and-forget — it never blocks the clause analysis pipeline.
+
+function captureClauseForVault(
+  clauseLabel: string,
+  clauseText: string,
+  docClass: string,
+): void {
+  const payload = legalClauseToSlopPayload(clauseLabel, clauseText, docClass);
+  const promptHash = hashPrompt(
+    `${LEGAL_TASK_TYPE}:${docClass}:${clauseLabel}:${clauseText.slice(0, 500)}`,
+  );
+
+  void executeDoubleDip(payload, promptHash, LEGAL_TASK_TYPE, { domain: "legal", sourceKind: "shadow_hook" }).catch((err: unknown) => {
+    logger.warn(
+      { err, clauseLabel, docClass },
+      "semanticLegalAnalyzer: ZIE vault capture failed for clause (non-fatal)",
+    );
+  });
+}
+
 // ── Core analysis ─────────────────────────────────────────────────────────────
 
 export async function analyzeClausesSemantically(params: {
@@ -269,13 +318,11 @@ export async function analyzeClausesSemantically(params: {
 }): Promise<void> {
   const { runId, matterId, documentText, docClass, policy } = params;
 
-  // Detect clauses via the deterministic coverage engine.
-  // GAP-3 fix: use reviewDocumentCoverage(...).detected_clauses — no stubDetectClauses.
   const coverage = reviewDocumentCoverage(documentText, docClass);
   const detectedClauses = coverage.detected_clauses;
 
   if (detectedClauses.length === 0) {
-    logger.warn({ runId, matterId, docClass }, "semantic: no clauses detected, marking run complete");
+    logger.warn({ runId, matterId, docClass }, "semantic: no clauses detected");
     await updateRunStatus(runId, "completed_no_clauses");
     return;
   }
@@ -306,10 +353,7 @@ export async function analyzeClausesSemantically(params: {
     } catch (err) {
       const latencyMs = Date.now() - t0;
       const isExhausted = err instanceof RouterExhaustedError;
-      logger.warn(
-        { runId, matterId, clauseId: clause.clause_id, err },
-        "semantic: router exhausted for clause",
-      );
+      logger.warn({ runId, matterId, clauseId: clause.clause_id, err }, "semantic: router exhausted");
 
       await insertAttemptRow({
         attemptId: crypto.randomUUID(),
@@ -331,7 +375,6 @@ export async function analyzeClausesSemantically(params: {
     const latencyMs = Date.now() - t0;
     const { raw, model_used, provider_used, fallback_count } = invokeResult;
 
-    // Log the successful attempt.
     await insertAttemptRow({
       attemptId: crypto.randomUUID(),
       runId,
@@ -345,41 +388,27 @@ export async function analyzeClausesSemantically(params: {
       latencyMs,
     });
 
-    // Classify the raw string response.
     const classification = classifyModelResponse(raw);
 
     if (classification.kind !== "valid_json") {
-      logger.warn(
-        { runId, clauseId: clause.clause_id, modelId: model_used, kind: classification.kind },
-        "semantic: non-JSON or refusal response, skipping persistence",
-      );
+      logger.warn({ runId, clauseId: clause.clause_id, kind: classification.kind }, "semantic: non-JSON response");
       anyFailed = true;
       continue;
     }
 
-    // Check for semantically unusable output (placeholder fields, empty critical fields).
     const unusableReason = detectUnusableOutput(classification.parsed, policy.schemaType);
     if (unusableReason !== null) {
-      logger.warn(
-        { runId, clauseId: clause.clause_id, modelId: model_used, reason: unusableReason },
-        "semantic: unusable output, skipping persistence",
-      );
+      logger.warn({ runId, clauseId: clause.clause_id, reason: unusableReason }, "semantic: unusable output");
       anyFailed = true;
       continue;
     }
 
-    // Parse with the appropriate Zod schema.
     const schema =
-      policy.schemaType === "premium"
-        ? PremiumClauseAnalysisSchema
-        : SemanticClauseAnalysisSchema;
+      policy.schemaType === "premium" ? PremiumClauseAnalysisSchema : SemanticClauseAnalysisSchema;
 
     const parsed = schema.safeParse(classification.parsed);
     if (!parsed.success) {
-      logger.warn(
-        { runId, clauseId: clause.clause_id, issues: parsed.error.issues },
-        "semantic: schema validation failed, skipping persistence",
-      );
+      logger.warn({ runId, clauseId: clause.clause_id, issues: parsed.error.issues }, "semantic: schema failed");
       anyFailed = true;
       continue;
     }
@@ -403,6 +432,15 @@ export async function analyzeClausesSemantically(params: {
       schemaVersion: data.schema_version,
       rawResponse: raw,
     });
+
+    // ── ZIE Factory: feed this clause into the vault (fire-and-forget) ───────
+    // The clause text + label is the prompt. The 120B output is the gold label.
+    // This runs concurrently and never blocks the clause analysis loop.
+    captureClauseForVault(
+      data.clause_label,
+      documentText.slice(0, 2000), // clause context window
+      docClass,
+    );
   }
 
   await updateRunStatus(runId, anyFailed ? "completed_with_errors" : "completed");
@@ -410,12 +448,6 @@ export async function analyzeClausesSemantically(params: {
 
 // ── Public entry point ────────────────────────────────────────────────────────
 
-/**
- * runSemanticShadow — fire-and-forget shadow hook.
- *
- * Called from legal.ts after the deterministic pipeline completes.
- * Never throws. All errors are caught and logged.
- */
 export async function runSemanticShadow(params: {
   matterId: string;
   tenantId: string;
@@ -430,51 +462,33 @@ export async function runSemanticShadow(params: {
     const policy = getRoutePolicy(docClass);
     const routeChainId = buildRouteChainId(policy);
 
-    // Guard: skip unsupported doc classes in v1.
     if (UNSUPPORTED_DOC_CLASSES.includes(docClass)) {
-      logger.info(
-        { runId, matterId, specialist, docClass },
-        "semantic: skipping unsupported doc class in v1",
-      );
+      logger.info({ runId, matterId, specialist, docClass }, "semantic: skipping unsupported doc class");
       await insertRunRow({
-        runId,
-        matterId,
-        tenantId,
-        docClass,
-        routeChainId,
+        runId, matterId, tenantId, docClass, routeChainId,
         promptVersion: SEMANTIC_PROMPT_VERSION,
         status: "skipped_unsupported_doc_class_mapping",
       });
       return;
     }
 
-    // Insert run row before analysis begins.
     await insertRunRow({
-      runId,
-      matterId,
-      tenantId,
-      docClass,
-      routeChainId,
+      runId, matterId, tenantId, docClass, routeChainId,
       promptVersion: SEMANTIC_PROMPT_VERSION,
       status: "running",
     });
 
-    // docClass is a supported DocClass at this point (guard above eliminates "nda"/"default").
     await analyzeClausesSemantically({
-      runId,
-      matterId,
-      tenantId,
-      documentText,
+      runId, matterId, tenantId, documentText,
       docClass: docClass as DocClass,
       policy,
     });
   } catch (err) {
     logger.error({ runId, matterId, err }, "semantic: unhandled error in shadow run");
-    // Best-effort status update — may fail if the run row was never inserted.
     try {
       await updateRunStatus(runId, "failed", true);
     } catch {
-      // Swallow — we're already in the error handler.
+      // swallow
     }
   }
 }

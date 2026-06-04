@@ -2,6 +2,7 @@ import app from "./app";
 import { logger } from "./lib/logger";
 import { pool } from "@workspace/db";
 import { runSeed } from "./seed";
+import { startForgeScheduler, stopForgeScheduler } from "./lib/forgeScheduler";
 
 const rawPort = process.env["PORT"];
 
@@ -453,9 +454,23 @@ app.listen(port, (err) => {
     .then(() => runSeed())
     .then(() => {
       logger.info("DB migrations and seed complete.");
+      // Start the pg-boss forge scheduler after DB is confirmed live
+      return startForgeScheduler();
+    })
+    .then(() => {
+      logger.info("Forge scheduler started.");
     })
     .catch((err) => {
       // Soft-fail: log the error but do NOT crash the server.
-      logger.error({ err }, "DB migrations/seed failed — server continues without DB.");
+      logger.error({ err }, "DB migrations/seed/scheduler failed — server continues.");
     });
+
+  // Graceful shutdown — stop pg-boss before process exits
+  const shutdown = async (signal: string) => {
+    logger.info({ signal }, "Received shutdown signal — stopping forge scheduler");
+    await stopForgeScheduler().catch(() => {});
+    process.exit(0);
+  };
+  process.once("SIGTERM", () => void shutdown("SIGTERM"));
+  process.once("SIGINT", () => void shutdown("SIGINT"));
 });
