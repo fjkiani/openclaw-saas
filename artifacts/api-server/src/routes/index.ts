@@ -14,6 +14,8 @@ import onboardingRouter from "./onboarding";
 import manuscriptRouter from "./manuscript";
 import seoRouter from "./seo";
 import judgeRouter from "./judge";
+import clauseDraftRouter from "./legal.clause.draft.js";
+import flywheelRouter from "./flywheel.js";
 
 const router: IRouter = Router();
 
@@ -32,5 +34,7 @@ router.use(onboardingRouter);
 router.use(manuscriptRouter);
 router.use(seoRouter);
 router.use(judgeRouter);
+router.use(clauseDraftRouter);
+router.use(flywheelRouter);
 
 export default router;

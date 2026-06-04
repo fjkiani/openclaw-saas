@@ -29,6 +29,9 @@ import { logger } from "./logger.js";
 
 export const SFT_THRESHOLD = 200;
 export const DPO_THRESHOLD = 100;
+// Verified-DPO threshold: fires Modal when a task_type accumulates 50 judge-verified pairs.
+// This is the primary training trigger — quality signal, not raw volume.
+export const VERIFIED_DPO_THRESHOLD = 50;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -133,6 +136,105 @@ export async function updateRoutingPolicy(params: {
     { taskType, trainedModelId, sourceJobId },
     "modalDispatch: routing policy updated — fast path now uses fine-tuned model",
   );
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// checkVerifiedThresholds — fires Modal when any task_type hits 50 judge-verified pairs
+//
+// Checks per task_type (not per domain) so legal_clause_analysis and
+// legal_clause_draft are tracked independently and train on the correct data mix.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function checkVerifiedThresholds(): Promise<DispatchResult[]> {
+  // Count judge-verified pairs per task_type
+  const verifiedRes = await pool.query<{ domain: string; task_type: string; verified_count: string }>(
+    `SELECT domain, task_type, COUNT(*) AS verified_count
+     FROM zie_preference_pairs
+     WHERE judge_verified = true
+     GROUP BY domain, task_type
+     HAVING COUNT(*) >= $1`,
+    [VERIFIED_DPO_THRESHOLD],
+  );
+
+  if (verifiedRes.rows.length === 0) {
+    logger.info({ threshold: VERIFIED_DPO_THRESHOLD }, "modalDispatch: no task_type has reached verified DPO threshold");
+    return [];
+  }
+
+  const results: DispatchResult[] = [];
+
+  for (const row of verifiedRes.rows) {
+    const { domain, task_type, verified_count } = row;
+    const verifiedCount = parseInt(verified_count, 10);
+
+    // Check if a training job already exists for this task_type to avoid double-dispatch
+    const existingJob = await pool.query<{ id: number }>(
+      `SELECT id FROM training_jobs
+       WHERE name LIKE $1 AND status IN ('queued', 'running', 'completed')
+       ORDER BY id DESC LIMIT 1`,
+      [`flywheel-verified-${task_type}%`],
+    );
+
+    if (existingJob.rows.length > 0) {
+      logger.info({ task_type, existingJobId: existingJob.rows[0].id }, "modalDispatch: verified threshold met but job already exists — skipping");
+      continue;
+    }
+
+    logger.info({ domain, task_type, verifiedCount, threshold: VERIFIED_DPO_THRESHOLD }, "modalDispatch: verified DPO threshold met — inserting training job");
+
+    const jobRes = await pool.query<{ id: number }>(
+      `INSERT INTO training_jobs
+         (tenant_id, workspace_id, dataset_id, dataset_version_id,
+          name, mode, base_model, hyperparams, status, compute_backend)
+       VALUES
+         ('system', 1, 1, 1,
+          $1, 'fine_tuning', 'liquid/lfm-2.5-1.2b:free',
+          $2, 'queued', 'modal')
+       RETURNING id`,
+      [
+        `flywheel-verified-${task_type}-dpo${verifiedCount}-${Date.now()}`,
+        JSON.stringify({
+          domain,
+          task_type,
+          trigger: "verified_dpo_threshold",
+          verified_dpo_pairs: verifiedCount,
+          threshold: VERIFIED_DPO_THRESHOLD,
+          lora_rank: 16,
+          lora_alpha: 32,
+          epochs: 3,
+          learning_rate: 2e-4,
+        }),
+      ],
+    );
+    const jobId = jobRes.rows[0].id;
+
+    let functionCallId: string;
+    try {
+      functionCallId = await dispatchTraining(jobId, task_type, 0, verifiedCount);
+    } catch (err: unknown) {
+      await pool.query(
+        `UPDATE training_jobs SET status='failed', error=$1, updated_at=now() WHERE id=$2`,
+        [err instanceof Error ? err.message : String(err), jobId],
+      );
+      logger.error({ err, jobId, task_type }, "modalDispatch: verified dispatch failed");
+      throw err;
+    }
+
+    logger.info({ jobId, functionCallId, task_type, verifiedCount }, "modalDispatch: verified-DPO Modal LoRA job spawned");
+
+    results.push({
+      task_type,
+      dispatched: true,
+      sftCount: 0,
+      dpoCount: verifiedCount,
+      jobId,
+      functionCallId,
+      dryRun: !!process.env.DRY_RUN,
+    });
+  }
+
+  return results;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

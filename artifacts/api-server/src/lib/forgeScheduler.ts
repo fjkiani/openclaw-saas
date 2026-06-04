@@ -15,7 +15,7 @@
  */
 
 import PgBoss from "pg-boss";
-import { checkThresholdsAndDispatch } from "./modalDispatch.js";
+import { checkThresholdsAndDispatch, checkVerifiedThresholds } from "./modalDispatch.js";
 import { logger } from "./logger.js";
 
 const DATABASE_URL = process.env.DATABASE_URL;
@@ -74,6 +74,10 @@ export async function startForgeScheduler(): Promise<void> {
       logger.info({ jobId: job.id }, "forgeScheduler: hourly-forge-check fired");
       try {
         const results = await checkThresholdsAndDispatch();
+        const verifiedResults = await checkVerifiedThresholds();
+        if (verifiedResults.length > 0) {
+          logger.info({ verifiedResults }, "forgeScheduler: verified-DPO threshold jobs dispatched");
+        }
         for (const result of results) {
           logger.info(
             {
