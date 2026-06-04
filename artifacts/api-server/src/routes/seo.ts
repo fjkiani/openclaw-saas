@@ -54,10 +54,18 @@ const DIP1_CHAIN: ModelRouteConfig[] = [
   {
     id: "openai/gpt-oss-20b:free",
     provider: "openrouter",
-    apiKeyEnv: "OPENROUTER_API_KEY_2",
+    apiKeyEnv: "OPENROUTER_API_KEY",
     maxTokens: 1024,
-    timeoutMs: 20_000,
+    timeoutMs: 25_000,
     tags: ["20b", "dip1"],
+  },
+  {
+    id: "llama-3.3-70b-versatile",
+    provider: "groq",
+    apiKeyEnv: "GROQ_API_KEY",
+    maxTokens: 1024,
+    timeoutMs: 15_000,
+    tags: ["70b", "dip1-fallback"],
   },
 ];
 
@@ -67,17 +75,16 @@ const DIP2_CHAIN: ModelRouteConfig[] = [
     provider: "openrouter",
     apiKeyEnv: "OPENROUTER_API_KEY",
     maxTokens: 2048,
-    timeoutMs: 45_000,
+    timeoutMs: 55_000,
     tags: ["120b", "dip2-primary"],
   },
-  // Fallback: 20B on key 2 if 120B is rate-limited or unavailable
   {
-    id: "openai/gpt-oss-20b:free",
-    provider: "openrouter",
-    apiKeyEnv: "OPENROUTER_API_KEY_2",
-    maxTokens: 1024,
-    timeoutMs: 20_000,
-    tags: ["20b", "dip2-fallback"],
+    id: "llama-3.3-70b-versatile",
+    provider: "groq",
+    apiKeyEnv: "GROQ_API_KEY",
+    maxTokens: 2048,
+    timeoutMs: 15_000,
+    tags: ["70b", "dip2-fallback"],
   },
 ];
 
