@@ -433,6 +433,132 @@ async function runMigrations(): Promise<void> {
       )
     `);
 
+    // ── ZIE Multi-Tenant Flywheel Tables ──────────────────────────────────────
+    // The LLM-as-judge route (routes/judge.ts) reads zie_preference_pairs and
+    // writes evaluation_runs / evaluation_metrics. Without these tables the judge
+    // route 500s with "relation zie_preference_pairs does not exist". The column
+    // set below is a SUPERSET reconciled against judge.ts: it SELECTs
+    // id, domain, task_type, prompt_hash, chosen_response_json,
+    // rejected_response_json, preference_source, judge_verified, tenant_id and
+    // UPDATEs judge_verified / judge_score_chosen / judge_score_rejected /
+    // judge_reasoning / judge_run_id. All must exist or the route fails again.
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS "zie_router_policies" (
+        "id" serial PRIMARY KEY NOT NULL,
+        "task_type" text NOT NULL UNIQUE,
+        "fast_model_id" text NOT NULL,
+        "fast_provider" text NOT NULL DEFAULT 'openrouter',
+        "premium_model_id" text,
+        "confidence_threshold" real DEFAULT 0.85,
+        "created_at" timestamptz NOT NULL DEFAULT now()
+      )
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS "zie_training_records" (
+        "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        "domain" text NOT NULL,
+        "task_type" text NOT NULL,
+        "source_kind" text NOT NULL,
+        "quality_score" real,
+        "prompt_hash" text UNIQUE,
+        "prompt_json" jsonb,
+        "remote_response_json" jsonb,
+        "workspace_id" text,
+        "tenant_id" text,
+        "created_at" timestamptz NOT NULL DEFAULT now()
+      )
+    `);
+
+    // zie_preference_pairs — judge.ts contract. prompt_hash, source_kind,
+    // used_for_dpo and tenant_id are included because the deployed route reads
+    // them (tenant_id is also the fallback source for evaluation_runs.tenant_id).
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS "zie_preference_pairs" (
+        "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        "domain" text NOT NULL,
+        "task_type" text NOT NULL,
+        "source_kind" text NOT NULL DEFAULT 'direct_call',
+        "preference_source" text NOT NULL DEFAULT 'path_race',
+        "prompt_hash" text,
+        "chosen_response_json" jsonb NOT NULL,
+        "rejected_response_json" jsonb NOT NULL,
+        "used_for_dpo" boolean NOT NULL DEFAULT false,
+        "judge_verified" boolean NOT NULL DEFAULT false,
+        "judge_score_chosen" real,
+        "judge_score_rejected" real,
+        "judge_reasoning" text,
+        "judge_run_id" integer,
+        "tenant_id" text,
+        "workspace_id" text,
+        "created_at" timestamptz NOT NULL DEFAULT now()
+      )
+    `);
+
+    // Idempotent reconciliation: if an older zie_preference_pairs already exists
+    // (e.g. a partial/legacy shape), make sure every column judge.ts touches is
+    // present. ADD COLUMN IF NOT EXISTS is a no-op when the column already exists.
+    await client.query(`
+      ALTER TABLE "zie_preference_pairs"
+        ADD COLUMN IF NOT EXISTS "prompt_hash" text,
+        ADD COLUMN IF NOT EXISTS "source_kind" text NOT NULL DEFAULT 'direct_call',
+        ADD COLUMN IF NOT EXISTS "preference_source" text NOT NULL DEFAULT 'path_race',
+        ADD COLUMN IF NOT EXISTS "used_for_dpo" boolean NOT NULL DEFAULT false,
+        ADD COLUMN IF NOT EXISTS "judge_verified" boolean NOT NULL DEFAULT false,
+        ADD COLUMN IF NOT EXISTS "judge_score_chosen" real,
+        ADD COLUMN IF NOT EXISTS "judge_score_rejected" real,
+        ADD COLUMN IF NOT EXISTS "judge_reasoning" text,
+        ADD COLUMN IF NOT EXISTS "judge_run_id" integer,
+        ADD COLUMN IF NOT EXISTS "tenant_id" text,
+        ADD COLUMN IF NOT EXISTS "workspace_id" text
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS "zie_model_promotion_gates" (
+        "id" serial PRIMARY KEY NOT NULL,
+        "domain" text NOT NULL,
+        "task_type" text NOT NULL,
+        "candidate_model_id" text NOT NULL,
+        "baseline_model_id" text NOT NULL,
+        "eval_score" real,
+        "promoted" boolean NOT NULL DEFAULT false,
+        "promotion_date" timestamptz,
+        "created_at" timestamptz NOT NULL DEFAULT now()
+      )
+    `);
+
+    await client.query(`CREATE INDEX IF NOT EXISTS "idx_zie_preference_domain" ON "zie_preference_pairs"("domain")`);
+    await client.query(`CREATE INDEX IF NOT EXISTS "idx_zie_preference_verified" ON "zie_preference_pairs"("judge_verified")`);
+    await client.query(`CREATE INDEX IF NOT EXISTS "idx_zie_training_domain" ON "zie_training_records"("domain", "task_type")`);
+
+    // ── Minimal eval-table reconciliation so the judge can WRITE ───────────────
+    // judge.ts writes evaluation_runs(domain, task_type) + evaluation_metrics(
+    // metric_value). The bootstrap above created the forge shape (job_id NOT NULL
+    // / rubric_id, and value/threshold/passed). Per the deferred eval-schema
+    // decision we do NOT remove the forge columns — we only ADD the judge's
+    // columns and relax job_id so the judge INSERT can succeed. Forge code keeps
+    // working against its columns; judge writes its own. Full unification of these
+    // tables is tracked separately and intentionally not done here.
+    await client.query(`ALTER TABLE "evaluation_runs" ADD COLUMN IF NOT EXISTS "domain" text`);
+    await client.query(`ALTER TABLE "evaluation_runs" ADD COLUMN IF NOT EXISTS "task_type" text`);
+    await client.query(`ALTER TABLE "evaluation_runs" ALTER COLUMN "job_id" DROP NOT NULL`);
+    await client.query(`ALTER TABLE "evaluation_metrics" ADD COLUMN IF NOT EXISTS "metric_value" real`);
+    await client.query(`ALTER TABLE "evaluation_metrics" ADD COLUMN IF NOT EXISTS "metadata" jsonb DEFAULT '{}'::jsonb`);
+    // value is NOT NULL in the forge shape; the judge does not write it. Relax it
+    // so a judge-only INSERT (which omits value) does not violate the constraint.
+    await client.query(`ALTER TABLE "evaluation_metrics" ALTER COLUMN "value" DROP NOT NULL`);
+
+    // ── Seed default router policies (idempotent) ──────────────────────────────
+    await client.query(`
+      INSERT INTO "zie_router_policies" ("task_type", "fast_model_id", "fast_provider")
+      VALUES
+        ('legal_clause_analysis', 'liquid/lfm-2.5-1.2b-instruct:free', 'openrouter'),
+        ('manuscript_slop_check', 'liquid/lfm-2.5-1.2b-instruct:free', 'openrouter'),
+        ('seo_content_audit',     'liquid/lfm-2.5-1.2b-instruct:free', 'openrouter')
+      ON CONFLICT ("task_type") DO NOTHING
+    `);
+
     logger.info("DB migrations complete.");
   } finally {
     client.release();
