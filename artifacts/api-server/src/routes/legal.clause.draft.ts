@@ -18,7 +18,7 @@ import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import { pool } from "@workspace/db";
 import { logger } from "../lib/logger.js";
-import { draftClause } from "../lib/draftAgent.js";
+import { draftClause, generateAgreement } from "../lib/draftAgent.js";
 
 const router = Router();
 
@@ -47,6 +47,14 @@ const DraftRequestSchema = z.union([
     rationale: z.string().min(1),
     tenant_id: z.string().optional(),
   }),
+  // Mode C: generate — draft a full agreement from context + instructions
+  z.object({
+    mode: z.literal("generate"),
+    clause_type: z.string().min(1),
+    context: z.record(z.unknown()).optional().default({}),
+    instructions: z.string().min(10),
+    tenant_id: z.string().optional(),
+  }),
 ]);
 
 // ── POST /api/v1/legal/clause/draft ──────────────────────────────────────────
@@ -63,6 +71,27 @@ router.post(
     const body = parsed.data;
 
     try {
+      // Mode C: generate full agreement from scratch
+      if (body.mode === "generate") {
+        const genOutput = await generateAgreement({
+          clauseType: body.clause_type,
+          context: body.context ?? {},
+          instructions: body.instructions,
+          tenantId: body.tenant_id,
+        });
+        res.status(200).json({
+          ok: true,
+          clause_type: genOutput.clauseType,
+          improved_text: genOutput.improvedText,
+          changes_summary: genOutput.changesSummary,
+          risk_reduction: genOutput.riskReduction,
+          confidence: genOutput.confidence,
+          model_used: genOutput.modelUsed,
+          vault_written: true,
+        });
+        return;
+      }
+
       let draftInput: Parameters<typeof draftClause>[0];
 
       if (body.mode === "inline") {

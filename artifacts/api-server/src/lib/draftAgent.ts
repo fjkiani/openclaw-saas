@@ -223,3 +223,160 @@ export async function draftClause(input: DraftClauseInput): Promise<DraftClauseO
     modelUsed,
   };
 }
+
+// ── GenerateAgreementInput / Output ───────────────────────────────────────────
+
+export interface GenerateAgreementInput {
+  clauseType: string;           // e.g. "co_founder_agreement"
+  context: Record<string, unknown>;  // parties, vesting, jurisdiction, etc.
+  instructions: string;         // free-form drafting instructions
+  tenantId?: string;
+}
+
+export interface GenerateAgreementOutput {
+  clauseType: string;
+  improvedText: string;         // the full agreement text
+  changesSummary: string;       // what was drafted and key provisions
+  riskReduction: "eliminated" | "reduced" | "flagged_for_counsel";
+  confidence: number;
+  modelUsed: string;
+}
+
+// ── System prompt for full agreement generation ───────────────────────────────
+
+const GENERATE_SYSTEM_PROMPT = `You are a senior corporate attorney drafting a complete legal agreement from scratch.
+
+You will receive:
+- clause_type: the type of agreement to draft
+- context: structured data about the parties, terms, and deal parameters
+- instructions: specific drafting requirements
+
+Your output must be:
+1. improved_text: The complete agreement in proper legal drafting style. Include all sections, numbered clauses, recitals, signature blocks. Use formal contract language throughout. This must be a complete, standalone document.
+2. changes_summary: 2-4 sentences summarizing the key provisions drafted and any notable choices made.
+3. risk_reduction: "eliminated" if all standard risks are addressed, "reduced" if some provisions need attorney review, "flagged_for_counsel" if the instructions require judgment calls beyond standard drafting.
+4. confidence: Float 0.0-1.0 reflecting your confidence in the drafted agreement.
+
+Rules:
+- Output ONLY valid JSON. No markdown fences. No prose outside the JSON.
+- improved_text must be a complete, executable legal document.
+- Include all sections specified in the instructions. Do not omit any.
+- Use Delaware law defaults unless jurisdiction is specified otherwise.
+- For co-founder agreements: always include equity, vesting, IP assignment, decision-making, departure/buyback, non-compete, and dispute resolution sections.
+- Number all sections. Use defined terms in ALL CAPS on first use.
+
+Output format:
+{
+  "improved_text": "<complete agreement text>",
+  "changes_summary": "<2-4 sentences>",
+  "risk_reduction": "eliminated|reduced|flagged_for_counsel",
+  "confidence": 0.0-1.0
+}`;
+
+// ── Model chain for generation (needs higher token limit) ─────────────────────
+
+const GENERATE_CHAIN: ModelRouteConfig[] = [
+  {
+    id: "llama-3.3-70b-versatile",
+    provider: "groq",
+    apiKeyEnv: "GROQ_API_KEY",
+    maxTokens: 4096,
+    timeoutMs: 60_000,
+    tags: ["70b", "generate-primary"],
+  },
+  {
+    id: "openai/gpt-oss-120b:free",
+    provider: "openrouter",
+    apiKeyEnv: "OPENROUTER_API_KEY",
+    maxTokens: 4096,
+    timeoutMs: 90_000,
+    tags: ["120b", "generate-fallback"],
+  },
+];
+
+// ── generateAgreement ─────────────────────────────────────────────────────────
+
+export async function generateAgreement(input: GenerateAgreementInput): Promise<GenerateAgreementOutput> {
+  const {
+    clauseType,
+    context,
+    instructions,
+    tenantId = "system",
+  } = input;
+
+  const userContent = JSON.stringify({
+    clause_type: clauseType,
+    context,
+    instructions,
+  });
+
+  const contextStr = JSON.stringify(context).slice(0, 500);
+  const promptHash = hashPrompt(`legal_generate:${clauseType}:${contextStr}:${instructions.slice(0, 200)}`);
+
+  // ── Invoke model ──────────────────────────────────────────────────────────
+  const result = await invokeWithFallback<z.infer<typeof DraftOutputSchema>>(
+    {
+      systemPrompt: GENERATE_SYSTEM_PROMPT,
+      userContent,
+      title: `OpenClaw Agreement Generator - ${clauseType}`,
+      maxTokens: 4096,
+      temperature: 0.2,
+    },
+    GENERATE_CHAIN,
+    {
+      validator: (raw) => DraftOutputSchema.parse(raw),
+      routeChainId: "zie-generate-agent",
+      schemaType: "seo",
+    },
+  );
+
+  const draftOutput = result.parsed;
+  const modelUsed = result.model_used;
+
+  // ── Vault writes (fire-and-forget) ────────────────────────────────────────
+  setImmediate(async () => {
+    try {
+      const promptJson = JSON.stringify({ clause_type: clauseType, context, instructions });
+      const responseJson = JSON.stringify(draftOutput);
+
+      await pool.query(
+        `INSERT INTO zie_training_records
+           (domain, task_type, source_kind, quality_score, prompt_hash,
+            prompt_json, remote_response_json)
+         VALUES ('legal', 'legal_agreement_generate', 'generate_agent', $1, $2, $3, $4)
+         ON CONFLICT (prompt_hash) DO NOTHING`,
+        [draftOutput.confidence, promptHash, promptJson, responseJson],
+      );
+
+      await pool.query(
+        `INSERT INTO zie_preference_pairs
+           (domain, task_type, preference_source,
+            prompt_hash, chosen_response_json, rejected_response_json,
+            source_kind)
+         VALUES ('legal', 'legal_agreement_generate', 'generate_agent',
+                 $1, $2, $3, 'generate_agent')`,
+        [
+          promptHash,
+          JSON.stringify({ text: draftOutput.improved_text, changes_summary: draftOutput.changes_summary }),
+          JSON.stringify({ text: "", reason: "no prior draft — generated from scratch" }),
+        ],
+      );
+
+      logger.info(
+        { clauseType, promptHash, confidence: draftOutput.confidence },
+        "generateAgent: vault writes complete (SFT + DPO pair)",
+      );
+    } catch (vaultErr) {
+      logger.error({ vaultErr, clauseType }, "generateAgent: vault write failed (non-blocking)");
+    }
+  });
+
+  return {
+    clauseType,
+    improvedText: draftOutput.improved_text,
+    changesSummary: draftOutput.changes_summary,
+    riskReduction: draftOutput.risk_reduction,
+    confidence: draftOutput.confidence,
+    modelUsed,
+  };
+}
