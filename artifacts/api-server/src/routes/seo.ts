@@ -29,7 +29,10 @@
 
 import { Router, type IRouter, type Request, type Response } from "express";
 import { z } from "zod";
-import { pool } from "@workspace/db";
+import {
+  persistSeoFlywheelData,
+  type SeoFactoryInput,
+} from "../factory/seoFactoryAdapter.js";
 import { invokeWithFallback, type ModelRouteConfig } from "../lib/modelRouter.js";
 import { logger } from "../lib/logger.js";
 import { requireWorkspaceMember } from "../middleware/requireWorkspaceMember.js";
@@ -150,42 +153,35 @@ interface SeoAuditResponse {
 }
 
 // ── Flywheel persistence (fire-and-forget) ────────────────────────────────────
-// Raw pool.query — matches doubleDipRouter.ts pattern exactly. No Drizzle ORM.
+// Delegates to seoFactoryAdapter — writes migration-0004 columns, returns UUIDs.
+// Raw pool.query inside adapter — no Drizzle ORM (matches doubleDipRouter.ts pattern).
 
 async function persistFlywheelData(
   promptHash: string,
   promptJson: unknown,
   remoteResult: SeoSynthesis,
   localResult: { data: SeoSynthesis; confidence: number },
+  tenantId?: string | null,
+  workspaceId?: number | null,
 ): Promise<void> {
-  await Promise.all([
-    // SFT Vault: 120B gold output
-    pool.query(
-      `INSERT INTO zie_training_records
-         (task_type, prompt_hash, prompt_json, remote_response_json, quality_score)
-       VALUES ($1, $2, $3, $4, $5)
-       ON CONFLICT (prompt_hash) DO NOTHING`,
-      [
-        "seo_audit",
-        promptHash,
-        JSON.stringify(promptJson),
-        JSON.stringify(remoteResult),
-        "1.0000",
-      ],
-    ),
-    // DPO Vault: chosen=120B, rejected=local
-    pool.query(
-      `INSERT INTO zie_preference_pairs
-         (task_type, prompt_hash, chosen_response_json, rejected_response_json)
-       VALUES ($1, $2, $3, $4)`,
-      [
-        "seo_audit",
-        promptHash,
-        JSON.stringify(remoteResult),
-        JSON.stringify(localResult.data),
-      ],
-    ),
-  ]);
+  const input: SeoFactoryInput = {
+    promptHash,
+    promptJson,
+    remoteResult,
+    localResult,
+    tenantId: tenantId ?? null,
+    workspaceId: workspaceId ?? null,
+  };
+  const result = await persistSeoFlywheelData(input);
+  logger.info(
+    {
+      sftRecordId:   result.sftRecordId,
+      localRecordId: result.localRecordId,
+      dpoRecordId:   result.dpoRecordId,
+      promptHash,
+    },
+    "seo.ts: flywheel persisted via seoFactoryAdapter",
+  );
 }
 
 // ── Dip 1: Local 20B runner ───────────────────────────────────────────────────
@@ -437,7 +433,7 @@ router.post(
     }
 
     // ── The Theft: async persist, never block the caller ─────────────────────
-    void persistFlywheelData(promptHash, promptJson, remoteResult, localResult).catch(
+    void persistFlywheelData(promptHash, promptJson, remoteResult, localResult, req.resolvedTenantId ?? null, req.resolvedWorkspace?.id ?? null).catch(
       (err: unknown) => {
         logger.error(
           { err, promptHash, domain: body.domain },
