@@ -39,12 +39,15 @@ export interface RoutePolicy {
 }
 
 // ── Model constants ───────────────────────────────────────────────────────────
-// Matches the model IDs used in legal.ts SPECIALIST_MODEL_CHAIN.
+// timeoutMs: 55_000 on all entries — Railway max request timeout is 5 minutes.
+// modelRouter.ts defaults to 25_000 (AbortSignal.timeout) which kills calls
+// before Railway's proxy sees them. 55s gives the full chain room to respond.
 
 const GROQ_LLAMA_70B: ModelRouteConfig = {
   id: "llama-3.3-70b-versatile",
   provider: "groq",
   apiKeyEnv: "GROQ_API_KEY",
+  timeoutMs: 55_000,
   tags: ["70b", "fast"],
 };
 
@@ -52,6 +55,7 @@ const OR_LLAMA_70B_K1: ModelRouteConfig = {
   id: "meta-llama/llama-3.3-70b-instruct:free",
   provider: "openrouter",
   apiKeyEnv: "OPENROUTER_API_KEY",
+  timeoutMs: 55_000,
   tags: ["70b"],
 };
 
@@ -59,6 +63,7 @@ const OR_LLAMA_70B_K2: ModelRouteConfig = {
   id: "meta-llama/llama-3.3-70b-instruct:free",
   provider: "openrouter",
   apiKeyEnv: "OPENROUTER_API_KEY_2",
+  timeoutMs: 55_000,
   tags: ["70b"],
 };
 
@@ -66,6 +71,7 @@ const OR_GPT_120B: ModelRouteConfig = {
   id: "openai/gpt-oss-120b:free",
   provider: "openrouter",
   apiKeyEnv: "OPENROUTER_API_KEY",
+  timeoutMs: 55_000,
   tags: ["120b"],
 };
 
@@ -73,6 +79,7 @@ const OR_GPT_20B: ModelRouteConfig = {
   id: "openai/gpt-oss-20b:free",
   provider: "openrouter",
   apiKeyEnv: "OPENROUTER_API_KEY_2",
+  timeoutMs: 55_000,
   tags: ["20b"],
 };
 
