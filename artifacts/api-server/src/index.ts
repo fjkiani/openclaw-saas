@@ -511,7 +511,8 @@ async function runMigrations(): Promise<void> {
         ADD COLUMN IF NOT EXISTS "judge_reasoning" text,
         ADD COLUMN IF NOT EXISTS "judge_run_id" integer,
         ADD COLUMN IF NOT EXISTS "tenant_id" text,
-        ADD COLUMN IF NOT EXISTS "workspace_id" text
+        ADD COLUMN IF NOT EXISTS "workspace_id" text,
+        ADD COLUMN IF NOT EXISTS "created_at" timestamptz NOT NULL DEFAULT now()
     `);
 
     await client.query(`
