@@ -35,7 +35,6 @@ import {
 } from "../factory/seoFactoryAdapter.js";
 import { invokeWithFallback, type ModelRouteConfig } from "../lib/modelRouter.js";
 import { logger } from "../lib/logger.js";
-import { requireWorkspaceMember } from "../middleware/requireWorkspaceMember.js";
 import {
   runViteAudit,
   computeSCIRankings,
@@ -293,7 +292,6 @@ const router: IRouter = Router();
  */
 router.post(
   "/v1/seo/audit",
-  requireWorkspaceMember,
   async (req: Request, res: Response): Promise<void> => {
     // ── 1. Validate request body ────────────────────────────────────────────
     const parseResult = SeoAuditRequestSchema.safeParse(req.body);
