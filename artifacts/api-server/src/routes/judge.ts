@@ -10,7 +10,8 @@
  *   2. Send chosen + rejected responses to the judge LLM (GROQ llama-3.3-70b).
  *   3. Parse judge scores (0.0–1.0 each) + reasoning.
  *   4. In ONE transaction: insert an evaluation_run, insert its evaluation_metrics
- *      (judge_score_chosen, judge_score_rejected, judge_delta), then UPDATE
+ *      (judge_score_chosen, judge_score_rejected, judge_delta) using the SPEC
+ *      columns eval_run_id / metric_value, then UPDATE
  *      zie_preference_pairs SET judge_verified, judge_score_*, judge_reasoning,
  *      judge_run_id = <evaluation_run.id> WHERE id = :pairId.
  *   5. Return receipt JSON (includes judge_run_id).
@@ -180,9 +181,9 @@ router.post(
       );
       evalRunId = runInsert.rows[0].id;
 
-      // 4b. evaluation_metrics — FK column is eval_run_id (integer); value is `value`.
+      // 4b. evaluation_metrics — SPEC columns: eval_run_id (integer FK), metric_value (real).
       await client.query(
-        `INSERT INTO evaluation_metrics (tenant_id, eval_run_id, metric_name, value)
+        `INSERT INTO evaluation_metrics (tenant_id, eval_run_id, metric_name, metric_value)
          VALUES
            ($1, $2, 'judge_score_chosen',   $3),
            ($1, $2, 'judge_score_rejected', $4),

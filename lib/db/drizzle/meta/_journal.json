@@ -1,0 +1,15 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    { "idx": 0, "version": "7", "when": 1748908800000, "tag": "0001_legal_receipt_nonces", "breakpoints": true },
+    { "idx": 1, "version": "7", "when": 1748908801000, "tag": "0002_semantic_clause_analyses", "breakpoints": true },
+    { "idx": 2, "version": "7", "when": 1748908802000, "tag": "0003_zie_flywheel", "breakpoints": true },
+    { "idx": 3, "version": "7", "when": 1748908803000, "tag": "0003b_manuscript_pipeline", "breakpoints": true },
+    { "idx": 4, "version": "7", "when": 1748908804000, "tag": "0004_zie_seo_columns", "breakpoints": true },
+    { "idx": 5, "version": "7", "when": 1748908805000, "tag": "0004b_zie_router_policies", "breakpoints": true },
+    { "idx": 6, "version": "7", "when": 1748908806000, "tag": "0005_zie_domain_columns", "breakpoints": true },
+    { "idx": 7, "version": "7", "when": 1748908807000, "tag": "0006_zie_evaluation_bridge", "breakpoints": true },
+    { "idx": 8, "version": "7", "when": 1748908808000, "tag": "0007_judge_evaluation_bridge", "breakpoints": true }
+  ]
+}
