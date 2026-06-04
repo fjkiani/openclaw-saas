@@ -32,7 +32,7 @@ import { VERIFIED_DPO_THRESHOLD } from "../lib/modalDispatch.js";
 const router = Router();
 
 router.get(
-  "/api/v1/legal/flywheel/status",
+  "/v1/legal/flywheel/status",
   async (_req: Request, res: Response): Promise<void> => {
     try {
       // Per task_type: verified pairs, total pairs

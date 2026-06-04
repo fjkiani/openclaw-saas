@@ -52,7 +52,7 @@ const DraftRequestSchema = z.union([
 // ── POST /api/v1/legal/clause/draft ──────────────────────────────────────────
 
 router.post(
-  "/api/v1/legal/clause/draft",
+  "/v1/legal/clause/draft",
   async (req: Request, res: Response): Promise<void> => {
     const parsed = DraftRequestSchema.safeParse(req.body);
     if (!parsed.success) {
