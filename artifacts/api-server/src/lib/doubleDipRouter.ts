@@ -21,7 +21,7 @@ interface FastPathPolicy {
 }
 
 const DEFAULT_FAST_POLICY: FastPathPolicy = {
-  fast_model_id: "liquid/lfm-2.5-1.2b:free",
+  fast_model_id: "liquid/lfm-2.5-1.2b-instruct:free",
   fast_provider: "openrouter",
   fast_api_key_env: "OPENROUTER_API_KEY",
   fast_max_tokens: 512,

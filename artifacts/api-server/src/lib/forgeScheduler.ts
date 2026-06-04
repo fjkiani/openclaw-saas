@@ -46,6 +46,10 @@ export async function startForgeScheduler(): Promise<void> {
   await boss.start();
   logger.info("forgeScheduler: pg-boss started");
 
+  // pg-boss v10: queue must exist before schedule() can reference it
+  await boss.createQueue("hourly-forge-check");
+  logger.info("forgeScheduler: queue hourly-forge-check created (idempotent)");
+
   // Register the cron schedule — idempotent, safe to call on every startup
   await boss.schedule(
     "hourly-forge-check",
