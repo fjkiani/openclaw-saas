@@ -1,7 +1,7 @@
 /**
  * semanticLegalAnalyzer.ts
  *
- * Semantic Law Counsel v1 — Shadow-mode orchestrator + ZIE Factory integration.
+ * Semantic Law Counsel v1 - Shadow-mode orchestrator + ZIE Factory integration.
  *
  * runSemanticShadow() is called fire-and-forget from legal.ts after the
  * deterministic pipeline completes. It never throws into the caller.
@@ -58,9 +58,12 @@ export const SEMANTIC_PROMPT_VERSION = "semantic-v1.0";
 export const LEGAL_TASK_TYPE = "legal_clause_analysis";
 
 export const SPECIALIST_TO_DOC_CLASS: Record<string, SemanticDocClass> = {
-  cofounder: "co_founder_agreement",
-  // contractor: "contractor_ip_assignment",
-  // advisor:    "advisor_agreement",
+  cofounder:  "co_founder_agreement",
+  contract:   "contractor_ip_assignment",
+  ip:         "contractor_ip_assignment",
+  employment: "advisor_agreement",
+  litigation: "default",
+  corporate:  "default",
 };
 
 const UNSUPPORTED_DOC_CLASSES: SemanticDocClass[] = ["nda", "default"];
@@ -157,7 +160,7 @@ function buildClauseInvocationInput(
       `- Return ONLY valid JSON.\n\n` +
       `Document text (truncated to 8000 chars):\n---\n${documentText.slice(0, 8000)}\n---\n\n` +
       `Analyze the "${clauseLabel}" clause now.`,
-    title: `Semantic Law Counsel v1 — ${clauseLabel}`,
+    title: `Semantic Law Counsel v1 - ${clauseLabel}`,
   };
 }
 
