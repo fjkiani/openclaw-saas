@@ -138,14 +138,14 @@ const INTAKE_MODEL_CHAIN: ModelEntry[] = [
 ];
 
 const SPECIALIST_MODEL_CHAIN: ModelEntry[] = [
-  // 1. Groq — llama-3.3-70b, ~30 req/min free tier, fastest 70B available
-  { id: GROQ_LLAMA_70B, provider: "groq",       apiKeyEnv: "GROQ_API_KEY",         eval_accuracy: 1.0,  eval_macro_f1: 1.0,    eval_latency_s: 1.5,  use_rag: false },
-  // 2. OpenRouter key 1 — llama-3.3-70b
-  { id: OR_LLAMA_70B,   provider: "openrouter", apiKeyEnv: "OPENROUTER_API_KEY",   eval_accuracy: 1.0,  eval_macro_f1: 1.0,    eval_latency_s: 5.0,  use_rag: false },
-  // 3. OpenRouter key 2 — llama-3.3-70b (separate quota)
-  { id: OR_LLAMA_70B,   provider: "openrouter", apiKeyEnv: "OPENROUTER_API_KEY_2", eval_accuracy: 1.0,  eval_macro_f1: 1.0,    eval_latency_s: 5.0,  use_rag: false },
-  // 4. OpenRouter key 1 — gpt-oss-120b fallback
+  // 1. OpenRouter 120B — reliable on Render k30t (draft/judge proven path)
   { id: OR_GPT_120B,    provider: "openrouter", apiKeyEnv: "OPENROUTER_API_KEY",   eval_accuracy: 0.8,  eval_macro_f1: 0.8,    eval_latency_s: 3.45, use_rag: false },
+  // 2. Groq — llama-3.3-70b when available
+  { id: GROQ_LLAMA_70B, provider: "groq",       apiKeyEnv: "GROQ_API_KEY",         eval_accuracy: 1.0,  eval_macro_f1: 1.0,    eval_latency_s: 1.5,  use_rag: false },
+  // 3. OpenRouter key 1 — llama-3.3-70b
+  { id: OR_LLAMA_70B,   provider: "openrouter", apiKeyEnv: "OPENROUTER_API_KEY",   eval_accuracy: 1.0,  eval_macro_f1: 1.0,    eval_latency_s: 5.0,  use_rag: false },
+  // 4. OpenRouter key 2 — llama-3.3-70b (separate quota)
+  { id: OR_LLAMA_70B,   provider: "openrouter", apiKeyEnv: "OPENROUTER_API_KEY_2", eval_accuracy: 1.0,  eval_macro_f1: 1.0,    eval_latency_s: 5.0,  use_rag: false },
   // 5. OpenRouter key 2 — gpt-oss-20b last resort
   { id: OR_GPT_20B,     provider: "openrouter", apiKeyEnv: "OPENROUTER_API_KEY_2", eval_accuracy: 0.7,  eval_macro_f1: 0.7,    eval_latency_s: 3.44, use_rag: false },
 ];
@@ -396,7 +396,7 @@ async function callModelWithFallback(
           temperature: 0,
           max_tokens: maxTokens,
         }),
-        signal: AbortSignal.timeout(25_000),
+        signal: AbortSignal.timeout(entry.provider === "openrouter" ? 55_000 : 12_000),
       });
 
     try {

@@ -52,10 +52,10 @@ const OR_GPT_120B    = "openai/gpt-oss-120b:free";
 const OR_GPT_20B     = "openai/gpt-oss-20b:free";
 
 const SPECIALIST_MODEL_CHAIN: ModelEntry[] = [
+  { id: OR_GPT_120B,    provider: "openrouter", apiKeyEnv: "OPENROUTER_API_KEY"   },
   { id: GROQ_LLAMA_70B, provider: "groq",       apiKeyEnv: "GROQ_API_KEY"         },
   { id: OR_LLAMA_70B,   provider: "openrouter", apiKeyEnv: "OPENROUTER_API_KEY"   },
   { id: OR_LLAMA_70B,   provider: "openrouter", apiKeyEnv: "OPENROUTER_API_KEY_2" },
-  { id: OR_GPT_120B,    provider: "openrouter", apiKeyEnv: "OPENROUTER_API_KEY"   },
   { id: OR_GPT_20B,     provider: "openrouter", apiKeyEnv: "OPENROUTER_API_KEY_2" },
 ];
 
@@ -107,7 +107,7 @@ async function callExtractorModel(
           temperature: 0,
           max_tokens: maxTokens,
         }),
-        signal: AbortSignal.timeout(25_000),
+        signal: AbortSignal.timeout(entry.provider === "openrouter" ? 55_000 : 12_000),
       });
 
     try {
