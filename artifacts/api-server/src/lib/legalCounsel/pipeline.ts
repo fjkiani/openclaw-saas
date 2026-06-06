@@ -14,6 +14,9 @@ import { buildFullContractDigest, buildMultiRetrievalQueries } from "./buildDige
 import { mergedHybridRetrieve } from "./multiRetrieve.js";
 import { partitionAndValidateFindings, type GroundedFinding, type InferredFinding } from "./grounding.js";
 import { counselGovernanceBlock } from "./disclaimer.js";
+import { detectContractSignals, buildStatuteRetrievalQueries } from "./contractSignals.js";
+import { buildCompanyLeverageFindings, enrichGroundedStatuteFindings } from "./companyLeverage.js";
+import { COFOUNDER_STATUTE_SLUGS } from "../legalCorpus/cofounderSlugs.js";
 
 const COUNSEL_CHAIN: ModelRouteConfig[] = [
   {
@@ -157,6 +160,9 @@ export interface CounselAnalyzeResult {
     corpus_chunks_total: number;
     retrieval_mode: string;
     force_critical_used: boolean;
+    forced_slugs_requested: string[];
+    forced_slugs_retrieved: string[];
+    contract_signals: ReturnType<typeof detectContractSignals>;
     queries_run: number;
     multi_version: boolean;
   };
@@ -172,11 +178,18 @@ GROUNDING RULES (strict):
 - Do NOT duplicate the same issue in both arrays.
 - lens_findings: optional legacy summary entries; prefer findings_grounded / findings_inferred.
 
-Statutory anchors:
-- QSBS IRC §1202: post-OBBBA $75M gross asset ceiling (NOT $50M)
-- DGCL §144: restricted stock / affiliate resale safe harbor
-- IRC §83(b): 30-day non-waivable election window
+Statutory anchors (ground with corpus when present):
+- QSBS IRC §1202: post-OBBBA $75M gross asset ceiling (NOT $50M) — slug irc-1202
+- DGCL §144: restricted stock / affiliate resale safe harbor — slug dgcl-144
+- IRC §83(b): 30-day non-waivable election window — slug irc-83b
+- IRC §409A: FMV at grant — slug irc-409a
 - RUO vs clinical use for AI/oncology products with a CMO co-founder
+
+COMPANY LEVERAGE LENS (when perspective=company):
+- Identify counterparty-favorable terms (Mutual Dependency, acceleration economics, blank Schedule C).
+- Identify company wins to preserve (Cause-only termination, $0 cash, scoped IP).
+- Put negotiation leverage in opportunities_for_company; blocking pre-sign gaps in blocking_issues.
+- Do NOT suggest redlines that give away company wins unless balanced trade.
 
 Output ONLY valid JSON (no markdown):
 {
@@ -221,15 +234,19 @@ export async function runLegalCounselAnalyze(
 
   const sections = chunkContractSections(analyzeText);
   const digest = buildFullContractDigest(sections, { maxTotalChars: 28_000 });
+  const signals = detectContractSignals(analyzeText);
 
-  const retrievalQueries = buildMultiRetrievalQueries(sections, docHint, 1500, analyzeText);
+  const retrievalQueries = [
+    ...buildMultiRetrievalQueries(sections, docHint, 1500, analyzeText),
+    ...buildStatuteRetrievalQueries(signals),
+  ];
   const isCofounder = /co-founder|cofounder|cmo|restricted stock/i.test(analyzeText);
 
   const rag = await mergedHybridRetrieve({
     queries: retrievalQueries,
     domains: ["cofounder", "tax", "delaware", "regulatory", "contract"],
-    topK: 12,
-    maxChars: 8000,
+    topK: 16,
+    maxChars: 10_000,
     forceCofounderCritical: isCofounder,
   });
 
@@ -258,6 +275,7 @@ export async function runLegalCounselAnalyze(
       coverage_pct: digest.coverage_pct,
       full_text_length: analyzeText.length,
     },
+    contract_signals: signals,
     version_analysis: versionAnalysis
       ? {
           versions: versionAnalysis.version_labels,
@@ -268,6 +286,8 @@ export async function runLegalCounselAnalyze(
       : null,
     instruction:
       "Analyze all lenses. Split findings_grounded vs findings_inferred per grounding rules. " +
+      "When contract_signals show 83(b)/RSPA/restricted stock, ground tax findings to irc-83b, dgcl-144, irc-1202, irc-409a if in knowledge_base. " +
+      "Apply company leverage lens: flag Mutual Dependency, acceleration cost, blank Schedule C, employee vs contractor delta. " +
       "If version_analysis present, address material diffs in executive_summary and blocking_issues.",
   });
 
@@ -288,16 +308,48 @@ export async function runLegalCounselAnalyze(
   );
 
   const partitioned = partitionAndValidateFindings(result.parsed, rag.hits);
+  let findingsGrounded = enrichGroundedStatuteFindings(
+    partitioned.findings_grounded,
+    rag.hits,
+    signals,
+  );
+  const leverage = buildCompanyLeverageFindings(
+    analyzeText,
+    signals,
+    versionAnalysis?.diff_items,
+    perspective,
+  );
+
+  const mergeInferred = (base: InferredFinding[], extra: InferredFinding[]) => {
+    const out = [...base];
+    for (const e of extra) {
+      if (out.some((x) => x.issue.slice(0, 40) === e.issue.slice(0, 40))) continue;
+      out.push(e);
+    }
+    return out;
+  };
+
+  const findingsInferred = mergeInferred(partitioned.findings_inferred, leverage.inferred);
+  const opportunities = [
+    ...(result.parsed.opportunities_for_company ?? []),
+    ...leverage.opportunities,
+  ];
+  const blockingIssues = [
+    ...new Set([...(result.parsed.blocking_issues ?? []), ...leverage.blocking]),
+  ];
+
   const slugs = [...new Set(rag.hits.map((h) => h.slug))];
 
   const output = {
     ...result.parsed,
-    findings_grounded: partitioned.findings_grounded,
-    findings_inferred: partitioned.findings_inferred,
+    findings_grounded: findingsGrounded,
+    findings_inferred: findingsInferred,
+    opportunities_for_company: opportunities,
+    blocking_issues: blockingIssues,
     lens_findings: result.parsed.lens_findings?.length
       ? result.parsed.lens_findings
       : [
-          ...partitioned.findings_grounded.map((g) => ({
+          ...findingsGrounded.map((g) => ({
             lens: g.lens,
             severity: g.severity as "critical" | "high" | "medium" | "low" | "info",
             issue: g.issue,
@@ -305,7 +357,7 @@ export async function runLegalCounselAnalyze(
             corpus_slugs: [g.slug],
             recommendation: g.recommendation,
           })),
-          ...partitioned.findings_inferred.map((inf) => ({
+          ...findingsInferred.map((inf) => ({
             lens: inf.lens,
             severity: (inf.severity ?? "medium") as "critical" | "high" | "medium" | "low" | "info",
             issue: inf.issue,
@@ -349,6 +401,9 @@ export async function runLegalCounselAnalyze(
       corpus_chunks_total: corpusChunksTotal,
       retrieval_mode: rag.retrieval_mode,
       force_critical_used: isCofounder,
+      forced_slugs_requested: [...COFOUNDER_STATUTE_SLUGS],
+      forced_slugs_retrieved: rag.forced_slugs_retrieved,
+      contract_signals: signals,
       queries_run: rag.queries_run,
       multi_version: !single,
     },

@@ -4,7 +4,11 @@
 
 import { legalCorpusHybridRetrieve } from "../legalCorpus/hybridRetrieve.js";
 import { buildContextBlock, type RRFResult } from "../legalCorpus/rrfMerge.js";
-import type { LegalCorpusHit } from "../legalCorpus/retrieve.js";
+import {
+  COFOUNDER_STATUTE_SLUGS,
+  fetchCofounderStatuteHits,
+  type LegalCorpusHit,
+} from "../legalCorpus/retrieve.js";
 
 export async function mergedHybridRetrieve(params: {
   queries: string[];
@@ -18,11 +22,19 @@ export async function mergedHybridRetrieve(params: {
   truncated: boolean;
   retrieval_mode: "hybrid" | "bm25_only";
   queries_run: number;
+  forced_slugs_retrieved: string[];
 }> {
   const topK = params.topK ?? 12;
   const maxChars = params.maxChars ?? 8000;
   const byChunk = new Map<number, LegalCorpusHit & { best_rank: number }>();
   let retrieval_mode: "hybrid" | "bm25_only" = "hybrid";
+
+  if (params.forceCofounderCritical) {
+    const forced = await fetchCofounderStatuteHits();
+    for (const h of forced) {
+      byChunk.set(h.chunk_id, { ...h, best_rank: 2 });
+    }
+  }
 
   for (const query of params.queries) {
     const r = await legalCorpusHybridRetrieve({
@@ -30,7 +42,7 @@ export async function mergedHybridRetrieve(params: {
       domains: params.domains,
       topK,
       maxChars,
-      forceCofounderCritical: params.forceCofounderCritical,
+      forceCofounderCritical: false,
     });
     if (r.retrieval_mode === "bm25_only") retrieval_mode = "bm25_only";
 
@@ -61,11 +73,15 @@ export async function mergedHybridRetrieve(params: {
 
   const { block, truncated } = buildContextBlock(rrfItems, maxChars);
 
+  const forcedSet = new Set<string>(COFOUNDER_STATUTE_SLUGS);
+  const forced_slugs_retrieved = [...new Set(hits.filter((h) => forcedSet.has(h.slug)).map((h) => h.slug))];
+
   return {
     hits,
     context_block: block,
     truncated,
     retrieval_mode,
     queries_run: params.queries.length,
+    forced_slugs_retrieved,
   };
 }

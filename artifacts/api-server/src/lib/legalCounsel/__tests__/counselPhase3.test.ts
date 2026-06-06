@@ -13,6 +13,9 @@ import { chunkContractSections } from "../chunkContract.js";
 import { partitionAndValidateFindings } from "../grounding.js";
 import { runLegalCounselDiff } from "../pipeline.js";
 import { counselGovernanceBlock } from "../disclaimer.js";
+import { detectContractSignals, buildStatuteRetrievalQueries } from "../contractSignals.js";
+import { buildCompanyLeverageFindings, enrichGroundedStatuteFindings } from "../companyLeverage.js";
+import { COFOUNDER_STATUTE_SLUGS } from "../../legalCorpus/cofounderSlugs.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CRISPRO_FIXTURE = resolve(__dirname, "../../legalCorpus/__tests__/fixtures/crispro-v3.1.txt");
@@ -126,5 +129,60 @@ describe("legalCounsel Phase 3 — governance", () => {
     const g = counselGovernanceBlock();
     expect(g.not_legal_advice).toBe(true);
     expect(g.disclaimer.toLowerCase()).toContain("not legal advice");
+  });
+});
+
+describe("legalCounsel Phase 3 — contract signals & company leverage", () => {
+  it("COFOUNDER_STATUTE_SLUGS use ingested corpus names (not boot seeds)", () => {
+    expect(COFOUNDER_STATUTE_SLUGS).toContain("irc-83b");
+    expect(COFOUNDER_STATUTE_SLUGS).toContain("dgcl-144");
+    expect(COFOUNDER_STATUTE_SLUGS).not.toContain("qsbs-post-obbba");
+    expect(COFOUNDER_STATUTE_SLUGS).not.toContain("irc-83b-election");
+  });
+
+  it("detects CrisPRO v2 signals and statute queries", () => {
+    const text = readFileSync(CRISPRO_FIXTURE, "utf-8");
+    const { versions } = splitContractVersions(text);
+    const signals = detectContractSignals(versions[1]!.text);
+    expect(signals.has_83b).toBe(true);
+    expect(signals.has_mutual_dependency).toBe(true);
+    expect(signals.has_schedule_c_blank).toBe(true);
+    expect(signals.has_employee_classification).toBe(true);
+    const statuteQs = buildStatuteRetrievalQueries(signals);
+    expect(statuteQs.some((q) => /83b/i.test(q))).toBe(true);
+  });
+
+  it("company leverage flags Mutual Dependency for company perspective", () => {
+    const text = readFileSync(CRISPRO_FIXTURE, "utf-8");
+    const { versions } = splitContractVersions(text);
+    const signals = detectContractSignals(versions[1]!.text);
+    const { inferred, blocking } = buildCompanyLeverageFindings(
+      versions[1]!.text,
+      signals,
+      undefined,
+      "company",
+    );
+    expect(inferred.some((i) => /mutual dependency/i.test(i.issue))).toBe(true);
+    expect(blocking.some((b) => /mutual dependency/i.test(b))).toBe(true);
+  });
+
+  it("enrichGroundedStatuteFindings adds irc-83b when signal + hit present", () => {
+    const signals = detectContractSignals("Section 83(b) election within 30 days");
+    const hits = [
+      {
+        chunk_id: 7,
+        document_id: 1,
+        slug: "irc-83b",
+        title: "IRC 83b",
+        citation: "IRC §83(b)",
+        domain: "tax",
+        priority: "critical",
+        rank: 1,
+        content: "File within 30 days of transfer.",
+      },
+    ];
+    const enriched = enrichGroundedStatuteFindings([], hits, signals);
+    expect(enriched.some((g) => g.slug === "irc-83b")).toBe(true);
+    expect(enriched.length).toBeGreaterThanOrEqual(1);
   });
 });

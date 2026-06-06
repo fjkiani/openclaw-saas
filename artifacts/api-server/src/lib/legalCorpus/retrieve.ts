@@ -1,5 +1,6 @@
 import { pool } from "@workspace/db";
 import { logger } from "../logger.js";
+import { COFOUNDER_STATUTE_SLUGS } from "./cofounderSlugs.js";
 import { LEGAL_CORPUS_VERSION } from "./documents.js";
 
 export interface LegalCorpusHit {
@@ -21,13 +22,36 @@ export interface LegalCorpusRetrieveResult {
   truncated: boolean;
 }
 
-const COFOUNDER_FORCE_SLUGS = [
-  "qsbs-post-obbba",
-  "dgcl-144-safe-harbor",
-  "irc-83b-election",
-  "cofounder-ip-assignment-carveout",
-  "cofounder-ruo-fda-scope",
-];
+export { COFOUNDER_STATUTE_SLUGS };
+
+/** Load pinned statute/CUAD chunks for cofounder counsel (ingested corpus slugs). */
+export async function fetchCofounderStatuteHits(): Promise<LegalCorpusHit[]> {
+  try {
+    const forced = await pool.query(
+      `SELECT c.id AS chunk_id, c.document_id, d.slug, d.title, d.citation, d.domain, d.priority,
+              1.0::float8 AS rank, c.content
+       FROM legal_corpus_chunks c
+       JOIN legal_corpus_documents d ON d.id = c.document_id
+       WHERE d.slug = ANY($1::text[])
+       ORDER BY array_position($1::text[], d.slug), c.chunk_index`,
+      [COFOUNDER_STATUTE_SLUGS],
+    );
+    return forced.rows.map((r) => ({
+      chunk_id: Number(r.chunk_id),
+      document_id: Number(r.document_id),
+      slug: String(r.slug),
+      title: String(r.title),
+      citation: String(r.citation ?? ""),
+      domain: String(r.domain),
+      priority: String(r.priority),
+      rank: Number(r.rank ?? 1),
+      content: String(r.content),
+    }));
+  } catch (err: unknown) {
+    logger.warn({ err }, "fetchCofounderStatuteHits failed");
+    return [];
+  }
+}
 
 function buildContextBlock(hits: LegalCorpusHit[], maxChars: number): { block: string; truncated: boolean } {
   const parts: string[] = [];
@@ -104,16 +128,12 @@ export async function legalCorpusRetrieve(params: {
 
   try {
     if (forceCofounderCritical) {
-      const forced = await pool.query(
-        `SELECT c.id AS chunk_id, c.document_id, d.slug, d.title, d.citation, d.domain, d.priority,
-                1.0::float8 AS rank, c.content
-         FROM legal_corpus_chunks c
-         JOIN legal_corpus_documents d ON d.id = c.document_id
-         WHERE d.slug = ANY($1::text[])
-         ORDER BY array_position($1::text[], d.slug), c.chunk_index`,
-        [COFOUNDER_FORCE_SLUGS],
-      );
-      pushRows(forced.rows);
+      const forcedHits = await fetchCofounderStatuteHits();
+      for (const h of forcedHits) {
+        if (seenChunkIds.has(h.chunk_id)) continue;
+        seenChunkIds.add(h.chunk_id);
+        hits.push(h);
+      }
     }
 
     if (searchTerms.length >= 3) {
