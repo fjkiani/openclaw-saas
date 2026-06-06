@@ -1,0 +1,15 @@
+INTERNAL REVENUE CODE §409A — INCLUSION IN GROSS INCOME OF AMOUNTS DEFERRED UNDER NONQUALIFIED DEFERRED COMPENSATION PLANS
+
+Source: 26 U.S.C. §409A; Treasury Regulations §1.409A-1 through §1.409A-13.
+
+(a) General rule. Amounts deferred under a nonqualified deferred compensation plan shall be included in gross income when such amounts are no longer subject to a substantial risk of forfeiture, unless the plan complies with the requirements of §409A(a)(2)-(4).
+
+(b) Failure to comply. If a plan fails to comply with §409A, all amounts deferred under the plan for the taxable year and all previous taxable years shall be included in gross income for the taxable year to the extent not subject to a substantial risk of forfeiture. In addition, the taxpayer is subject to: (1) An additional 20 percent tax on the amount required to be included in income; (2) Interest at the underpayment rate plus 1 percent on the deferred amounts.
+
+(c) Requirements for compliance. A plan complies with §409A only if: (1) The plan provides that amounts may not be paid earlier than a specified date or upon the occurrence of a specified event (separation from service, disability, death, change in control, unforeseeable emergency, or specified time or schedule); (2) The plan provides that payments upon separation from service may not be made before the date which is 6 months after the date of separation (for specified employees of publicly traded companies); (3) The plan does not permit the acceleration of the time or schedule for any payment.
+
+(d) Stock options and stock appreciation rights. A stock option or SAR that meets the following requirements is not treated as deferred compensation subject to §409A: (1) The option or SAR is granted with an exercise price not less than fair market value of the underlying stock on the date of grant; (2) The exercise price may not be modified after grant to reduce the price; (3) The option or SAR must be for service-provider stock (common stock); (4) The option or SAR does not include any feature for the deferral of compensation.
+
+(e) Safe harbor for stock options. Options with an exercise price at least equal to fair market value on the date of grant are exempt from §409A. This is the primary reason 409A valuations are required for private companies issuing stock options.
+
+ANALYSIS INSTRUCTION: When reviewing employment agreements, deferred compensation arrangements, or stock option plans, verify §409A compliance. Flag as CRITICAL if: (1) deferred compensation without specified payment triggers, (2) stock options with exercise price below FMV at grant, (3) severance payments that violate the 6-month delay for specified employees, (4) any provision permitting acceleration of payments. Verify that 409A valuation exists for any stock option grants.

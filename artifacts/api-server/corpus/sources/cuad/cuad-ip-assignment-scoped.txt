@@ -1,0 +1,6 @@
+IP Assignment — Scoped to Company Business
+
+Clause Type: ip_assignment
+Source: CUAD v1 (CC BY 4.0, Atticus Project) — representative pattern
+
+Employee agrees to assign to the Company all right, title, and interest in any inventions, improvements, or discoveries that Employee makes, conceives, or reduces to practice, whether alone or jointly with others, that (a) relate to the business of the Company or any of its affiliates, or (b) result from work performed by Employee for the Company, or (c) are made using Company equipment, supplies, facilities, or information. Employee shall disclose all such inventions to the Company promptly upon creation.

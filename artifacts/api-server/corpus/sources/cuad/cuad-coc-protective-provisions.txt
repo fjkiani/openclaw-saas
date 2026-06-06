@@ -1,0 +1,6 @@
+Change of Control — Protective Provisions for Investors
+
+Clause Type: change_of_control
+Source: CUAD v1 (CC BY 4.0, Atticus Project) — representative pattern
+
+Without the prior written consent of the holders of a majority of the Series A Preferred Stock, the Company shall not: (a) effect any merger, consolidation, or sale of all or substantially all of the Company's assets; (b) effect any reclassification of capital stock or recapitalization; (c) liquidate or dissolve the Company; or (d) amend the certificate of incorporation in a manner that adversely affects the rights of the Series A Preferred Stock. The consent of the Series A holders shall be required in addition to any vote required by law or the certificate of incorporation.

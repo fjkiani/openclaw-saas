@@ -1,0 +1,6 @@
+Indemnification — Mutual
+
+Clause Type: indemnification
+Source: CUAD v1 (CC BY 4.0, Atticus Project) — representative pattern
+
+Each party shall indemnify, defend, and hold harmless the other party and its officers, directors, employees, and agents from and against any and all claims, damages, losses, and expenses (including reasonable attorneys' fees) arising out of or related to: (a) any breach of the indemnifying party's representations, warranties, or obligations under this Agreement; (b) any claim that the indemnifying party's deliverables or use of the indemnifying party's technology infringes any third-party intellectual property rights; (c) any bodily injury or property damage caused by the indemnifying party's negligence or willful misconduct; or (d) any violation of applicable law by the indemnifying party.

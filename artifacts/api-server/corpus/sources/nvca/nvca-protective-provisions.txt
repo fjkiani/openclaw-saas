@@ -1,0 +1,24 @@
+NVCA MODEL PROTECTIVE PROVISIONS — PREFERRED STOCK VETO RIGHTS
+
+Source: NVCA Model Legal Documents (National Venture Capital Association). Summary excerpt for legal corpus.
+
+SOLE VOTING RIGHTS
+So long as any shares of Series A Preferred Stock remain outstanding, the Company shall not, without the prior written consent of the holders of a majority of the then-outstanding shares of Series A Preferred Stock, voting together as a separate class:
+
+(a) alter or change the rights, preferences, or privileges of the Series A Preferred Stock so as to affect them adversely;
+(b) increase or decrease the authorized number of shares of Series A Preferred Stock;
+(c) create any new class or series of capital stock having rights, preferences, or privileges senior to or on parity with the Series A Preferred Stock;
+(d) reclassify any authorized shares of Common Stock into shares having preferences or rights senior to or on parity with the Series A Preferred Stock;
+(e) effect any merger, consolidation, or sale of all or substantially all of the Company's assets;
+(f) liquidate or dissolve the Company;
+(g) amend the certificate of incorporation or bylaws in a manner that adversely affects the Series A Preferred Stock;
+(h) increase the size of the Board of Directors beyond the number specified in the certificate of incorporation; or
+(i) issue debt in excess of $1,000,000.
+
+BOARD SEAT
+The holders of the Series A Preferred Stock, voting as a separate class, shall be entitled to elect one (1) director to the Board of Directors. This right shall continue so long as the Series A Preferred Stock holders hold at least twenty-five percent (25%) of the originally issued Series A Preferred Stock.
+
+OBSERVER RIGHTS
+The holders of a majority of the Series A Preferred Stock shall have the right to designate one observer to attend all meetings of the Board of Directors. The observer shall receive all materials provided to directors but shall not have voting rights.
+
+ANALYSIS INSTRUCTION: When reviewing protective provisions, verify: (1) the scope of veto rights — the NVCA model lists 9 categories; (2) whether the veto threshold is majority of Preferred or a higher percentage; (3) whether protective provisions can be waived by the Preferred holders; (4) whether the debt threshold ($1M default) is appropriate for the company's stage. Overly broad protective provisions can impede operational flexibility for founders.

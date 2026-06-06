@@ -1,0 +1,18 @@
+{
+  "description": "Slugs that MUST appear in top-5 hybrid retrieval results for the CrisPro RSPA query. Used by recall@5 eval test.",
+  "query": "cofounder restricted stock purchase agreement 83b election vesting acceleration change of control QSBS",
+  "required_slugs": [
+    "irc-83b",
+    "cuad-coc-acceleration",
+    "cuad-ip-assignment-scoped",
+    "cuad-noncompete-12-month",
+    "cuad-indemnification-d&o",
+    "cuad-governing-law-delaware",
+    "irc-1202",
+    "irc-409a",
+    "dgcl-144",
+    "nvca-protective-provisions"
+  ],
+  "min_recall_at_5": 8,
+  "note": "At least 8 of these 10 slugs must appear in the top-5 hybrid retrieval results (each document may have multiple chunks in top results)."
+}

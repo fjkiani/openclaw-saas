@@ -29,13 +29,21 @@ const IngestSchema = z.object({
   citation: z.string().optional(),
   domain: z.enum(["cofounder", "contract", "tax", "delaware", "regulatory"]),
   tags: z.array(z.string()).optional(),
-  priority: z.enum(["critical", "normal"]).optional(),
+  priority: z.enum(["critical", "normal", "high", "medium"]).optional(),
   content: z.string().min(100),
 });
 
 router.get("/v1/legal/kb/status", async (_req: Request, res: Response): Promise<void> => {
   const status = await legalCorpusStatus();
-  res.json({ ok: true, ...status, hybrid: true });
+  res.json({
+    ok: true,
+    corpus_version: status.corpus_version,
+    documents: status.documents,
+    chunks: status.chunks,
+    by_source: status.by_source,
+    embedded_pct: status.embedded_pct,
+    hybrid: true,
+  });
 });
 
 router.post("/v1/legal/kb/search", async (req: Request, res: Response): Promise<void> => {

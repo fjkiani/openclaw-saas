@@ -1,0 +1,15 @@
+INTERNAL REVENUE CODE §83(b) — ELECTION TO INCLUDE IN GROSS income VALUE OF PROPERTY TRANSFERRED FOR SERVICES
+
+Source: 26 U.S.C. §83(b); Treasury Regulation §1.83-2.
+
+(a) Election. Any person who performs services in connection with which property is transferred to such person may elect to include in gross income, as compensation for such services, the excess of the fair market value of such property at the time of transfer over the amount paid for such property.
+
+(b) Time and manner of election. The election must be filed with the Internal Revenue Service not later than 30 days after the date of the transfer of the property to which the election applies. The 30-day deadline is absolute and non-waivable. No extensions are available, and failure to file within the 30-day window is irrevocable.
+
+(c) Required filing elements. The election must include: (1) A signed statement identifying the taxpayer, the property, the date of transfer, and the fair market value at the time of transfer; (2) The amount paid for the property; (3) A declaration that the election is being made under §83(b); (4) Filing by certified mail or other approved method to the IRS service center where the taxpayer files returns; (5) A copy furnished to the employer/company; (6) A copy retained by the taxpayer.
+
+(d) Effect of election. If the election is made, the taxpayer includes in gross income the excess of the fair market value of the property at the time of transfer over the amount paid. Subsequent appreciation is not taxed as ordinary income upon vesting. If the property is later sold, gain is treated as capital gain (subject to holding period rules).
+
+(e) Consequence of failure to elect. If no §83(b) election is made, the taxpayer is taxed at ordinary income rates on the fair market value of the property as it vests. For startup stock with significant appreciation, this can result in a substantially larger tax liability compared to making the election at grant when fair market value is typically low.
+
+ANALYSIS INSTRUCTION: When reviewing founder restricted stock purchase agreements (RSPAs), verify that §83(b) election procedures are addressed. Flag as CRITICAL if: (1) vesting schedule without 83(b) reference, (2) grant date ambiguous, (3) no exhibit with election form, (4) company promises to "help with taxes" without election mechanics, (5) 30-day deadline not prominently disclosed.

@@ -1,0 +1,6 @@
+Indemnification — Cap on Liability Interaction
+
+Clause Type: indemnification
+Source: CUAD v1 (CC BY 4.0, Atticus Project) — representative pattern
+
+The indemnification obligations in this Section shall be subject to the overall limitation of liability cap set forth in Section 9, except that indemnification for intellectual property infringement claims and breaches of confidentiality shall not be subject to such cap. The indemnifying party's obligation to defend shall be limited to claims where the potential damages exceed fifty thousand dollars ($50,000). The indemnifying party shall not settle any claim without the indemnified party's prior written consent if such settlement would impose any obligation on the indemnified party.

@@ -1,0 +1,6 @@
+Indemnification — D&O Advancement of Expenses
+
+Clause Type: indemnification
+Source: CUAD v1 (CC BY 4.0, Atticus Project) — representative pattern
+
+The Company shall indemnify and hold harmless each director and officer against all expenses (including attorneys' fees), judgments, fines, and amounts paid in settlement actually and reasonably incurred in connection with any threatened, pending, or completed action, suit, or proceeding. The Company shall advance expenses incurred by a director or officer in defending any such proceeding within thirty (30) days of receipt of a written request, provided that the director or officer executes an undertaking to repay such advances if it is ultimately determined that such person is not entitled to indemnification.

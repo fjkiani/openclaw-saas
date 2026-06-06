@@ -1,0 +1,6 @@
+Audit Rights — Customer Access
+
+Clause Type: confidentiality
+Source: CUAD v1 (CC BY 4.0, Atticus Project) — representative pattern
+
+Customer shall have the right to audit Vendor's compliance with this Agreement, including security practices, data handling procedures, and confidentiality safeguards, upon thirty (30) days' written notice, not more than once per calendar year. Vendor shall provide Customer and its auditors with reasonable access to Vendor's facilities, systems, and records relevant to the services provided under this Agreement. Vendor shall cooperate with any such audit and shall remediate any material findings within sixty (60) days of the audit report.

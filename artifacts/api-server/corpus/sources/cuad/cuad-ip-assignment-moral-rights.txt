@@ -1,0 +1,6 @@
+IP Assignment — Moral Rights Waiver
+
+Clause Type: ip_assignment
+Source: CUAD v1 (CC BY 4.0, Atticus Project) — representative pattern
+
+To the extent permitted by applicable law, Employee hereby waives all moral rights and rights of similar nature in any work product created by Employee in the course of Employee's employment. Where such waiver is not permitted, Employee agrees not to assert any moral rights against the Company or its assigns. This waiver applies to all works of authorship, including but not limited to software, documentation, designs, and creative materials.

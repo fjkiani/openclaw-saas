@@ -1,0 +1,6 @@
+Termination — Notice and Cure Periods
+
+Clause Type: termination
+Source: CUAD v1 (CC BY 4.0, Atticus Project) — representative pattern
+
+A party may terminate this Agreement by providing written notice to the other party as follows: (a) For a material breach, thirty (30) days' written notice with a cure period of thirty (30) days; provided that if the breach is capable of cure but is not cured within the cure period, termination becomes effective at the end of the cure period; (b) For a breach of payment obligations, fifteen (15) days' written notice with a cure period of fifteen (15) days; (c) For insolvency events, immediately upon written notice with no cure period.

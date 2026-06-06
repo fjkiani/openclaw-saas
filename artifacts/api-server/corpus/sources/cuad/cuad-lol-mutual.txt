@@ -1,0 +1,6 @@
+Limitation of Liability — Mutual Cap
+
+Clause Type: limitation_of_liability
+Source: CUAD v1 (CC BY 4.0, Atticus Project) — representative pattern
+
+Each party's total aggregate liability arising out of or related to this Agreement, whether in contract, tort, or otherwise, shall not exceed the greater of (a) the total fees paid by the Customer under this Agreement during the twelve (12) months preceding the claim, or (b) one hundred thousand dollars ($100,000). This limitation applies to all theories of liability, including but not limited to breach of contract, negligence, strict liability, and indemnification, except for breaches of confidentiality and intellectual property infringement.

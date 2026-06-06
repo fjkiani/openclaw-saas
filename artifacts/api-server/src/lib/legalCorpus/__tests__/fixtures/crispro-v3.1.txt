@@ -1,0 +1,60 @@
+COFOUNDER RESTRICTED STOCK PURCHASE AGREEMENT — CRISPRO THERAPEUTICS INC.
+
+This Restricted Stock Purchase Agreement (the "Agreement") is entered into as of January 15, 2025, by and between CrisPro Therapeutics Inc., a Delaware corporation (the "Company"), and the purchaser identified on the signature page hereto (the "Purchaser").
+
+1. PURCHASE OF SHARES
+
+Subject to the terms and conditions of this Agreement, the Company hereby sells to the Purchaser, and the Purchaser hereby purchases from the Company, the number of shares of the Company's Common Stock set forth on the signature page hereto (the "Shares") at a purchase price of $0.001 per share (the "Purchase Price"). The Purchaser acknowledges that the fair market value of the Shares as of the date of grant is $0.001 per share, as determined by the Board of Directors based on an independent 409A valuation dated December 1, 2024.
+
+2. VESTING SCHEDULE
+
+The Shares shall vest as follows: (a) twenty-five percent (25%) of the total Shares shall vest on the first anniversary of the Vesting Commencement Date (the "Cliff Date"); and (b) the remaining seventy-five percent (75%) of the total Shares shall vest in equal monthly installments over the thirty-six (36) months following the Cliff Date, such that all Shares are fully vested on the fourth anniversary of the Vesting Commencement Date. For purposes of this Agreement, "Vesting Commencement Date" means the date set forth on the signature page hereto.
+
+3. ACCELERATION UPON CHANGE OF CONTROL
+
+Upon a Change of Control (as defined in the Company's certificate of incorporation), all unvested Shares shall immediately vest and become exercisable. For purposes of this provision, "Change of Control" means: (a) the acquisition by any person or group of more than fifty percent (50%) of the outstanding voting securities of the Company; (b) the consummation of a merger or consolidation in which the Company is not the surviving entity; or (c) the sale of all or substantially all of the Company's assets.
+
+4. COMPANY REPURCHASE RIGHT
+
+If the Purchaser's employment with the Company terminates for any reason prior to the full vesting of the Shares, the Company shall have the right to repurchase all unvested Shares at the original Purchase Price. The Company's repurchase right shall expire ninety (90) days after the date of termination. The Company may assign its repurchase right to any successor entity.
+
+5. SECTION 83(b) ELECTION
+
+The Purchaser acknowledges that, under Section 83(b) of the Internal Revenue Code, the Purchaser may elect to include in gross income, as of the date of transfer, the excess (if any) of the fair market value of the Shares over the Purchase Price. The Purchaser understands that such election must be filed with the Internal Revenue Service within thirty (30) days of the date of transfer and that the election is irrevocable. THE PURCHASER IS STRONGLY URGED TO CONSULT WITH A TAX ADVISOR REGARDING THE SECTION 83(b) ELECTION. The Company shall provide the Purchaser with a form 83(b) election as Exhibit A hereto.
+
+6. RESTRICTIVE COVENANTS
+
+(a) Non-Competition. During the period of the Purchaser's employment with the Company and for a period of twelve (12) months following termination of employment for any reason, the Purchaser shall not, directly or indirectly, engage in any business that competes with the Company within the United States. This restriction shall not apply if the Purchaser is employed in the State of California, to the extent prohibited by California Business and Professions Code Section 16600.
+
+(b) Non-Solicitation. For a period of eighteen (18) months following termination of employment, the Purchaser shall not solicit any employee of the Company to leave the employ of the Company, or solicit any customer or vendor of the Company with whom the Purchaser had material contact during the last twelve months of employment.
+
+(c) Intellectual Property Assignment. The Purchaser hereby assigns to the Company all right, title, and interest in any inventions, improvements, or discoveries that the Purchaser makes, conceives, or reduces to practice during the period of employment that relate to the business of the Company or result from work performed for the Company. The Purchaser has listed on Schedule A all prior inventions that the Purchaser wishes to exclude from this assignment.
+
+7. INDEMNIFICATION
+
+The Company shall indemnify and hold harmless the Purchaser, in the Purchaser's capacity as a stockholder and officer, against all expenses, judgments, fines, and amounts paid in settlement actually and reasonably incurred in connection with any threatened, pending, or completed action, suit, or proceeding, to the fullest extent permitted by the Delaware General Corporation Law. The Company shall advance expenses incurred by the Purchaser in defending any such proceeding within thirty (30) days of receipt of a written request, provided that the Purchaser executes an undertaking to repay such advances if it is ultimately determined that the Purchaser is not entitled to indemnification.
+
+8. GOVERNING LAW
+
+This Agreement shall be governed by and construed in accordance with the laws of the State of Delaware, without regard to its conflict of laws principles. Each party hereby irrevocably submits to the exclusive jurisdiction of the Court of Chancery of the State of Delaware.
+
+9. QSBS REPRESENTATIONS
+
+The Company represents that it is a qualified small business within the meaning of Section 1202 of the Internal Revenue Code, with aggregate gross assets not exceeding $75,000,000 (as adjusted for inflation). The Shares are being issued at original issue and are intended to qualify as qualified small business stock under Section 1202. The Company shall use commercially reasonable efforts to maintain its status as a qualified small business for the holding period applicable to the Purchaser's Shares.
+
+10. 409A COMPLIANCE
+
+This Agreement is intended to comply with, or be exempt from, the requirements of Section 409A of the Internal Revenue Code and shall be interpreted accordingly. The Purchase Price per share has been established at not less than the fair market value of the Common Stock on the date of grant, as determined by an independent 409A valuation. Any payments upon separation from service shall be made in accordance with the six-month delay rule applicable to specified employees of publicly traded companies.
+
+IN WITNESS WHEREOF, the parties have executed this Agreement as of the date first written above.
+
+CRISPRO THERAPEUTICS INC.
+By: _________________________
+Name: Jordan Chen
+Title: CEO
+
+PURCHASER:
+_________________________
+Name: [Purchaser Name]
+Vesting Commencement Date: January 15, 2025
+Shares: 4,000,000

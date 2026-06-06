@@ -1,0 +1,6 @@
+Governing Law — Foreign Jurisdiction
+
+Clause Type: governing_law
+Source: CUAD v1 (CC BY 4.0, Atticus Project) — representative pattern
+
+This Agreement shall be governed by and construed in accordance with the laws of England and Wales. The parties irrevocably agree that the courts of England and Wales shall have exclusive jurisdiction to settle any dispute arising out of or in connection with this Agreement. Nothing in this clause shall limit the right of either party to take proceedings against the other in any other court of competent jurisdiction.

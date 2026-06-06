@@ -1,0 +1,17 @@
+DELAWARE GENERAL CORPORATION LAW §211 — MEETINGS OF STOCKHOLDERS
+
+Source: Delaware Code Online, Title 8, Chapter 1, Subchapter VII. 8 Del. C. §211.
+
+(a) Meetings of stockholders may be held at such place, within or without this State as may be designated by or in the manner provided in the certificate of incorporation or bylaws, or if not so designated, as determined by the board of directors. The board of directors may, in its sole discretion, determine that a meeting of stockholders shall not be held at any place, but may instead be held solely by means of remote communication, provided that the corporation shall implement reasonable measures (1) to verify that each person deemed present and voting at the meeting by means of remote communication is a stockholder or proxyholder, (2) to provide such stockholders and proxyholders a reasonable opportunity to participate in the meeting and to vote on matters submitted to the stockholders, including an opportunity to read or hear the proceedings of the meeting substantially concurrently with such proceedings, and (3) to record the vote of any such stockholder or proxyholder.
+
+(b) Unless otherwise provided in the certificate of incorporation, annual meetings of stockholders for the election of directors shall be held at such time and place as may be designated by or in the manner provided in the certificate of incorporation or bylaws. Failure to hold an annual meeting does not affect otherwise valid corporate acts or work a forfeiture or dissolution of the corporation.
+
+(c) Special meetings of the stockholders may be called by the board of directors or by such person or persons as may be authorized by the certificate of incorporation or by the bylaws.
+
+(d) Unless otherwise provided in the certificate of incorporation, written notice of the place, date, and time of the annual meeting and, in the case of a special meeting, the purpose or purposes for which the meeting is called, shall be given not less than 10 nor more than 60 days before the date of the meeting to each stockholder entitled to vote at such meeting.
+
+(e) The holders of record of the stock entitled to vote at any meeting of stockholders shall be determined as of the record date determined in accordance with §213 of this title.
+
+(f) A majority of the outstanding shares entitled to vote, represented in person or by proxy, shall constitute a quorum at a meeting of stockholders. In the absence of a quorum, a majority of the shares so represented may adjourn the meeting from time to time without further notice.
+
+ANALYSIS INSTRUCTION: When reviewing corporate governance documents, verify that stockholder meeting provisions comply with DGCL §211. Check for: (1) proper notice periods (10-60 days), (2) quorum requirements, (3) remote meeting provisions, (4) special meeting call authority. Flag if bylaws restrict stockholder meeting rights beyond what §211 permits.

@@ -1,0 +1,6 @@
+Confidentiality — Injunctive Relief
+
+Clause Type: confidentiality
+Source: CUAD v1 (CC BY 4.0, Atticus Project) — representative pattern
+
+The receiving party acknowledges that any breach of the confidentiality provisions of this Agreement may cause the disclosing party irreparable harm for which monetary damages would be an inadequate remedy. Accordingly, in addition to any other remedies available at law or in equity, the disclosing party shall be entitled to seek injunctive relief, specific performance, or other equitable relief to prevent or stop any breach or threatened breach of confidentiality obligations, without the necessity of proving actual damages or posting any bond or security.

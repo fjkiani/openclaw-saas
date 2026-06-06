@@ -1,0 +1,6 @@
+Force Majeure — Pandemic Inclusion
+
+Clause Type: force_majeure
+Source: CUAD v1 (CC BY 4.0, Atticus Project) — representative pattern
+
+Force majeure events shall include, without limitation: epidemics, pandemics, quarantine restrictions, and government-ordered shutdowns or stay-at-home orders. The affected party shall not be required to mitigate the effects of a pandemic-related force majeure event by relocating operations or implementing remote work arrangements if doing so would be commercially unreasonable or would compromise the quality of deliverables. The affected party shall provide notice within five (5) business days of the occurrence of the force majeure event.

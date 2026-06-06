@@ -1,0 +1,6 @@
+Governing Law — Delaware Selection
+
+Clause Type: governing_law
+Source: CUAD v1 (CC BY 4.0, Atticus Project) — representative pattern
+
+This Agreement shall be governed by and construed in accordance with the laws of the State of Delaware, without regard to its conflict of laws principles. Each party hereby irrevocably submits to the exclusive jurisdiction of the Court of Chancery of the State of Delaware (or, if the Court of Chancery declines jurisdiction, the Superior Court of the State of Delaware) and the United States District Court for the District of Delaware, and waives any objection to venue in such courts.

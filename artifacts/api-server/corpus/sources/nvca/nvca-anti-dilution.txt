@@ -1,0 +1,29 @@
+NVCA MODEL ANTI-DILUTION PROTECTION — BROAD-BASED WEIGHTED AVERAGE
+
+Source: NVCA Model Legal Documents (National Venture Capital Association). Summary excerpt for legal corpus.
+
+BROAD-BASED WEIGHTED AVERAGE FORMULA
+If the Company issues additional shares of Common Stock (or securities convertible into or exercisable for Common Stock) at a price per share less than the then-applicable conversion price of the Series A Preferred Stock (a "Dilutive Issuance"), the conversion price shall be adjusted as follows:
+
+CP₂ = CP₁ × (A + B) / (A + C)
+
+Where:
+- CP₂ = New conversion price
+- CP₁ = Conversion price in effect immediately prior to the Dilutive Issuance
+- A = Number of shares of Common Stock outstanding immediately prior to the Dilutive Issuance (on an as-converted basis, including all outstanding Preferred Stock)
+- B = Aggregate consideration received by the Company in the Dilutive Issuance divided by CP₁
+- C = Number of shares of Common Stock issued (or deemed issued) in the Dilutive Issuance
+
+NARROW-BASED WEIGHTED AVERAGE
+Some investors negotiate for narrow-based weighted average, which uses only the Common Stock outstanding (excluding Preferred on an as-converted basis) in variable A. This produces a larger downward adjustment to the conversion price and is more investor-favorable.
+
+FULL RATCHET
+The most investor-favorable (and founder-hostile) anti-dilution method. Under full ratchet, the conversion price is reduced to the price per share of the Dilutive Issuance, regardless of the size of the Dilutive Issuance. Even a small down-round at a low price would reset the entire conversion price. Full ratchet is rare in modern venture deals.
+
+EXCLUSIONS FROM DILUTIVE ISSUANCE
+The following issuances shall not be considered Dilutive Issuances: (a) shares issued in connection with the Company's initial public offering; (b) shares issued pursuant to the Company's employee stock option plan; (c) shares issued in connection with acquisitions; (d) shares issued to banks or equipment lessors pursuant to debt financing; (e) shares issued in connection with strategic partnerships.
+
+PAY-TO-PLAY
+Some term sheets include a "pay-to-play" provision requiring investors to participate pro rata in future financing rounds to maintain their anti-dilution protection. Investors who do not participate lose anti-dilution protection and their Preferred Stock converts to Common Stock.
+
+ANALYSIS INSTRUCTION: When reviewing anti-dilution provisions, verify: (1) whether the formula is broad-based weighted average (standard), narrow-based weighted average (investor-favorable), or full ratchet (rare, very investor-favorable); (2) the definition of "outstanding shares" used in the formula; (3) the carve-outs from Dilutive Issuance definition; (4) whether pay-to-play provisions apply. Flag full ratchet as a significant red flag for founders.

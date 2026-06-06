@@ -1,0 +1,6 @@
+Termination — For Cause
+
+Clause Type: termination
+Source: CUAD v1 (CC BY 4.0, Atticus Project) — representative pattern
+
+Either party may terminate this Agreement immediately upon written notice if the other party: (a) materially breaches any provision of this Agreement and fails to cure such breach within thirty (30) days after receipt of written notice specifying the breach; (b) becomes insolvent or admits in writing its inability to pay its debts; (c) makes an assignment for the benefit of creditors; or (d) has a receiver appointed for a substantial portion of its assets. Upon termination for cause, the terminating party shall have no further obligation to the defaulting party.

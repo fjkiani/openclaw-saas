@@ -179,20 +179,50 @@ export async function legalCorpusRetrieve(params: {
   };
 }
 
-export async function legalCorpusStatus(): Promise<{
+export interface LegalCorpusStatusResult {
   corpus_version: string;
   documents: number;
   chunks: number;
-}> {
+  by_source: Record<string, number>;
+  embedded_pct: number;
+}
+
+export async function legalCorpusStatus(): Promise<LegalCorpusStatusResult> {
   try {
     const docs = await pool.query<{ n: string }>(`SELECT COUNT(*) AS n FROM legal_corpus_documents`);
     const chunks = await pool.query<{ n: string }>(`SELECT COUNT(*) AS n FROM legal_corpus_chunks`);
+
+    // ── by_source breakdown ────────────────────────────────────────────────
+    const sourceRows = await pool.query<{ source_type: string; n: string }>(
+      `SELECT source_type, COUNT(*) AS n FROM legal_corpus_documents GROUP BY source_type`,
+    );
+    const by_source: Record<string, number> = {};
+    for (const r of sourceRows.rows) {
+      by_source[r.source_type] = parseInt(r.n, 10);
+    }
+
+    // ── embedding coverage ─────────────────────────────────────────────────
+    const totalChunks = parseInt(chunks.rows[0]?.n ?? "0", 10);
+    const embeddedRows = await pool.query<{ n: string }>(
+      `SELECT COUNT(*) AS n FROM legal_corpus_chunks WHERE embedding_vec IS NOT NULL`,
+    );
+    const embeddedChunks = parseInt(embeddedRows.rows[0]?.n ?? "0", 10);
+    const embedded_pct = totalChunks > 0 ? embeddedChunks / totalChunks : 0;
+
     return {
       corpus_version: LEGAL_CORPUS_VERSION,
       documents: parseInt(docs.rows[0]?.n ?? "0", 10),
-      chunks: parseInt(chunks.rows[0]?.n ?? "0", 10),
+      chunks: totalChunks,
+      by_source,
+      embedded_pct: Math.round(embedded_pct * 1000) / 1000, // 3 decimal places
     };
   } catch {
-    return { corpus_version: LEGAL_CORPUS_VERSION, documents: 0, chunks: 0 };
+    return {
+      corpus_version: LEGAL_CORPUS_VERSION,
+      documents: 0,
+      chunks: 0,
+      by_source: {},
+      embedded_pct: 0,
+    };
   }
 }

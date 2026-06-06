@@ -1,0 +1,6 @@
+Non-Compete — California Void Provision
+
+Clause Type: non_compete
+Source: CUAD v1 (CC BY 4.0, Atticus Project) — representative pattern
+
+Employee acknowledges that the non-competition provisions of this Agreement are reasonable and necessary to protect the Company's legitimate business interests. NOTWITHSTANDING THE FOREGOING, if Employee is employed in the State of California, the non-competition provisions of this Section shall not apply to the extent prohibited by California Business and Professions Code Section 16600, and Employee shall be subject only to the non-solicitation and confidentiality provisions of this Agreement.

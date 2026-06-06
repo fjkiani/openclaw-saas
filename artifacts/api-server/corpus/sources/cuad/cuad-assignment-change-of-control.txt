@@ -1,0 +1,6 @@
+Assignment — Change of Control Auto-Termination
+
+Clause Type: assignment
+Source: CUAD v1 (CC BY 4.0, Atticus Project) — representative pattern
+
+In the event of a Change of Control of either party, the non-acquiring party shall have the right to terminate this Agreement upon thirty (30) days' written notice. For purposes of this Section, 'Change of Control' means: (a) the acquisition of more than fifty percent (50%) of the voting securities of a party by any person or group; (b) a merger or consolidation in which a party is not the surviving entity; or (c) the sale of all or substantially all of a party's assets.

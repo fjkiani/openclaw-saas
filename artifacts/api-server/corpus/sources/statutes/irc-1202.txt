@@ -1,0 +1,15 @@
+INTERNAL REVENUE CODE §1202 — PARTIAL EXCLUSION FOR GAIN FROM CERTAIN SMALL BUSINESS STOCK (QSBS)
+
+Source: 26 U.S.C. §1202, as amended by the One Big Beautiful Bill Act (OBBBA) 2025.
+
+(a) General rule. In the case of a noncorporate taxpayer, gross income shall not include 50 percent (in the case of stock acquired after February 17, 2009, and before September 28, 2010), 75 percent (in the case of stock acquired after September 27, 2009, and before January 1, 2012), or 100 percent (in the case of stock acquired after September 27, 2010) of any gain from the sale or exchange of qualified small business stock held for more than 5 years.
+
+(b) Definitions. For purposes of this section: (1) Qualified small business. The term "qualified small business" means any domestic C corporation with aggregate gross assets that do not exceed $75,000,000 (as adjusted for inflation after 2015 by the Secretary). NOTE: The OBBBA 2025 amended the gross asset ceiling from $50 million to $75 million for purposes of determining QSBS eligibility.
+
+(2) Qualified small business stock. The term "qualified small business stock" means any stock in a qualified small business which is acquired by the taxpayer at its original issue (directly or through an underwriter) in exchange for money, other property (not including stock), or as compensation for services.
+
+(c) Limitations. (1) The amount of gain eligible for the exclusion under this section for any taxable year shall not exceed the greater of (A) 10 times the taxpayer's basis in the qualified small business stock, or (B) $10,000,000 (reduced by the amount of gain excluded in prior taxable years).
+
+(d) Holding period. Stock must be held for more than 5 years to qualify for the exclusion.
+
+ANALYSIS INSTRUCTION: When analyzing founder equity, stock purchases, or tax planning language, verify whether the analysis uses the post-OBBBA $75M gross assets threshold. Flag as CRITICAL if materials cite only the obsolete $50M ceiling without acknowledging the amended threshold. Check that QSBS representations in financing documents reference current law. Verify holding period compliance (5+ years) and that stock was acquired at original issue.

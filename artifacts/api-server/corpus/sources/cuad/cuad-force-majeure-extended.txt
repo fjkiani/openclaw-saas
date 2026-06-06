@@ -1,0 +1,6 @@
+Force Majeure — Extended Termination Right
+
+Clause Type: force_majeure
+Source: CUAD v1 (CC BY 4.0, Atticus Project) — representative pattern
+
+If a force majeure event continues for more than sixty (60) consecutive days, either party may terminate this Agreement upon ten (10) days' written notice to the other party. In the event of such termination, the parties shall settle all accounts within thirty (30) days, and the terminating party shall have no further liability to the other party except for obligations that by their nature survive termination. The force majeure event shall not excuse any obligation to make payments for goods or services already delivered or performed.

@@ -1,0 +1,17 @@
+NVCA MODEL PREFERRED STOCK — RIGHTS AND PREFERENCES
+
+Source: NVCA Model Legal Documents (National Venture Capital Association). Summary excerpt for legal corpus.
+
+DIVIDEND PREFERENCES
+Holders of Series A Preferred Stock shall be entitled to receive, when and as declared by the Board of Directors, non-cumulative dividends at a rate per share equal to eight percent (8%) of the Original Purchase Price per share, before any dividends are declared or paid on the Common Stock. The Original Purchase Price shall mean the price per share paid by the initial purchasers of the Series A Preferred Stock.
+
+LIQUIDATION PREFERENCE
+In the event of any liquidation, dissolution, or winding up of the Company, whether voluntary or involuntary, the holders of Series A Preferred Stock shall be entitled to receive, prior and in preference to any distribution of any of the assets of the Company to the holders of Common Stock, a per share amount equal to the greater of (a) one times (1x) the Original Purchase Price per share, plus any declared but unpaid dividends thereon, or (b) the amount per share that such holder would have received had the Series A Preferred Stock been converted into Common Stock immediately prior to such liquidation event.
+
+PARTICIPATING PREFERRED
+If the Series A Preferred Stock is designated as "participating preferred," holders shall receive the liquidation preference described above and shall then participate with the Common Stock holders on an as-converted basis in the remaining assets. If the Series A Preferred Stock is designated as "non-participating preferred," holders shall receive the greater of the liquidation preference or the amount they would receive on an as-converted basis.
+
+CONVERSION RIGHTS
+Each share of Series A Preferred Stock shall be convertible, at the option of the holder, at any time, into shares of Common Stock at the then-applicable conversion rate. The initial conversion rate shall be one-to-one, subject to adjustment for stock splits, stock dividends, recapitalizations, and similar events. The Series A Preferred Stock shall automatically convert into Common Stock upon the closing of a firmly underwritten public offering at a price per share of not less than five times (5x) the Original Purchase Price and with aggregate proceeds to the Company of not less than $15,000,000 (a "Qualified Public Offering").
+
+ANALYSIS INSTRUCTION: When reviewing preferred stock financing documents, verify: (1) whether the liquidation preference is 1x non-participating (investor-friendly but standard) or 1x participating (double-dip, less founder-friendly); (2) the conversion trigger for automatic conversion; (3) dividend rate and whether cumulative or non-cumulative. Flag participating preferred as a negotiation point that can significantly reduce common stock proceeds in a moderate exit.

@@ -1,0 +1,6 @@
+Escrow — Source Code Escrow
+
+Clause Type: ip_assignment
+Source: CUAD v1 (CC BY 4.0, Atticus Project) — representative pattern
+
+Vendor shall deposit the source code for the Software into an escrow account with a mutually agreed escrow agent within thirty (30) days of the effective date of this Agreement. The source code shall be released to Customer upon the occurrence of any of the following release conditions: (a) Vendor files for bankruptcy or becomes insolvent; (b) Vendor discontinues support for the Software; (c) Vendor breaches its maintenance obligations and fails to cure within sixty (60) days. Customer shall use the source code only for the purpose of maintaining and supporting the Software and shall treat it as Confidential Information.

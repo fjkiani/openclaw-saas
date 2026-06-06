@@ -1,0 +1,6 @@
+Confidentiality — Return and Destruction Obligations
+
+Clause Type: confidentiality
+Source: CUAD v1 (CC BY 4.0, Atticus Project) — representative pattern
+
+Upon termination of this Agreement or upon the disclosing party's written request, the receiving party shall promptly return or destroy all copies of Confidential Information in its possession, provided that the receiving party may retain one (1) copy for archival purposes in its legal department and any copies stored in automated backup systems that are not reasonably accessible. The receiving party shall certify in writing that it has complied with this obligation within ten (10) business days of the request.

@@ -1,0 +1,6 @@
+Limitation of Liability — Carve-Outs from Cap
+
+Clause Type: limitation_of_liability
+Source: CUAD v1 (CC BY 4.0, Atticus Project) — representative pattern
+
+The limitations of liability set forth in this Section shall not apply to: (a) breaches of confidentiality obligations; (b) indemnification obligations under Section 8; (c) fraud, willful misconduct, or gross negligence; (d) intellectual property infringement claims; or (e) obligations to pay fees. The parties acknowledge that the limitations in this Section are a material basis of the bargain and that each party would not enter into this Agreement without such limitations.

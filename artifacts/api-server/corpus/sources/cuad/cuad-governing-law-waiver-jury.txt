@@ -1,0 +1,6 @@
+Governing Law — Jury Trial Waiver
+
+Clause Type: governing_law
+Source: CUAD v1 (CC BY 4.0, Atticus Project) — representative pattern
+
+This Agreement shall be governed by the laws of the State of California. EACH PARTY HEREBY WAIVES ITS RIGHT TO A JURY TRIAL WITH RESPECT TO ANY CLAIM OR CAUSE OF ACTION ARISING UNDER OR RELATING TO THIS AGREEMENT. The prevailing party in any dispute shall be entitled to recover its reasonable attorneys' fees and costs.

@@ -1,0 +1,6 @@
+Representations and Warranties — Standard
+
+Clause Type: governing_law
+Source: CUAD v1 (CC BY 4.0, Atticus Project) — representative pattern
+
+Each party represents and warrants that: (a) it has the legal power and authority to enter into this Agreement and perform its obligations hereunder; (b) the execution and delivery of this Agreement has been duly authorized by all necessary corporate action; (c) this Agreement constitutes a valid and binding obligation enforceable in accordance with its terms; (d) the performance of its obligations under this Agreement will not violate any applicable law, regulation, or any agreement to which it is a party; and (e) no consent, approval, or authorization is required from any third party in connection with the execution and delivery of this Agreement.

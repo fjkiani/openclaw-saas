@@ -1,0 +1,6 @@
+Indemnification — IP Infringement Carve-Out
+
+Clause Type: indemnification
+Source: CUAD v1 (CC BY 4.0, Atticus Project) — representative pattern
+
+Vendor shall indemnify Customer against any claim that the Software, as delivered, infringes any United States patent, copyright, or trade secret. If the Software becomes or in Vendor's opinion may become the subject of an infringement claim, Vendor may, at its option: (a) procure for Customer the right to continue using the Software; (b) modify the Software so it becomes non-infringing; or (c) replace the Software with non-infringing software. If none of these options is commercially reasonable, either party may terminate this Agreement with respect to the infringing Software, and Vendor shall refund to Customer the fees paid for such Software, depreciated on a straight-line basis over a thirty-six (36) month period.

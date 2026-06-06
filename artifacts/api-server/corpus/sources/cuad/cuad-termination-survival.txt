@@ -1,0 +1,6 @@
+Termination — Survival Clauses
+
+Clause Type: termination
+Source: CUAD v1 (CC BY 4.0, Atticus Project) — representative pattern
+
+Upon expiration or termination of this Agreement, the following provisions shall survive: Sections 5 (Confidentiality), 6 (Intellectual Property), 7 (Non-Competition), 8 (Indemnification), 9 (Limitation of Liability), and 11 (Governing Law). Survival of confidentiality obligations shall extend for a period of five (5) years following termination. Survival of non-competition obligations shall extend for the period specified in Section 7.

@@ -1,0 +1,6 @@
+Data Protection — GDPR Compliance
+
+Clause Type: confidentiality
+Source: CUAD v1 (CC BY 4.0, Atticus Project) — representative pattern
+
+To the extent that Vendor processes personal data originating from the European Economic Area on behalf of Customer, Vendor shall comply with the EU General Data Protection Regulation (GDPR). Vendor shall: (a) process personal data only on Customer's documented instructions; (b) ensure that persons authorized to process personal data have committed to confidentiality; (c) implement appropriate technical and organizational security measures; (d) not transfer personal data outside the EEA without appropriate safeguards; and (e) assist Customer in responding to data subject requests and breach notifications.

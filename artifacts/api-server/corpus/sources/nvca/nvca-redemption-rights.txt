@@ -1,0 +1,20 @@
+NVCA MODEL REDEMPTION RIGHTS — OPTIONAL REDEMPTION OF PREFERRED STOCK
+
+Source: NVCA Model Legal Documents (National Venture Capital Association). Summary excerpt for legal corpus.
+
+OPTIONAL REDEMPTION
+At any time after the fifth (5th) anniversary of the initial closing of the Series A Preferred Stock financing, the holders of a majority of the then-outstanding shares of Series A Preferred Stock shall have the right to require the Company to redeem all (but not less than all) of the outstanding shares of Series A Preferred Stock at a price per share equal to the Original Purchase Price per share plus any declared but unpaid dividends thereon (the "Redemption Price").
+
+REDEMPTION SCHEDULE
+If the Company does not have sufficient legally available funds to redeem all shares of Series A Preferred Stock when requested, the Company shall redeem as many shares as it can legally redeem, and shall redeem the remaining shares as soon as it has sufficient legally available funds. Redemption shall be made in equal annual installments over three (3) years.
+
+DEEMED LIQUIDATION EVENT
+A merger, acquisition, or change of control in which the Preferred Stock holders do not retain their preferences in the surviving entity shall be treated as a liquidation event for purposes of the liquidation preference. This is known as a "deemed liquidation event" and triggers the same preference waterfall as an actual liquidation.
+
+MANDATORY REDEMPTION TRIGGER
+Some term sheets include a mandatory redemption trigger if the Company has not achieved a Qualified Public Offering within seven (7) years of the initial closing. This provision is negotiable and is often softened or removed in founder-friendly term sheets.
+
+LEGAL LIMITATIONS ON REDEMPTION
+Under Delaware law (DGCL §160), a corporation may not redeem stock if the redemption would render the corporation unable to pay its debts. The Company's board must determine that the Company has sufficient surplus assets to lawfully effect the redemption. This limitation means that redemption rights are effectively a "soft put" — they give investors leverage but may not be enforceable if the Company is cash-constrained.
+
+ANALYSIS INSTRUCTION: When reviewing redemption rights, verify: (1) the trigger date (typically 5 years from closing); (2) the redemption price (typically Original Purchase Price plus accrued dividends); (3) the redemption schedule (lump sum vs. installments); (4) whether mandatory redemption triggers exist; (5) the legal limitation under DGCL §160. Flag redemption rights as a negotiation point — they are often softened or removed in competitive deals.

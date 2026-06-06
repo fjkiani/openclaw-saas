@@ -1,0 +1,6 @@
+Termination — Immediate Without Cure
+
+Clause Type: termination
+Source: CUAD v1 (CC BY 4.0, Atticus Project) — representative pattern
+
+The Company may terminate this Agreement immediately upon written notice to the Contractor for any of the following events: (i) conviction of a felony; (ii) fraud, embezzlement, or material dishonesty; (iii) gross negligence or willful misconduct in the performance of duties; (iv) breach of any confidentiality or non-competition obligation. No cure period shall apply to termination under this section.

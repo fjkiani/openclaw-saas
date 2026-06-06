@@ -1,0 +1,6 @@
+Assignment — No Delegation of Performance
+
+Clause Type: assignment
+Source: CUAD v1 (CC BY 4.0, Atticus Project) — representative pattern
+
+Neither party may delegate the performance of its duties or obligations under this Agreement to any third party without the prior written consent of the other party. Any attempted assignment or delegation in violation of this Section shall be null and void. The assigning party shall remain liable for all obligations under this Agreement notwithstanding any permitted assignment.

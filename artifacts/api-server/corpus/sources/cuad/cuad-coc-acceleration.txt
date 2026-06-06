@@ -1,0 +1,6 @@
+Change of Control — Vesting Acceleration
+
+Clause Type: change_of_control
+Source: CUAD v1 (CC BY 4.0, Atticus Project) — representative pattern
+
+Upon a Change of Control, all unvested equity awards held by Employee shall immediately vest and become exercisable. For purposes of this Agreement, 'Change of Control' means: (a) the acquisition by any person or group of more than fifty percent (50%) of the outstanding voting securities of the Company; (b) the consummation of a merger or consolidation in which the Company is not the surviving entity; or (c) the sale of all or substantially all of the Company's assets. This acceleration provision shall apply in addition to, and not in lieu of, any other acceleration provisions in Employee's equity award agreements.

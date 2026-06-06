@@ -1,0 +1,6 @@
+Governing Law — Multi-State Conflict
+
+Clause Type: governing_law
+Source: CUAD v1 (CC BY 4.0, Atticus Project) — representative pattern
+
+This Agreement shall be governed by the laws of the State of New York, provided that with respect to any matter relating to the formation, organization, or internal affairs of the Company, the laws of the State of Delaware shall apply. The parties agree that any dispute arising under this Agreement shall be resolved in the federal or state courts located in New York County, New York.

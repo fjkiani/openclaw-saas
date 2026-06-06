@@ -1,0 +1,6 @@
+Change of Control — Severance Benefits
+
+Clause Type: change_of_control
+Source: CUAD v1 (CC BY 4.0, Atticus Project) — representative pattern
+
+If Employee's employment is terminated by the Company without Cause or by Employee for Good Reason within twelve (12) months following a Change of Control, Employee shall be entitled to: (a) a lump sum payment equal to twelve (12) months of Employee's base salary; (b) a pro-rata bonus for the year of termination; (c) continued health insurance coverage for twelve (12) months; and (d) acceleration of all unvested equity awards. Good Reason means a material reduction in title, responsibilities, base salary, or relocation of more than fifty (50) miles.

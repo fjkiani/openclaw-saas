@@ -1,0 +1,6 @@
+Confidentiality — Standard Exclusions
+
+Clause Type: confidentiality
+Source: CUAD v1 (CC BY 4.0, Atticus Project) — representative pattern
+
+The obligations of confidentiality shall not apply to information that: (a) was publicly known at the time of disclosure; (b) becomes publicly known through no wrongful act of the receiving party; (c) was already in the receiving party's possession before disclosure by the disclosing party; (d) is rightfully received from a third party without a breach of any obligation of confidentiality; or (e) is independently developed by the receiving party without use of or reference to the disclosing party's Confidential Information. The receiving party bears the burden of proving any exclusion by documented evidence.

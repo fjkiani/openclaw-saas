@@ -1,0 +1,6 @@
+Non-Compete — Sale of Business Exception
+
+Clause Type: non_compete
+Source: CUAD v1 (CC BY 4.0, Atticus Project) — representative pattern
+
+In connection with the sale of all or substantially all of the Company's assets or stock, Seller agrees that for a period of twenty-four (24) months following the closing, Seller shall not, directly or indirectly, engage in any business that competes with the business conducted by the Company as of the closing date within the geographic area where the Company conducts business. This non-competition covenant is made in connection with the sale of the Company and is reasonably necessary to protect the value of the business being purchased.

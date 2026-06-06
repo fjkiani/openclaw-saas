@@ -1,0 +1,6 @@
+Limitation of Liability — No Limitation on Indemnity
+
+Clause Type: limitation_of_liability
+Source: CUAD v1 (CC BY 4.0, Atticus Project) — representative pattern
+
+Nothing in this Agreement shall limit either party's liability for: (i) death or personal injury caused by negligence; (ii) fraud or fraudulent misrepresentation; (iii) breach of confidentiality obligations; or (iv) any liability that cannot be excluded or limited by applicable law. The liability cap in Section 9.1 shall not apply to indemnification obligations under Section 8 or to breaches of confidentiality.

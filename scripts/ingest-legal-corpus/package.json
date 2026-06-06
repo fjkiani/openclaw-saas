@@ -1,0 +1,14 @@
+{
+  "name": "@workspace/ingest-legal-corpus",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "ingest": "tsx src/main.ts",
+    "ingest:dry": "tsx src/main.ts --dry-run"
+  },
+  "dependencies": {
+    "pg": "^8.13.1",
+    "tsx": "^4.19.0"
+  }
+}

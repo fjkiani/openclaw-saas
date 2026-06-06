@@ -38,16 +38,43 @@ export async function migrateLegalCorpus(): Promise<void> {
         ON legal_corpus_chunks USING gin(tsv)
     `);
 
+    // ── v2 columns: source tracking + idempotency ──────────────────────────
+    await client.query(`
+      ALTER TABLE legal_corpus_documents
+        ADD COLUMN IF NOT EXISTS source_type text NOT NULL DEFAULT 'seed',
+        ADD COLUMN IF NOT EXISTS source_url text,
+        ADD COLUMN IF NOT EXISTS source_hash text
+    `);
+
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS legal_corpus_documents_source_hash_idx
+        ON legal_corpus_documents(source_hash) WHERE source_hash IS NOT NULL
+    `);
+
+    // ── pgvector column for ANN search (Supabase has vector ext enabled) ────
+    await client.query(`CREATE EXTENSION IF NOT EXISTS vector`);
+
     await client.query(`
       ALTER TABLE legal_corpus_chunks
         ADD COLUMN IF NOT EXISTS embedding real[]
     `);
 
+    await client.query(`
+      ALTER TABLE legal_corpus_chunks
+        ADD COLUMN IF NOT EXISTS embedding_vec vector(2048)
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS legal_corpus_chunks_embedding_vec_idx
+        ON legal_corpus_chunks USING hnsw (embedding_vec vector_cosine_ops)
+    `);
+
+    // ── Seed the 12 playbook documents ──────────────────────────────────────
     for (const doc of LEGAL_CORPUS_SEED) {
       const upsert = await client.query<{ id: number }>(
         `INSERT INTO legal_corpus_documents
-           (slug, title, citation, domain, tags, priority, corpus_version, content, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
+           (slug, title, citation, domain, tags, priority, corpus_version, content, source_type, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'seed', now())
          ON CONFLICT (slug) DO UPDATE SET
            title = EXCLUDED.title,
            citation = EXCLUDED.citation,

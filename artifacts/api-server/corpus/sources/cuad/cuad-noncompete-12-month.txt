@@ -1,0 +1,6 @@
+Non-Compete — 12-Month Restriction
+
+Clause Type: non_compete
+Source: CUAD v1 (CC BY 4.0, Atticus Project) — representative pattern
+
+During the term of Employee's employment and for a period of twelve (12) months following the termination of Employee's employment for any reason, Employee shall not, directly or indirectly, engage in, assist, or have any interest in any business that competes with the Company within the United States. This restriction applies regardless of whether Employee's activities are on behalf of Employee or any other person or entity, and whether as an employee, consultant, officer, director, partner, or stockholder.

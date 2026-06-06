@@ -1,0 +1,6 @@
+Indemnification — One-Sided (Vendor Indemnifies)
+
+Clause Type: indemnification
+Source: CUAD v1 (CC BY 4.0, Atticus Project) — representative pattern
+
+Vendor shall indemnify, defend, and hold harmless Customer and its officers, directors, employees, and agents from and against any and all claims, damages, losses, and expenses (including reasonable attorneys' fees) arising out of or related to: (a) any breach of Vendor's representations, warranties, or obligations under this Agreement; (b) any claim that the Deliverables infringe or misappropriate any third-party intellectual property rights; (c) any bodily injury or property damage caused by Vendor's negligence or willful misconduct; or (d) any violation of applicable law by Vendor in performing its obligations hereunder.

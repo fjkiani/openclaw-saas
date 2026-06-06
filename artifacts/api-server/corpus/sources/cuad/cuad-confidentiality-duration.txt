@@ -1,0 +1,6 @@
+Confidentiality — Duration and Survival
+
+Clause Type: confidentiality
+Source: CUAD v1 (CC BY 4.0, Atticus Project) — representative pattern
+
+The obligations of confidentiality and non-use set forth in this Agreement shall survive the termination or expiration of this Agreement for a period of five (5) years, except that with respect to trade secrets, the obligations shall continue for as long as such information remains a trade secret under applicable law. The receiving party acknowledges that breach of confidentiality obligations may cause irreparable harm and that the disclosing party shall be entitled to seek injunctive relief in addition to any other remedies available at law or in equity.

@@ -1,0 +1,6 @@
+Non-Compete — Non-Solicitation of Employees and Customers
+
+Clause Type: non_compete
+Source: CUAD v1 (CC BY 4.0, Atticus Project) — representative pattern
+
+For a period of eighteen (18) months following termination of employment, Employee shall not: (a) directly or indirectly solicit, induce, or encourage any employee of the Company to leave the employ of the Company; (b) directly or indirectly solicit any customer, client, or vendor of the Company with whom Employee had material contact during the last twelve (12) months of employment, for the purpose of providing products or services competitive with those provided by the Company; or (c) directly or indirectly hire or engage any employee of the Company.

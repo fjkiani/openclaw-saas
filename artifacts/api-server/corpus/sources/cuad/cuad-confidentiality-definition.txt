@@ -1,0 +1,6 @@
+Confidentiality — Broad Definition
+
+Clause Type: confidentiality
+Source: CUAD v1 (CC BY 4.0, Atticus Project) — representative pattern
+
+Confidential Information means any information disclosed by either party to the other party, directly or indirectly, in writing, orally, or by inspection, that is designated as 'Confidential,' 'Proprietary,' or some similar designation, or that reasonably should be understood to be confidential given the nature of the information and circumstances of disclosure. Confidential Information includes, without limitation: trade secrets, inventions, algorithms, software code, business plans, financial information, customer lists, pricing information, and marketing strategies.
