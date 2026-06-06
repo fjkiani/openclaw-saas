@@ -3,6 +3,7 @@ import { z } from "zod";
 import { pool } from "@workspace/db";
 import { RouterExhaustedError } from "./modelRouter.js";
 import { logger } from "./logger.js";
+import { resolveApiKey } from "./resolveApiKey.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Policy lookup — reads zie_router_policies to resolve the current fast-path
@@ -250,9 +251,9 @@ export async function executeDoubleDip(
 
   // Resolve fast-path model from zie_router_policies.
   const fastPolicy = await resolveFastPolicy(taskType);
-  const fastApiKey = process.env[fastPolicy.fast_api_key_env] ?? process.env.OPENROUTER_API_KEY ?? "";
-  const slowApiKey1 = process.env.OPENROUTER_API_KEY ?? "";
-  const slowApiKey2 = process.env.OPENROUTER_API_KEY_2 ?? "";
+  const fastApiKey = resolveApiKey(fastPolicy.fast_api_key_env);
+  const slowApiKey1 = resolveApiKey("OPENROUTER_API_KEY");
+  const slowApiKey2 = resolveApiKey("OPENROUTER_API_KEY_2");
 
   if (!fastApiKey) {
     throw new Error("OPENROUTER_API_KEY is not set");

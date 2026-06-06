@@ -1,138 +1,355 @@
 ---
-description: Model Forge — workspace, dataset, training job, registry, deployment, and governance pipeline
-globs: ["**/routes/forge.ts", "**/routes/onboarding.ts", "**/schema/model*.ts", "**/schema/training*.ts", "**/schema/evaluation*.ts", "**/schema/deployment*.ts", "**/pages/forge/**"]
+description: Model Forge — classic MDC (vision) + ZIE double-dip flywheel (partial live). Workspace, vault, judge, Modal LoRA, routing policy.
+globs: ["**/routes/forge.ts", "**/routes/onboarding.ts", "**/routes/flywheel.ts", "**/routes/legal.clause.draft.ts", "**/lib/doubleDipRouter.ts", "**/lib/modalDispatch.ts", "**/lib/forgeScheduler.ts", "**/lib/draftAgent.ts", "**/lib/semanticLegalAnalyzer.ts", "**/schema/model*.ts", "**/schema/training*.ts", "**/schema/zie*.ts", "**/pages/forge/**"]
 alwaysApply: false
 ---
 
 # OpenClaw — Model Forge
 
-## What the Forge Is
+> **Reality audit (2026-06-06 · `530be25`):** OpenClaw has **two** training stories. Do not conflate them.
+>
+> | Pipeline | Status | Doc |
+> |----------|--------|-----|
+> | **Classic Forge MDC** — datasets → Kairos jobs → registry → deploy | **VISION** on prod DB | §Classic Forge below |
+> | **ZIE double-dip flywheel** — inference → vault → judge → Modal LoRA → fast path | **PARTIAL LIVE** | §Double-Dip Flywheel |
+>
+> Operational truth: **`MDC_training.md`**, **`MDC_architecture.md`**
 
-The Model Forge is the platform's AI training and deployment pipeline. It allows tenants to:
-1. Create workspaces (scoped to a domain/vertical)
-2. Upload and version datasets
-3. Configure and submit training jobs
-4. Register trained models with versioning
-5. Approve model versions (human-in-loop gate)
-6. Deploy approved models to live endpoints
-7. Monitor eval metrics and usage events
+| Label | Meaning |
+|-------|---------|
+| **LIVE** | Code + HTTP/DB verified |
+| **PARTIAL** | Code exists; env, table, or manual gap |
+| **VISION** | Target; not on prod DB |
+| **FICTION** | Claimed in seed/UI; contradicted by audit |
 
-## API Routes (all under `/api/forge/`)
+---
+
+## Scorecard — closing the gap (core focus)
+
+Track every claim against live proof. Update status after deploy + curl/SQL.
+
+| Claim | Was | Now (code @ unreleased) | Proof after deploy |
+|-------|-----|-------------------------|-------------------|
+| `vault_written` proves DB write | ❌ hardcoded | ✅ `pair_id` + `vault.*` from `persistDraftVault()` | Response includes `vault.pair_id` UUID |
+| 13 curls without `mode:generate` | ❌ 400 | ✅ `normalizeDraftBody()` infers generate | curl with `clause_type`+`instructions` only |
+| Analyze → `/matter` | ❌ KEY_2 required | ✅ `resolveApiKey()` KEY_2→KEY_1 fallback | POST `/matter` returns clauses |
+| Judge overnight | ❌ manual only | ✅ `scheduleAutoJudge()` on vault write (`AUTO_JUDGE_VAULT=false` to disable) | `judge_verified=true` without manual POST |
+| Modal at 50 verified | ❌ no `training_jobs` | ✅ `training_jobs` in `runZieMigration()` | SQL + hourly scheduler |
+| End-to-end chain | ⚠️ partial | ⚠️ draft→vault→judge automated; analyze+Modal still env-dependent | flywheel `verified_pairs` increases |
+| Agent B / 5-agent pipeline | ❌ external | ❌ not in scope this pass | — |
+| KB / QSBS RAG | ❌ | ❌ needs ingestion decision | — |
+| NONSENSE_TYPE clause_type | ❌ 400 (no mode) | ✅ any string + inferred generate | 200 + contract text |
+| Canonical deploy (k30t vs Railway) | ❓ | ❓ **Decision:** k30t for legal flywheel | one DB, one API |
+
+**Live today (pre-deploy):** k30t still 400 on 13-curl shape and KEY_2 on `/matter` — push + Render redeploy required.
+
+**Post-deploy verification (run in order):**
+
+```bash
+# 1 — generate without mode (13-curl shape)
+curl -s -X POST "$API/api/v1/legal/clause/draft" -H "Content-Type: application/json" \
+  -d '{"clause_type":"termination","context":{"jurisdiction":"Delaware"},"instructions":"Analyze termination for pre-revenue cofounder"}' \
+  | jq '.vault.pair_id, .vault_written'
+
+# 2 — matter analyze (cofounder routing)
+curl -s -X POST "$API/api/v1/legal/matter" -H "Content-Type: application/json" \
+  -d '{"text":"Founder shares vest over 4 years with 1 year cliff. Governed by Delaware law. IP assigns to company."}' \
+  | jq '.matter_id, .intake.matter_type, .specialist_output'
+
+# 3 — flywheel verified count (after auto-judge)
+curl -s "$API/api/v1/legal/flywheel/status" -H "Authorization: Bearer test" | jq '.domains'
+```
+
+---
+
+## What “Forge” Means in This Repo
+
+**Product vision:** Tenants upload data, train/adapt models, evaluate, approve, deploy — the seven-stage MDC.
+
+**What actually ships today:** The **ZIE (Zero-Inference-Extraction) flywheel** — every production inference call is a data-collection opportunity. A small local model races a large remote model; when the remote wins, the pair becomes training data for a **LoRA fine-tune on our base model** (`liquid/lfm-2.5-1.2b`), then gets promoted to the **fast path** via `zie_router_policies`.
+
+Classic Forge routes (`/api/forge/*`) and Kairos `rag_adaptation` jobs are ** scaffolding for the original MDC** — not the path that accumulated legal draft pairs in June 2026.
+
+---
+
+## Double-Dip Flywheel — How We Train Our Own LLM
+
+### The idea (one paragraph)
+
+We never pay to train on every request. We **speculatively** run two models on the same prompt:
+
+1. **Fast path (local/small)** — default `liquid/lfm-2.5-1.2b-instruct:free`, 8s timeout, resolved from `zie_router_policies` after a fine-tune promotes a LoRA adapter.
+2. **Slow path (remote/teacher)** — default `openai/gpt-4o` via OpenRouter (fallback `OPENROUTER_API_KEY_2`).
+
+If the fast model returns **valid JSON** (Zod schema) with **confidence ≥ 0.85**, we serve it and **abort** the slow call — cheap inference, no training row.
+
+If the fast model fails or is uncertain, the slow model runs. When slow wins, we **persist both outputs** to the vault: slow = **chosen** (SFT gold), fast = **rejected** (DPO negative). Over time we fine-tune the 1.2B base so the fast path wins more often — **distilling the teacher into our own weights**.
+
+Implementation: `artifacts/api-server/src/lib/doubleDipRouter.ts` → `executeDoubleDip()`.
+
+### Flow diagram
 
 ```
-GET    /forge/workspaces                              → List user's workspaces
-POST   /forge/workspaces                              → Create workspace (auto-provisions tenant)
-GET    /forge/workspaces/:wid                         → Get workspace
-
-GET    /forge/workspaces/:wid/datasets                → List datasets
-POST   /forge/workspaces/:wid/datasets                → Create dataset
-GET    /forge/workspaces/:wid/datasets/:did           → Get dataset + documents
-POST   /forge/workspaces/:wid/datasets/:did/documents → Add document
-DELETE /forge/workspaces/:wid/datasets/:did/documents/:docId → Remove document
-POST   /forge/workspaces/:wid/datasets/:did/version   → Snapshot dataset version
-
-GET    /forge/workspaces/:wid/jobs                    → List training jobs
-POST   /forge/workspaces/:wid/jobs                    → Create job (status: draft)
-GET    /forge/workspaces/:wid/jobs/:jid               → Get job + Kairos status
-POST   /forge/workspaces/:wid/jobs/:jid/submit        → Validate + queue job
-POST   /forge/workspaces/:wid/jobs/:jid/dispatch      → Dispatch to Kairos (status: running)
-POST   /forge/workspaces/:wid/jobs/:jid/cancel        → Cancel job
-GET    /forge/workspaces/:wid/jobs/:jid/events        → SSE stream from Kairos
-POST   /forge/workspaces/:wid/jobs/:jid/deploy        → Deploy completed job
-GET    /forge/workspaces/:wid/jobs/:jid/eval          → Get eval runs + metrics
-
-GET    /forge/workspaces/:wid/policies                → Get governance policy
-PUT    /forge/workspaces/:wid/policies                → Update policy
-
-GET    /forge/workspaces/:wid/registry                → List model registrations + versions
-POST   /forge/workspaces/:wid/registry/:rid/versions/:vid/approve → Approve model version
-GET    /forge/workspaces/:wid/registry/:rid/deployment → Get active deployment + endpoint URL
-
-GET    /forge/workspaces/:wid/deployments             → List deployments
+                    POST /manuscript/review
+                    POST /seo/audit  (via seoAuditAnalyzer)
+                    semanticLegalAnalyzer → captureClauseForVault (shadow)
+                    POST /legal/clause/draft (separate path — draftAgent, no race)
+                              │
+                              ▼
+              ┌───────────────────────────────────┐
+              │     executeDoubleDip()            │
+              │  fast: 1.2B (zie_router_policies) │
+              │  slow: gpt-4o (OpenRouter)        │
+              │  Zod schema + confidence gate     │
+              └───────────────┬───────────────────┘
+                              │
+            fast wins (conf≥0.85)     slow wins
+                    │                      │
+                    ▼                      ▼
+              return analysis      persistToVault()
+              (no vault write)     zie_training_records  (SFT)
+                                   zie_preference_pairs  (DPO: chosen/rejected)
+                              │
+                              ▼ (manual today)
+              POST /v1/judge/latest  →  judge_verified, judge_run_id
+                              │
+                              ▼ (hourly, when thresholds met)
+              forgeScheduler → checkThresholdsAndDispatch()
+                            → checkVerifiedThresholds()
+                              │
+                              ▼
+              training_jobs (compute_backend=modal)  [needs table LIVE]
+              modal.functions train_lora.spawn()
+                              │
+                              ▼ (webhook / manual)
+              updateRoutingPolicy() → zie_router_policies.fast_model_id
+                              │
+                              ▼
+              Next executeDoubleDip() uses fine-tuned LoRA on fast path
 ```
 
-## Training Job State Machine
+### Invariants (from code comments)
+
+| ID | Rule |
+|----|------|
+| INV-02 | Speculative concurrent execution — fast and slow race; slow aborted if fast wins |
+| INV-03 | Zod whip — invalid JSON never enters vault |
+| — | Vault write **only when slow path wins** (except `draftAgent` / SEO adapter — see below) |
+| — | `prompt_hash` SHA-256 dedupes SFT rows (`ON CONFLICT DO NOTHING`) |
+
+### Default models
+
+| Role | Default | After fine-tune |
+|------|---------|-----------------|
+| Fast | `liquid/lfm-2.5-1.2b-instruct:free` | LoRA adapter ID written to `zie_router_policies` |
+| Slow (teacher) | `openai/gpt-4o` | Unchanged — continues generating gold labels |
+| Confidence gate | `0.85` | Override per caller via `VaultOptions.confidenceThreshold` |
+
+### Task types (free strings — not enum-enforced)
+
+| `task_type` | Vault source | Double-dip? | LIVE status |
+|-------------|--------------|-------------|-------------|
+| `manuscript_slop_check` | `POST /manuscript/review` | Yes | **PARTIAL** — needs OpenRouter |
+| `legal_clause_analysis` | `semanticLegalAnalyzer` shadow hook | Yes (fire-and-forget) | **PARTIAL** — needs `/matter` + KEY_2 |
+| `seo_audit` / `seo_content_audit` | `seoFactoryAdapter` / SEO routes | Yes (SEO has own dip in `seo.ts`) | **LIVE** on Railway/Render |
+| `legal_clause_draft` | `draftAgent.ts` | **No** — direct LLM + vault | **LIVE** (Render k30t) |
+| `legal_agreement_generate` | `generateAgreement()` | **No** | **LIVE** (Render k30t) |
+
+**Legal draft path:** `draftAgent` uses `invokeWithFallback` (Groq 70B → OR 120B), writes SFT + DPO with `chosen=improved_text`, `rejected=original_text`. No fast/slow race — every successful draft creates vault rows. Response field `vault_written: true` is **hardcoded**; confirm via flywheel SQL/counts.
+
+---
+
+## Vault Tables (ZIE — **LIVE** on Render/Railway)
+
+| Table | Purpose |
+|-------|---------|
+| `zie_training_records` | **SFT** — `(prompt_json, remote_response_json, quality_score, task_type, domain, source_kind)` |
+| `zie_preference_pairs` | **DPO** — `chosen_response_json` vs `rejected_response_json`; judge columns from migration 0007 |
+| `zie_router_policies` | **Deployment payoff** — `fast_model_id` per `task_type` (migration `0004b_zie_router_policies.sql`) |
+| `evaluation_runs` / `evaluation_metrics` | Judge bridge — `judge_run_id` on pairs |
+
+Key columns for training dispatch:
+- `used_for_sft` / `used_for_dpo` — set true when consumed by Modal job (volume trigger path)
+- `judge_verified` — required for **verified-DPO** trigger (quality path)
+
+Drizzle file `zieRouterPolicies.ts` (`local_model` / `remote_model`) **diverges** from live SQL (`fast_model_id`, etc.). Runtime code uses **`fast_*` columns** — trust migration `0004b`, not stale Drizzle shape.
+
+---
+
+## Training Triggers (Modal LoRA)
+
+`modalDispatch.ts` + hourly `forgeScheduler.ts` (pg-boss cron `0 * * * * UTC`).
+
+| Trigger | Threshold | What fires |
+|---------|-----------|------------|
+| **Volume** | 200 unused SFT + 100 unused DPO per `task_type` | `checkThresholdsAndDispatch()` → `train_lora.spawn()` |
+| **Quality (primary)** | **50** `judge_verified=true` pairs per `task_type` | `checkVerifiedThresholds()` → same Modal fn |
+
+Hyperparams written to `training_jobs.hyperparams`: `lora_rank: 16`, `lora_alpha: 32`, `epochs: 3`, `lr: 2e-4`, base `liquid/lfm-2.5-1.2b:free`.
+
+**After training:** `updateRoutingPolicy({ taskType, trainedModelId, ... })` updates `zie_router_policies` — next `executeDoubleDip()` reads the new fast model automatically.
+
+**Modal function:** `manuscript-trainer` / `train_lora` — **VISION** until Modal SDK + tokens installed; `DRY_RUN=true` stubs the spawn.
+
+**Blockers today (post code-fix, pre-deploy):**
+- Deploy unreleased changes to **k30t** — live API still old build
+- `training_jobs` created on next boot via `runZieMigration()` — verify after deploy
+- **0** judge-verified pairs on `legal_agreement_generate` — auto-judge should start incrementing after deploy
+- Modal SDK + tokens still required for actual LoRA spawn (`DRY_RUN=true` stubs)
+- Kairos Forge path separate and **broken** (streaming bug) — not used by double-dip
+
+Flywheel UI: `GET /api/v1/legal/flywheel/status` — `{ threshold: 50, domains: [{ task_type, verified_pairs, total_pairs, sft_records, pct }] }`.
+
+---
+
+## Classic Forge MDC — **VISION** (target product)
+
+Tenants: workspace → dataset → version → job → eval → registry → approve → deploy.
+
+### API Routes (`/api/forge/` — code **PARTIAL**, DB **VISION**)
+
+```
+GET/POST /forge/workspaces
+GET/POST /forge/workspaces/:wid/datasets[...]
+GET/POST /forge/workspaces/:wid/jobs[...]
+POST     /forge/workspaces/:wid/jobs/:jid/submit
+POST     /forge/workspaces/:wid/jobs/:jid/dispatch    → Kairos (not double-dip)
+GET      /forge/workspaces/:wid/jobs/:jid/events      → SSE
+POST     /forge/workspaces/:wid/jobs/:jid/deploy
+GET      /forge/workspaces/:wid/jobs/:jid/eval
+GET/PUT  /forge/workspaces/:wid/policies
+GET/POST /forge/workspaces/:wid/registry[...]/approve
+GET      /forge/workspaces/:wid/deployments
+```
+
+Auth: `requireWorkspaceMember` — `wid → model_workspaces.tenant_id → tenants.user_id`.
+
+### Training job state machine (target)
 
 ```
 draft → queued → running → completed → deployed
                          ↘ failed
 ```
 
-- `draft`: Job created, not yet submitted
-- `queued`: Passed validation (dataset ready, model allowed, concurrency OK)
-- `running`: Dispatched to Kairos, `kairos_run_id` set
-- `completed`: Kairos finished successfully
-- `failed`: Validation failed or Kairos error
-- `deployed`: Model version approved + deployment created
+**Live gap:** `jobMonitor.ts` on Kairos `done` inserts **stub** eval (`overall_score=0.85`) — not the ZIE judge path.
 
-## Training Modes
+### Training modes (target vs reality)
 
-| Mode | Description |
-|---|---|
-| `prompt_tuning` | Prompt engineering + few-shot examples |
-| `rag_adaptation` | FAISS retrieval augmentation (primary mode for legal vertical) |
-| `fine_tuning` | Full model fine-tuning (requires larger compute) |
+| Mode | Target | Reality |
+|------|--------|---------|
+| `prompt_tuning` | Better system prompt from dataset | **FICTION** — no branch in `forge.ts` |
+| `rag_adaptation` | Build retrieval index (FAISS) | **FICTION** — label in Kairos goal string only; no index |
+| `fine_tuning` | GPU weight update | **PARTIAL** — ZIE uses Modal LoRA on 1.2B, not Forge dataset pipeline |
 
-## Governance Policy (per tenant)
+### Governance (`model_policies`) — **VISION**
 
-Stored in `model_policies` table. Enforced at job submit time:
+`allowed_base_models`, `max_dataset_bytes`, `max_concurrent_jobs`, `deployment_requires_approval`, `budget_limit_usd` — enforced at submit when tables exist.
 
-| Field | Default | Description |
-|---|---|---|
-| `allowed_base_models` | `[]` (all allowed) | Allowlist of base model IDs |
-| `max_dataset_bytes` | 100 MB | Max dataset size |
-| `max_concurrent_jobs` | 2 | Max running+queued jobs |
-| `deployment_requires_approval` | `true` | Human approval gate before deploy |
-| `budget_limit_usd` | null | Spend cap |
+### Onboarding provision — **PARTIAL / often FICTION**
 
-## Model Approval Gate
+`POST /api/onboarding/provision` seeds workspace, CUAD dataset, completed `rag_adaptation` job, registry, `/extract-clause` deployment.
 
-Before a model version can be deployed:
-1. Job must be in `completed` status
-2. Model version must be in `candidate` status
-3. Only the tenant owner (matching `userId`) can approve
-4. Approval creates a record in `model_approvals` table
-5. Version status moves to `approved`
-6. Then `POST /jobs/:jid/deploy` creates the deployment
+**Audit:** Seed may fail (column mismatches); Forge tables absent on prod; **`/extract-clause` is a static route in `legal.ts`**, not a `deployment_endpoints` row. FAISS claims in hyperparams are **documentation only**.
 
-## Onboarding Provision
+### Classic Forge DB tables — **VISION** on prod
 
-`POST /api/onboarding/provision` — called on first Forge visit for a new user.
+`model_workspaces`, `model_datasets`, `dataset_documents`, `dataset_versions`, `training_jobs`, `training_job_artifacts`, `evaluation_runs`, `evaluation_metrics`, `model_registrations`, `model_versions`, `model_deployments`, `deployment_endpoints`, `model_usage_events`, `model_policies`, `model_approvals`
 
-Seeds the starter workspace with:
-- Workspace: "Legal AI Operating Layer" (domain: legal)
-- Dataset: CUAD Legal Clause Dataset v2 (50 examples, status: ready)
-- Training job: Legal Clause Extractor v1 (mode: rag_adaptation, status: completed)
-- Model registration + approved version (eval_accuracy: 1.0)
-- Active deployment + endpoint: `/v1/legal/extract-clause`
-- Governance policy: 3 allowed models, 3 concurrent jobs, approval required
+---
 
-Idempotent — safe to call multiple times.
+## How to Get From Here → Own LLM on Fast Path
 
-## DB Schema (Forge tables)
+Ordered by dependency. This is a **gap closure checklist**, not a sprint commitment.
 
-| Table | Purpose |
-|---|---|
-| `model_workspaces` | Workspace per tenant (id, tenant_id, name, domain) |
-| `model_datasets` | Dataset per workspace (source_type, sensitivity, status, document_count) |
-| `dataset_versions` | Immutable snapshots of datasets |
-| `dataset_documents` | Individual files/URLs in a dataset |
-| `training_jobs` | Job config + state (mode, base_model, hyperparams, kairos_run_id) |
-| `training_job_artifacts` | Output artifacts from completed jobs |
-| `evaluation_runs` | Eval run records per job |
-| `evaluation_metrics` | Per-metric results (accuracy, f1, etc.) |
-| `model_registrations` | Named model registry entry per workspace |
-| `model_versions` | Versioned model artifacts (status: candidate → approved) |
-| `model_deployments` | Active deployments (status: pending → active) |
-| `deployment_endpoints` | Callable endpoint paths per deployment |
-| `model_usage_events` | Audit log of training_started, deployed, etc. |
-| `model_policies` | Governance policy per tenant |
-| `model_approvals` | Human approval records |
+### Phase A — Make inference collect data reliably (**partially done in code**)
 
-## Workspace Middleware
+1. ~~`resolveApiKey()` KEY_2→KEY_1 fallback~~ ✅
+2. ~~Honest `vault_written` + `pair_id` receipt~~ ✅
+3. ~~Implicit `mode:generate` for 13-curl shape~~ ✅
+4. Pick **one** Postgres (Render k30t) as ZIE source of truth — **still needs ops decision**
 
-`requireWorkspaceMember` middleware (in `src/middleware/requireWorkspaceMember.ts`):
-- Resolves `:wid` to a `model_workspaces` row
-- Verifies the workspace belongs to the authenticated user's tenant
-- Attaches `req.resolvedWorkspace` and `req.resolvedTenantId` to the request
-- Returns 404 if workspace not found, 403 if tenant mismatch
+### Phase B — Make vault → judge → metrics closed (**partially done in code**)
+
+5. ~~Auto-judge on vault write~~ ✅ (`vaultAutoJudge.ts`; disable with `AUTO_JUDGE_VAULT=false`)
+6. Verify flywheel status shows `verified_pairs` increasing — **after deploy**
+7. Judge bridge remains atomic in `judgePair.ts` ✅
+
+### Phase C — Make training fire (**partially done in code**)
+
+8. ~~`training_jobs` in `runZieMigration()`~~ ✅ (nullable FKs for flywheel-only)
+9. Install `@modal-labs/modal`, set `MODAL_TOKEN_*`, deploy `manuscript-trainer/train_lora` — **ops**
+10. Wire Modal completion webhook → `updateRoutingPolicy()` — **ops**
+11. Confirm `forgeScheduler` pg-boss hourly on prod — **after deploy**
+
+### Phase D — Close the loop (**VISION → LIVE**)
+
+12. Re-run inference for that `task_type`; confirm `executeDoubleDip` resolves new `fast_model_id` from `zie_router_policies`.
+13. Measure fast-path win rate ↑ and slow-path vault writes ↓ over time.
+14. Optional: align classic Forge registry so deployed LoRA versions appear in Forge UI tabs.
+
+### Phase E — Classic MDC (optional, parallel track)
+
+15. Fix graph/KB schema if `rag_adaptation` ever means real retrieval (today **FICTION** — see `MDC_training.md`).
+16. Fix Kairos streaming bug before relying on Forge dispatch for anything other than ZIE Modal.
+
+---
+
+## Key Files
+
+| File | Role |
+|------|------|
+| `lib/doubleDipRouter.ts` | Fast/slow race, vault persist, `resolveFastPolicy()` |
+| `lib/modalDispatch.ts` | Threshold checks, Modal spawn, `updateRoutingPolicy()` |
+| `lib/forgeScheduler.ts` | Hourly pg-boss → dispatch |
+| `lib/draftVault.ts` | Sync vault writes + receipt |
+| `lib/vaultAutoJudge.ts` | Auto-judge after vault (`AUTO_JUDGE_VAULT`) |
+| `lib/judgePair.ts` | Shared judge implementation |
+| `lib/resolveApiKey.ts` | OPENROUTER_KEY_2 → KEY_1 fallback |
+| `lib/semanticLegalAnalyzer.ts` | Clause analysis + shadow `executeDoubleDip` |
+| `factory/seoFactoryAdapter.ts` | SEO vault with chosen/rejected training record FKs |
+| `routes/flywheel.ts` | Progress API for UI |
+| `routes/judge.ts` | LLM-as-judge → verified pairs |
+| `routes/forge.ts` | Classic MDC routes (VISION on prod) |
+| `lib/kairosClient.ts` + `jobMonitor.ts` | Kairos Forge path (PARTIAL / stub eval) |
+| `lib/db/drizzle/0004b_zie_router_policies.sql` | Router policy table + seeds |
+
+---
+
+## Acceptance Checks (curl / SQL)
+
+```bash
+# Flywheel progress (Render)
+curl -s "https://openclaw-api-k30t.onrender.com/api/v1/legal/flywheel/status" \
+  -H "Authorization: Bearer test"
+
+# Draft → vault (inline)
+curl -s -X POST ".../api/v1/legal/clause/draft" \
+  -H "Content-Type: application/json" \
+  -d '{"mode":"inline","clause_id":"test",...}'
+
+# Judge one pair (manual)
+curl -s -X POST ".../api/v1/judge/latest" -H "Authorization: Bearer test"
+```
+
+```sql
+-- Verified pairs toward Modal threshold
+SELECT task_type, COUNT(*) FILTER (WHERE judge_verified) AS verified, COUNT(*) AS total
+FROM zie_preference_pairs GROUP BY task_type;
+
+-- Fast path policy for a task
+SELECT task_type, fast_model_id, promoted_at FROM zie_router_policies;
+```
+
+---
+
+## Related Rules
+
+- **`MDC_training.md`** — live vs vision detail, env vars, RAG fiction
+- **`MDC_architecture.md`** — seven-stage target diagram + ZIE parallel path
+- **`07-legal-vertical.mdc`** — legal routes and specialists
+- **`10-cofounder-specialist.mdc`** — cofounder corpus (trigger-match, not vector KB)
+
+---
+
+*MDC version: 2.0 — 2026-06-06 (double-dip + reality audit)*
+*Supersedes: v1.0 Forge-only doc implying FAISS/rag_adaptation deployed*

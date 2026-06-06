@@ -81,7 +81,8 @@ async function runZieMigration(): Promise<void> {
       ADD COLUMN IF NOT EXISTS "dataset_version_id" integer,
       ADD COLUMN IF NOT EXISTS "model_version_id" integer,
       ADD COLUMN IF NOT EXISTS "source_run_id" uuid,
-      ADD COLUMN IF NOT EXISTS "source_analysis_ref" text
+      ADD COLUMN IF NOT EXISTS "source_analysis_ref" text,
+      ADD COLUMN IF NOT EXISTS "used_for_sft" boolean NOT NULL DEFAULT false
   `);
 
   // zie_preference_pairs — judge.ts contract. prompt_hash, source_kind,
@@ -194,13 +195,46 @@ async function runZieMigration(): Promise<void> {
     logger.warn({ alterErr }, "ZIE migration: evaluation_runs/metrics ALTER soft-failed — continuing");
   }
 
+  // ── Flywheel Modal dispatch: training_jobs without Forge FK deps ─────────────
+  // modalDispatch.ts INSERTs flywheel jobs with workspace_id=1 placeholders.
+  // This table is created here so ZIE path works even when runMigrations() fails.
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS "training_jobs" (
+      "id" serial PRIMARY KEY NOT NULL,
+      "tenant_id" text NOT NULL,
+      "workspace_id" integer,
+      "dataset_id" integer,
+      "dataset_version_id" integer,
+      "name" text NOT NULL,
+      "mode" text NOT NULL,
+      "base_model" text NOT NULL,
+      "hyperparams" jsonb NOT NULL DEFAULT '{}',
+      "status" text NOT NULL DEFAULT 'draft',
+      "kairos_run_id" text,
+      "compute_backend" text NOT NULL DEFAULT 'modal',
+      "reforge_suggested" boolean NOT NULL DEFAULT false,
+      "error" text,
+      "created_at" timestamptz NOT NULL DEFAULT now(),
+      "updated_at" timestamptz NOT NULL DEFAULT now()
+    )
+  `);
+  try {
+    await client.query(`ALTER TABLE "training_jobs" ALTER COLUMN "workspace_id" DROP NOT NULL`);
+    await client.query(`ALTER TABLE "training_jobs" ALTER COLUMN "dataset_id" DROP NOT NULL`);
+    await client.query(`ALTER TABLE "training_jobs" ALTER COLUMN "dataset_version_id" DROP NOT NULL`);
+  } catch {
+    // Table may already be nullable or not exist with NOT NULL — ignore
+  }
+
   // ── Seed default router policies (idempotent) ──────────────────────────────
   await client.query(`
     INSERT INTO "zie_router_policies" ("task_type", "fast_model_id", "fast_provider")
     VALUES
-      ('legal_clause_analysis', 'liquid/lfm-2.5-1.2b-instruct:free', 'openrouter'),
-      ('manuscript_slop_check', 'liquid/lfm-2.5-1.2b-instruct:free', 'openrouter'),
-      ('seo_content_audit',     'liquid/lfm-2.5-1.2b-instruct:free', 'openrouter')
+      ('legal_clause_analysis',  'liquid/lfm-2.5-1.2b-instruct:free', 'openrouter'),
+      ('legal_clause_draft',     'liquid/lfm-2.5-1.2b-instruct:free', 'openrouter'),
+      ('legal_agreement_generate', 'liquid/lfm-2.5-1.2b-instruct:free', 'openrouter'),
+      ('manuscript_slop_check',  'liquid/lfm-2.5-1.2b-instruct:free', 'openrouter'),
+      ('seo_content_audit',      'liquid/lfm-2.5-1.2b-instruct:free', 'openrouter')
     ON CONFLICT ("task_type") DO NOTHING
   `);
 

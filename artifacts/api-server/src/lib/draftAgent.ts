@@ -15,9 +15,9 @@
  */
 
 import crypto from "crypto";
-import { pool } from "@workspace/db";
 import { logger } from "./logger.js";
 import { invokeWithFallback, type ModelRouteConfig } from "./modelRouter.js";
+import { persistDraftVault, type VaultWriteReceipt } from "./draftVault.js";
 import { z } from "zod";
 
 // ── Model chain ───────────────────────────────────────────────────────────────
@@ -66,6 +66,7 @@ export interface DraftClauseOutput {
   riskReduction: "eliminated" | "reduced" | "flagged_for_counsel";
   confidence: number;
   modelUsed: string;
+  vault: VaultWriteReceipt;
 }
 
 // ── Zod schema for LLM output ─────────────────────────────────────────────────
@@ -171,47 +172,26 @@ export async function draftClause(input: DraftClauseInput): Promise<DraftClauseO
   draftOutput = result.parsed;
   modelUsed = result.model_used;
 
-  // ── Vault writes (SFT + DPO pair) ─────────────────────────────────────────
-  // Both writes are fire-and-forget — they never block the response.
-  setImmediate(async () => {
-    try {
-      const promptJson = JSON.stringify({ clause_id: clauseId, doc_class: docClass, original_text: originalText });
-      const responseJson = JSON.stringify(draftOutput);
+  const promptJson = JSON.stringify({ clause_id: clauseId, doc_class: docClass, original_text: originalText });
+  const responseJson = JSON.stringify(draftOutput);
 
-      // SFT record
-      await pool.query(
-        `INSERT INTO zie_training_records
-           (domain, task_type, source_kind, quality_score, prompt_hash,
-            prompt_json, remote_response_json)
-         VALUES ('legal', 'legal_clause_draft', 'draft_agent', $1, $2, $3, $4)
-         ON CONFLICT (prompt_hash) DO NOTHING`,
-        [draftOutput.confidence, promptHash, promptJson, responseJson],
-      );
-
-      // DPO preference pair: chosen=improved_text, rejected=original_text
-      // This is what feeds the flywheel for the drafting task specifically.
-      await pool.query(
-        `INSERT INTO zie_preference_pairs
-           (domain, task_type, preference_source,
-            prompt_hash, chosen_response_json, rejected_response_json,
-            source_kind)
-         VALUES ('legal', 'legal_clause_draft', 'draft_agent',
-                 $1, $2, $3, 'draft_agent')`,
-        [
-          promptHash,
-          JSON.stringify({ text: draftOutput.improved_text, changes_summary: draftOutput.changes_summary }),
-          JSON.stringify({ text: originalText, reason: "original — pre-improvement" }),
-        ],
-      );
-
-      logger.info(
-        { clauseId, docClass, promptHash, confidence: draftOutput.confidence },
-        "draftAgent: vault writes complete (SFT + DPO pair)",
-      );
-    } catch (vaultErr) {
-      logger.error({ vaultErr, clauseId }, "draftAgent: vault write failed (non-blocking)");
-    }
+  const vault = await persistDraftVault({
+    domain: "legal",
+    taskType: "legal_clause_draft",
+    sourceKind: "draft_agent",
+    preferenceSource: "draft_agent",
+    promptHash,
+    promptJson,
+    responseJson,
+    qualityScore: draftOutput.confidence,
+    chosenJson: JSON.stringify({
+      text: draftOutput.improved_text,
+      changes_summary: draftOutput.changes_summary,
+    }),
+    rejectedJson: JSON.stringify({ text: originalText, reason: "original — pre-improvement" }),
   });
+
+  logger.info({ clauseId, docClass, vault }, "draftAgent: vault write complete");
 
   return {
     clauseId,
@@ -221,6 +201,7 @@ export async function draftClause(input: DraftClauseInput): Promise<DraftClauseO
     riskReduction: draftOutput.risk_reduction,
     confidence: draftOutput.confidence,
     modelUsed,
+    vault,
   };
 }
 
@@ -240,6 +221,7 @@ export interface GenerateAgreementOutput {
   riskReduction: "eliminated" | "reduced" | "flagged_for_counsel";
   confidence: number;
   modelUsed: string;
+  vault: VaultWriteReceipt;
 }
 
 // ── System prompt for full agreement generation ───────────────────────────────
@@ -333,43 +315,26 @@ export async function generateAgreement(input: GenerateAgreementInput): Promise<
   const draftOutput = result.parsed;
   const modelUsed = result.model_used;
 
-  // ── Vault writes (fire-and-forget) ────────────────────────────────────────
-  setImmediate(async () => {
-    try {
-      const promptJson = JSON.stringify({ clause_type: clauseType, context, instructions });
-      const responseJson = JSON.stringify(draftOutput);
+  const promptJson = JSON.stringify({ clause_type: clauseType, context, instructions });
+  const responseJson = JSON.stringify(draftOutput);
 
-      await pool.query(
-        `INSERT INTO zie_training_records
-           (domain, task_type, source_kind, quality_score, prompt_hash,
-            prompt_json, remote_response_json)
-         VALUES ('legal', 'legal_agreement_generate', 'generate_agent', $1, $2, $3, $4)
-         ON CONFLICT (prompt_hash) DO NOTHING`,
-        [draftOutput.confidence, promptHash, promptJson, responseJson],
-      );
-
-      await pool.query(
-        `INSERT INTO zie_preference_pairs
-           (domain, task_type, preference_source,
-            prompt_hash, chosen_response_json, rejected_response_json,
-            source_kind)
-         VALUES ('legal', 'legal_agreement_generate', 'generate_agent',
-                 $1, $2, $3, 'generate_agent')`,
-        [
-          promptHash,
-          JSON.stringify({ text: draftOutput.improved_text, changes_summary: draftOutput.changes_summary }),
-          JSON.stringify({ text: "", reason: "no prior draft — generated from scratch" }),
-        ],
-      );
-
-      logger.info(
-        { clauseType, promptHash, confidence: draftOutput.confidence },
-        "generateAgent: vault writes complete (SFT + DPO pair)",
-      );
-    } catch (vaultErr) {
-      logger.error({ vaultErr, clauseType }, "generateAgent: vault write failed (non-blocking)");
-    }
+  const vault = await persistDraftVault({
+    domain: "legal",
+    taskType: "legal_agreement_generate",
+    sourceKind: "generate_agent",
+    preferenceSource: "generate_agent",
+    promptHash,
+    promptJson,
+    responseJson,
+    qualityScore: draftOutput.confidence,
+    chosenJson: JSON.stringify({
+      text: draftOutput.improved_text,
+      changes_summary: draftOutput.changes_summary,
+    }),
+    rejectedJson: JSON.stringify({ text: "", reason: "no prior draft — generated from scratch" }),
   });
+
+  logger.info({ clauseType, vault }, "generateAgent: vault write complete");
 
   return {
     clauseType,
@@ -378,5 +343,6 @@ export async function generateAgreement(input: GenerateAgreementInput): Promise<
     riskReduction: draftOutput.risk_reduction,
     confidence: draftOutput.confidence,
     modelUsed,
+    vault,
   };
 }

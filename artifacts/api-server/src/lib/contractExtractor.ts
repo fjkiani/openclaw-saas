@@ -9,6 +9,7 @@
  */
 
 import type { DraftIntake, DocClass } from "./draftReceiptEngine";
+import { resolveApiKey } from "./resolveApiKey.js";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -59,7 +60,7 @@ const SPECIALIST_MODEL_CHAIN: ModelEntry[] = [
 ];
 
 function getProviderConfig(entry: ModelEntry): { endpoint: string; apiKey: string; modelId: string } {
-  const apiKey = process.env[entry.apiKeyEnv] ?? "";
+  const apiKey = resolveApiKey(entry.apiKeyEnv);
   if (entry.provider === "groq") {
     return { endpoint: "https://api.groq.com/openai/v1/chat/completions", apiKey, modelId: entry.id };
   }
@@ -81,7 +82,7 @@ async function callExtractorModel(
 
     if (!apiKey) {
       if (i < SPECIALIST_MODEL_CHAIN.length - 1) { fallbackUsed = true; continue; }
-      throw new Error(`API key env var '${entry.apiKeyEnv}' not set and no more fallbacks`);
+      throw new Error(`API key env var '${entry.apiKeyEnv}' not set (also tried OpenRouter key fallback)`);
     }
 
     const headers: Record<string, string> = {

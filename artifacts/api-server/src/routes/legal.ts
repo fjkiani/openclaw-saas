@@ -77,6 +77,7 @@ import {
 import draftRouter from "./legal.draft.addendum.js";
 import { logger } from "../lib/logger.js";
 import { runSemanticShadow } from "../lib/semanticLegalAnalyzer.js";
+import { resolveApiKey } from "../lib/resolveApiKey.js";
 
 const router: IRouter = Router();
 
@@ -335,7 +336,7 @@ Respond with valid JSON only. No explanation, no markdown, no extra text.`;
 // This gives effective 2x quota on OpenRouter and priority access via Groq.
 
 function getProviderConfig(entry: ModelEntry): { endpoint: string; apiKey: string; modelId: string } {
-  const apiKey = process.env[entry.apiKeyEnv] ?? "";
+  const apiKey = resolveApiKey(entry.apiKeyEnv);
   if (entry.provider === "groq") {
     return {
       endpoint: "https://api.groq.com/openai/v1/chat/completions",
@@ -366,9 +367,10 @@ async function callModelWithFallback(
     const { endpoint, apiKey, modelId } = getProviderConfig(entry);
 
     if (!apiKey) {
-      // Key env var not set — skip this entry silently
       if (i < chain.length - 1) { fallbackUsed = true; continue; }
-      throw new Error(`API key env var '${entry.apiKeyEnv}' not set and no more fallbacks`);
+      throw new Error(
+        `API key env var '${entry.apiKeyEnv}' not set (also tried OpenRouter key fallback)`,
+      );
     }
 
     const headers: Record<string, string> = {

@@ -22,6 +22,7 @@ import {
   classifyModelResponse,
   detectUnusableOutput,
 } from "./semanticClauseSchema.js";
+import { resolveApiKey } from "./resolveApiKey.js";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -105,7 +106,7 @@ function resolveProviderConfig(entry: ModelRouteConfig): {
   apiKey: string;
   modelId: string;
 } {
-  const apiKey = process.env[entry.apiKeyEnv] ?? "";
+  const apiKey = resolveApiKey(entry.apiKeyEnv);
   switch (entry.provider) {
     case "groq":
       return {

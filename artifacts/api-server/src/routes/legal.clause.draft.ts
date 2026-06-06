@@ -3,15 +3,12 @@
  *
  * POST /api/v1/legal/clause/draft
  *
- * Turns a previously analyzed clause into improved contract text.
+ * Modes:
+ *   from_run  — fetch analysis from semantic_clause_analyses
+ *   inline    — caller provides all clause fields
+ *   generate  — clause_type + context + instructions (mode optional if clause_type present)
  *
- * Two input modes:
- *   A. run_id + clause_id  — fetches analysis from semantic_clause_analyses table
- *   B. inline              — caller provides all fields directly (no prior run needed)
- *
- * Vault writes (via draftAgent.ts):
- *   zie_training_records  — domain=legal, task_type=legal_clause_draft, source_kind=draft_agent
- *   zie_preference_pairs  — chosen=improved_text, rejected=original_text, preference_source=draft_agent
+ * Vault writes return a DB receipt (pair_id, vault_written) — not hardcoded.
  */
 
 import { Router, type Request, type Response } from "express";
@@ -19,21 +16,33 @@ import { z } from "zod";
 import { pool } from "@workspace/db";
 import { logger } from "../lib/logger.js";
 import { draftClause, generateAgreement } from "../lib/draftAgent.js";
+import type { VaultWriteReceipt } from "../lib/draftVault.js";
 
 const router = Router();
 
-// ── Request schema ────────────────────────────────────────────────────────────
+/** Accept agent runbook shape: clause_type + instructions without explicit mode. */
+function normalizeDraftBody(raw: unknown): unknown {
+  if (!raw || typeof raw !== "object") return raw;
+  const body = raw as Record<string, unknown>;
+  if (
+    body.mode === undefined &&
+    typeof body.clause_type === "string" &&
+    typeof body.instructions === "string" &&
+    body.instructions.length >= 10
+  ) {
+    return { ...body, mode: "generate" };
+  }
+  return raw;
+}
 
 const DraftRequestSchema = z.union([
-  // Mode A: fetch from DB by run_id + clause_id
   z.object({
     mode: z.literal("from_run").optional().default("from_run"),
     run_id: z.string().uuid("run_id must be a UUID"),
     clause_id: z.string().min(1),
-    original_text: z.string().min(1).optional(),  // override if provided
+    original_text: z.string().min(1).optional(),
     tenant_id: z.string().optional(),
   }),
-  // Mode B: inline — all fields provided directly
   z.object({
     mode: z.literal("inline"),
     clause_id: z.string().min(1),
@@ -47,7 +56,6 @@ const DraftRequestSchema = z.union([
     rationale: z.string().min(1),
     tenant_id: z.string().optional(),
   }),
-  // Mode C: generate — draft a full agreement from context + instructions
   z.object({
     mode: z.literal("generate"),
     clause_type: z.string().min(1),
@@ -57,12 +65,24 @@ const DraftRequestSchema = z.union([
   }),
 ]);
 
-// ── POST /api/v1/legal/clause/draft ──────────────────────────────────────────
+function vaultFields(vault: VaultWriteReceipt) {
+  return {
+    vault_written: vault.vault_written,
+    vault: {
+      prompt_hash: vault.prompt_hash,
+      pair_id: vault.pair_id,
+      sft_inserted: vault.sft_inserted,
+      dpo_inserted: vault.dpo_inserted,
+      task_type: vault.task_type,
+      domain: vault.domain,
+    },
+  };
+}
 
 router.post(
   "/v1/legal/clause/draft",
   async (req: Request, res: Response): Promise<void> => {
-    const parsed = DraftRequestSchema.safeParse(req.body);
+    const parsed = DraftRequestSchema.safeParse(normalizeDraftBody(req.body));
     if (!parsed.success) {
       res.status(400).json({ error: "Invalid request", details: parsed.error.flatten() });
       return;
@@ -71,7 +91,6 @@ router.post(
     const body = parsed.data;
 
     try {
-      // Mode C: generate full agreement from scratch
       if (body.mode === "generate") {
         const genOutput = await generateAgreement({
           clauseType: body.clause_type,
@@ -87,7 +106,7 @@ router.post(
           risk_reduction: genOutput.riskReduction,
           confidence: genOutput.confidence,
           model_used: genOutput.modelUsed,
-          vault_written: true,
+          ...vaultFields(genOutput.vault),
         });
         return;
       }
@@ -95,7 +114,6 @@ router.post(
       let draftInput: Parameters<typeof draftClause>[0];
 
       if (body.mode === "inline") {
-        // Mode B — all fields provided
         draftInput = {
           clauseId: body.clause_id,
           clauseLabel: body.clause_label,
@@ -109,7 +127,6 @@ router.post(
           tenantId: body.tenant_id,
         };
       } else {
-        // Mode A — fetch from semantic_clause_analyses
         const clauseRow = await pool.query<{
           clause_id: string;
           clause_label: string;
@@ -139,11 +156,9 @@ router.post(
         }
 
         const row = clauseRow.rows[0];
-
-        // Fetch original text from the run's document if not overridden
-        // (stored in semantic_clause_analysis_runs.document_text if that column exists,
-        //  otherwise caller must provide original_text override)
-        const originalText = body.original_text ?? `[Original ${row.clause_label} clause — provide original_text for best results]`;
+        const originalText =
+          body.original_text ??
+          `[Original ${row.clause_label} clause — provide original_text for best results]`;
 
         draftInput = {
           clauseId: row.clause_id,
@@ -175,7 +190,7 @@ router.post(
         risk_reduction: output.riskReduction,
         confidence: output.confidence,
         model_used: output.modelUsed,
-        vault_written: true,  // SFT + DPO pair written async
+        ...vaultFields(output.vault),
       });
     } catch (err: unknown) {
       logger.error({ err }, "legal.clause.draft: unhandled error");
