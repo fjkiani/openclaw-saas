@@ -1,60 +1,490 @@
-COFOUNDER RESTRICTED STOCK PURCHASE AGREEMENT — CRISPRO THERAPEUTICS INC.
+IP Counsel input created 
+CrisPRO.ai Co-Founder Services and Restricted Stock Agreement
+Version 3.1 (Negotiated Draft)
+Effective Date: [EFFECTIVE DATE]
+Confidential Draft
+This Co-Founder Services and Restricted Stock Agreement (this "Agreement") is entered into as of [EFFECTIVE DATE] (the "Effective Date") by and between:
+CrisPRO.ai, Inc., a Delaware corporation, with its principal place of business at [ADDRESS] (the "Company"); and
+Dr. Robin Kim, MD, an individual residing at [ADDRESS] (the "Co-Founder").
+The Company and Co-Founder are referred to individually as a "Party" and collectively as the "Parties."
+1. Purpose
+The Company is developing a mechanism-aware oncology platform for clinical trial matching, patient stratification, and related clinical intelligence products (the "Platform"). The Company ecosystem includes product lines such as VetOnco, Longevity, and DeepCrispr.ai (collectively, the "Company Products"). The Company desires to engage Co-Founder as a strategic full-time clinical co-founder and Chief Medical Officer (CMO), and Co-Founder desires to provide such services, subject to the terms of this Agreement.
+This Agreement is intended to create a win-win structure: Co-Founder may continue permitted medical, academic, financial, and advisory activities, while the Company receives strong protection for its intellectual property, confidential information, relationships, and core commercial field.
+2. Definitions
+2.1 Cause
+"Cause" means any of the following: (i) material breach of this Agreement or any other written agreement with the Company that remains uncured for 30 days after written notice; (ii) fraud, embezzlement, willful misconduct, or gross negligence that causes material harm to the Company; (iii) conviction of a felony or crime involving dishonesty; (iv) unauthorized use of Confidential Information; (v) material violation of written policies. "Cause" specifically excludes any failure to meet Milestone-linked vesting criteria under Schedule B.
+2.2 Change of Control
+Standard definition as a merger, consolidation, or reorganization in which stockholders before the transaction hold less than 50% of the voting power after; or a sale of all/substantially all assets.
+2.3 Confidential Information
+Standard non-public information definition including algorithms, source code, product roadmaps, datasets, model logic, training/validation methods, and technical documentation.
+2.4 Good Reason
+"Good Reason" means, without Co-Founder's prior written consent: (i) a material reduction in Co-Founder's title, authority, responsibilities, or clinical oversight; (ii) a material breach of this Agreement by the Company; or (iii) a Company directive requiring unlawful conduct.
+2.5 Mutual Dependency
+"Mutual Dependency" means a condition where a Milestone is delayed or impaired due to a lack of Company-provided technical resources, data access, API availability, or engineering support. In such events, the Milestone shall be deemed "Satisfied" for the purpose of vesting tranches.
+2.6 Reserved Company Field
+Standard oncology AI trial matching/stratification definition.
+2.7 Work Product
+Standard works of authorship and inventions definition created in connection with Company Products.
+3. Status, Role, and Services
+3.1 Co-Founder Status
+The Company recognizes Co-Founder as a strategic clinical co-founder.
+3.2 Title
+Co-Founder shall serve as Chief Medical Officer ("CMO").
+3.3 Independent Contractor
+Co-Founder provides services as an independent contractor. Co-Founder is solely responsible for all taxes and insurance.
+3.4 Services and Commitment
+Co-Founder shall provide services on a full-time basis, including clinical strategy, medical validation across all Company Products, clinical partnerships, and translational positioning.
+4. Outside Activities; Win-Win Structure
+4.1 Permitted Activities
+The Company acknowledges that Co-Founder may continue to engage in pre-existing financial and professional endeavors,  those disclosed on Schedule C-1.
+4.2 Personal Branding
+Co-Founder retains the right to build a personal professional brand on LinkedIn. Co-Founder may identify as "Co-Founder & CMO of CrisPRO.ai" to promote Company visibility while maintaining an individual professional voice and thought leadership.
+5. Equity Grant and Compliance
+5.1 Grant
+Subject to Board approval, the Company shall issue shares representing 25% of the Company's fully diluted capitalization (calculated including the 19% investor/early-team pool and the employee option pool) as set forth on Schedule A. The binding figure shall be the share number. Ownership applies to the parent entity and all present and future subsidiaries (VetOnco, Longevity, DeepCrispr.ai).
+5.2 Liability Shield and Insurance
+(i) RUO Status: All Platform and Company Product outputs are for Research Use Only (RUO) during this phase.
+(ii) Indemnification: The Company shall maintain Directors & Officers (D&O) Insurance.
+(iii) Professional Liability: The Company shall maintain a policy covering "AI-assisted clinical decision support."
+(iv) Clinical Disclaimer: All external predictions must clarify that AI provides clinical decision support, not diagnosis.
+5.3 Vesting Schedule
+Initial Vesting: 5% of the Equity Grant shall vest on the Effective Date.
+Cliff: No additional shares vest until the 12-month anniversary.
+Monthly Vesting: Thereafter, remaining shares vest in equal monthly installments over 36 months.
+Milestone-linked Vesting: Tranches under Schedule B are subject to the Mutual Dependency clause.
 
-This Restricted Stock Purchase Agreement (the "Agreement") is entered into as of January 15, 2025, by and between CrisPro Therapeutics Inc., a Delaware corporation (the "Company"), and the purchaser identified on the signature page hereto (the "Purchaser").
+5.4 Tax & Administrative Compliance
+The Restricted Stock Purchase Agreement (RSPA) shall be executed concurrently with this contract. The Board Consent authorizing this grant shall be issued and signed alongside this Agreement. Co-Founder shall file a Section 83(b) election via certified mail within 30 days of the grant.
+5.5 Acceleration
+Standard single (25%) and double (100%) trigger acceleration as defined in the 3.0 draft.
 
-1. PURCHASE OF SHARES
+6. Intellectual Property & Transparency
+6.1 Present Assignment
+Co-Founder hereby irrevocably assigns to the Company, effective immediately upon creation, all right, title, and interest in and to all Work Product, including all related intellectual property rights worldwide. This is a present assignment and is intended to be self-executing. This assignment explicitly extends to all Company Products, including VetOnco, Longevity, and DeepCrispr.ai.
+6.2 Disclosure of Work Product
+Co-Founder shall promptly disclose Work Product created in connection with Company services to ensure the clinical and technical integration of the Platform.
+6.3 Pre-Existing IP
+The assignment above does not apply to inventions, materials, or intellectual property specifically identified on Schedule C as pre-existing property of Co-Founder ("Pre-Existing IP"). To the extent any Pre-Existing IP is incorporated into Work Product, Co-Founder grants the Company a perpetual, irrevocable, worldwide, royalty-free license to use, reproduce, modify, distribute, display, perform, and create derivative works from such incorporated Pre-Existing IP as part of the Work Product and the Company's business.
+6.4 Further Assurances
+Co-Founder shall execute any documents and take any reasonable actions necessary to perfect, confirm, or enforce the Company's rights in Work Product. This obligation survives termination.
+6.5 Transparency and Mutual Representation
+The Company represents and warrants that all co-founders (including Fahad Kiani and Dr. Rahima Nayeem) have executed substantially similar Intellectual Property assignments and vesting schedules. This ensures that the "IP Moat" and all mechanism-aware technology remain fully contained within the Company for the benefit of all stockholders.
+7. Confidentiality and Trade Secrets
+7.1 Confidentiality Obligations
+Co-Founder shall: (i) hold Confidential Information and Trade Secrets in strict confidence; (ii) use them solely for the Company's benefit; (iii) not disclose them except as expressly permitted by this Agreement; and (iv) protect them using at least reasonable care. This includes all sensitive clinical data and scoring methods associated with the Platform.
+7.2 Permitted Disclosures
+Co-Founder may disclose Confidential Information only: (i) to Company personnel or advisers with a need to know; (ii) to Co-Founder's legal or tax advisers; (iii) as required by law, subpoena, or court order; or (iv) as permitted by applicable whistleblower laws.
+7.3 Return and Deletion
+Upon termination or upon written request, Co-Founder shall promptly return or destroy all Company materials containing Confidential Information, except to the extent retention is required by law or automatic archival backup systems.
+7.4 DTSA Notice
+Pursuant to 18 U.S.C. § 1833(b), Co-Founder is notified of the immunity for protected disclosures made in confidence to a government official or attorney for the purpose of investigating a suspected violation of law.
+8. Conflicts, Reserved Field Protection, and Non-Diversion
+8.1 No Misuse of Company Position or Information
+Co-Founder shall not use the Company's Confidential Information, Trade Secrets, Work Product, or business relationships for the benefit of any third party or for any purpose adverse to the Company.
+8.2 Reserved Field Restriction; Personal Branding
+During the term of this Agreement, Co-Founder shall not knowingly provide founder-level, executive-level, or product-strategy services to a third party in the Reserved Company Field. Notwithstanding the foregoing: The Company acknowledges Co-Founder's right to build and maintain a personal professional brand on LinkedIn. Co-Founder may identify as "Co-Founder & CMO of CrisPRO.ai" and share insights to build thought leadership, provided such activities do not disclose Trade Secrets.
+8.3 Corporate Opportunities; Non-Diversion
+If Co-Founder becomes aware of a business opportunity, partner opportunity, or strategic collaboration that falls within the Company's actual or contemplated business (including VetOnco, Longevity, or DeepCrispr.ai), Co-Founder shall first disclose the opportunity to the Company and shall not divert or exploit it personally without the Company's written consent.
+8.4 Non-Solicitation of Personnel
+During the term of this Agreement and for 12 months thereafter, Co-Founder shall not knowingly solicit for hire any employee or contractor of the Company with whom Co-Founder had material business contact during the final 12 months of service.
+8.5 Non-Solicitation of Counterparties
+During the term of this Agreement and for 12 months thereafter, Co-Founder shall not knowingly divert or solicit any customer, partner, investor, or grant counterparty of the Company for the purpose of providing a product or service competitive with the Company's then-current products or services.
 
-Subject to the terms and conditions of this Agreement, the Company hereby sells to the Purchaser, and the Purchaser hereby purchases from the Company, the number of shares of the Company's Common Stock set forth on the signature page hereto (the "Shares") at a purchase price of $0.001 per share (the "Purchase Price"). The Purchaser acknowledges that the fair market value of the Shares as of the date of grant is $0.001 per share, as determined by the Board of Directors based on an independent 409A valuation dated December 1, 2024.
 
-2. VESTING SCHEDULE
+9. Compensation and Expenses (Continued)
+9.2 Expenses
+The Company shall reimburse Co-Founder for all reasonable, documented, and pre-approved business expenses incurred by Co-Founder in connection with the performance of services under this Agreement, in accordance with the Company's standard expense reimbursement policy.
+10. Representations
+10.1 Co-Founder Representations
+Co-Founder represents and warrants that:
+Co-Founder has the full right, power, and authority to enter into this Agreement and to perform the services described herein;
+the performance of services will not violate any other agreement or obligation binding on Co-Founder;
+Co-Founder will not use or disclose any third-party confidential information or intellectual property in performing services for the Company;
+Co-Founder has disclosed all material outside roles and financial endeavors on Schedule C-1; and
+Schedule C accurately identifies all known Pre-Existing IP to be excluded from the assignment to the Company.
+10.2 Company Representations
+The Company represents and warrants that it has the corporate power and authority to enter into this Agreement and to submit the Equity Grant for Board approval. The Company further represents that all other co-founders (including Fahad Kiani and Dr. Rahima Nayeem) have executed substantially similar Intellectual Property assignments and vesting schedules to ensure the IP Moat is fully contained within the Company.
+11. Termination
+11.1 Term
+This Agreement begins on the Effective Date and continues until terminated in accordance with this Section.
+11.2 Termination by Company
+The Company may terminate this Agreement:
+immediately for Cause; or
+without Cause on 30 days' written notice.
+11.3 Termination by Co-Founder
+Co-Founder may terminate this Agreement:
+for Good Reason after compliance with the notice and cure procedure; or
+without Good Reason on 30 days' written notice.
+11.4 Effect of Termination
+Upon termination, Co-Founder's authority to act for the Company immediately ceases. Unvested shares remain subject to the Company's repurchase rights as set forth in the RSPA. Co-Founder shall promptly return or destroy all Company materials containing Confidential Information in accordance with Section 7.3. Sections 6, 7, 8, 12, and 13 shall survive termination.
+12. Remedies
+The Parties acknowledge that a breach of Sections 6 (Intellectual Property), 7 (Confidentiality), or 8 (Reserved Field Protection) may cause irreparable harm for which monetary damages would be inadequate. Accordingly, either Party may seek temporary, preliminary, or permanent equitable relief in a court of competent jurisdiction to protect Confidential Information, Trade Secrets, Intellectual Property, or business relationships, without waiving the right to arbitrate other claims.
+13. General Provisions
+13.1 Governing Law
+This Agreement shall be governed by and construed in accordance with the laws of the State of Delaware, without regard to conflict-of-law rules.
+13.2 Dispute Resolution
+Except for requests for equitable relief under Section 12, any dispute arising out of or relating to this Agreement shall be resolved by binding arbitration administered by JAMS in Delaware before one arbitrator.
+13.3 Entire Agreement
+This Agreement, including all schedules, constitutes the entire agreement of the Parties and supersedes all prior discussions, drafts, or oral agreements regarding its subject matter.
+13.4 Amendment
+This Agreement may be amended only by a written instrument signed by both Parties.
+13.5 Assignment
+The Company may assign this Agreement in connection with a merger, acquisition, financing, or sale of substantially all assets. Co-Founder may not assign this Agreement without the Company's written consent.
+13.6 Notices
+All notices under this Agreement shall be in writing and delivered by personal delivery, overnight courier, certified mail, or email with confirmation of receipt.
+13.7 Counterparts; Electronic Signatures
+This Agreement may be executed in counterparts and by electronic signature, each of which shall be deemed an original.
+13.8 Severability
+If any provision of this Agreement is held invalid or unenforceable, the remaining provisions shall remain in effect to the fullest extent permitted by law.
 
-The Shares shall vest as follows: (a) twenty-five percent (25%) of the total Shares shall vest on the first anniversary of the Vesting Commencement Date (the "Cliff Date"); and (b) the remaining seventy-five percent (75%) of the total Shares shall vest in equal monthly installments over the thirty-six (36) months following the Cliff Date, such that all Shares are fully vested on the fourth anniversary of the Vesting Commencement Date. For purposes of this Agreement, "Vesting Commencement Date" means the date set forth on the signature page hereto.
+Schedule A - Cap Table Reference
+Exact share count of Equity Grant: [NUMBER]
+Dr. Robin Kim (CMO): 25% (Fully Diluted)
+Fahad Kiani (CEO/CTO): 51% (Fully Diluted)
+Dr. Rahima Nayeem: 5% (Fully Diluted)
+Investors / Early Pool: 19% (Fully Diluted)
+Schedule B - Milestones
+All shared missions and milestones are subject to the Mutual Dependency clause. If a milestone is missed due to Company technical delays or lack of resources, it is deemed achieved for vesting purposes.
+Milestone ID
+Deliverable
+Acceptance Criteria
+Target Date
+Vesting Tranche
+Cure Period
+[M-01]
+Clinical Governance Framework
+Submission of written protocol
+[Date]
+[Shares]
+30 Days
 
-3. ACCELERATION UPON CHANGE OF CONTROL
+Schedule C - Pre-Existing IP
+[List pre-existing intellectual property excluded from assignment here.]
+Schedule C-1 - Outside Roles and Interests
+Co-Founder Disclosures: private businesses, assets, brands and endeavors not related to CrisPRO.ai or its subsidiaries; Clinical/Surgical Affiliations; Academic Research Appointments.
+Signature Page
+CRISPRO.ai, Inc.
+By: __________________________
+Name: Fahad Kiani
+Title: Founder and Chief Executive Officer
+CO-FOUNDER
+By: __________________________
+Name: Dr. Robin Kim, MD
+Title: Co-Founder; Chief Medical Officer
 
-Upon a Change of Control (as defined in the Company's certificate of incorporation), all unvested Shares shall immediately vest and become exercisable. For purposes of this provision, "Change of Control" means: (a) the acquisition by any person or group of more than fifty percent (50%) of the outstanding voting securities of the Company; (b) the consummation of a merger or consolidation in which the Company is not the surviving entity; or (c) the sale of all or substantially all of the Company's assets.
 
-4. COMPANY REPURCHASE RIGHT
 
-If the Purchaser's employment with the Company terminates for any reason prior to the full vesting of the Shares, the Company shall have the right to repurchase all unvested Shares at the original Purchase Price. The Company's repurchase right shall expire ninety (90) days after the date of termination. The Company may assign its repurchase right to any successor entity.
 
-5. SECTION 83(b) ELECTION
 
-The Purchaser acknowledges that, under Section 83(b) of the Internal Revenue Code, the Purchaser may elect to include in gross income, as of the date of transfer, the excess (if any) of the fair market value of the Shares over the Purchase Price. The Purchaser understands that such election must be filed with the Internal Revenue Service within thirty (30) days of the date of transfer and that the election is irrevocable. THE PURCHASER IS STRONGLY URGED TO CONSULT WITH A TAX ADVISOR REGARDING THE SECTION 83(b) ELECTION. The Company shall provide the Purchaser with a form 83(b) election as Exhibit A hereto.
 
-6. RESTRICTIVE COVENANTS
 
-(a) Non-Competition. During the period of the Purchaser's employment with the Company and for a period of twelve (12) months following termination of employment for any reason, the Purchaser shall not, directly or indirectly, engage in any business that competes with the Company within the United States. This restriction shall not apply if the Purchaser is employed in the State of California, to the extent prohibited by California Business and Professions Code Section 16600.
 
-(b) Non-Solicitation. For a period of eighteen (18) months following termination of employment, the Purchaser shall not solicit any employee of the Company to leave the employ of the Company, or solicit any customer or vendor of the Company with whom the Purchaser had material contact during the last twelve months of employment.
 
-(c) Intellectual Property Assignment. The Purchaser hereby assigns to the Company all right, title, and interest in any inventions, improvements, or discoveries that the Purchaser makes, conceives, or reduces to practice during the period of employment that relate to the business of the Company or result from work performed for the Company. The Purchaser has listed on Schedule A all prior inventions that the Purchaser wishes to exclude from this assignment.
 
-7. INDEMNIFICATION
 
-The Company shall indemnify and hold harmless the Purchaser, in the Purchaser's capacity as a stockholder and officer, against all expenses, judgments, fines, and amounts paid in settlement actually and reasonably incurred in connection with any threatened, pending, or completed action, suit, or proceeding, to the fullest extent permitted by the Delaware General Corporation Law. The Company shall advance expenses incurred by the Purchaser in defending any such proceeding within thirty (30) days of receipt of a written request, provided that the Purchaser executes an undertaking to repay such advances if it is ultimately determined that the Purchaser is not entitled to indemnification.
 
-8. GOVERNING LAW
 
-This Agreement shall be governed by and construed in accordance with the laws of the State of Delaware, without regard to its conflict of laws principles. Each party hereby irrevocably submits to the exclusive jurisdiction of the Court of Chancery of the State of Delaware.
 
-9. QSBS REPRESENTATIONS
 
-The Company represents that it is a qualified small business within the meaning of Section 1202 of the Internal Revenue Code, with aggregate gross assets not exceeding $75,000,000 (as adjusted for inflation). The Shares are being issued at original issue and are intended to qualify as qualified small business stock under Section 1202. The Company shall use commercially reasonable efforts to maintain its status as a qualified small business for the holding period applicable to the Purchaser's Shares.
 
-10. 409A COMPLIANCE
 
-This Agreement is intended to comply with, or be exempt from, the requirements of Section 409A of the Internal Revenue Code and shall be interpreted accordingly. The Purchase Price per share has been established at not less than the fair market value of the Common Stock on the date of grant, as determined by an independent 409A valuation. Any payments upon separation from service shall be made in accordance with the six-month delay rule applicable to specified employees of publicly traded companies.
 
-IN WITNESS WHEREOF, the parties have executed this Agreement as of the date first written above.
 
-CRISPRO THERAPEUTICS INC.
-By: _________________________
-Name: Jordan Chen
-Title: CEO
 
-PURCHASER:
-_________________________
-Name: [Purchaser Name]
-Vesting Commencement Date: January 15, 2025
-Shares: 4,000,000
+
+Dr Kim version 5/24/26
+CrisPRO.ai Co-Founder Services and Restricted Stock Agreement
+Version 3.1 (Negotiated Draft)
+Effective Date: [EFFECTIVE DATE]
+Confidential Draft
+This Co-Founder Services and Restricted Stock Agreement (this "Agreement") is entered into as of [EFFECTIVE DATE] (the "Effective Date") by and between:
+CrisPRO.ai, Inc., a Delaware corporation, with its principal place of business at [ADDRESS] (the "Company"); and
+Robin Kim, MD, an individual residing at [ADDRESS] (the "Co-Founder").
+The Company and Co-Founder are referred to individually as a "Party" and collectively as the "Parties."
+1. Purpose
+The Company is developing a mechanism-aware oncology platform for clinical trial matching, patient stratification, and related clinical intelligence products (the "Platform"). The Company ecosystem includes product lines such as VetOnco, Longivity, and DeepCrispr.ai (collectively, the "Company Products"). The Company desires to engage Co-Founder as a strategic full-time clinical co-founder and Chief Medical Officer (CMO), and Co-Founder desires to provide such services, subject to the terms of this Agreement.
+This Agreement is intended to create a win-win structure: Co-Founder may continue permitted medical, academic, financial, and advisory activities, while the Company receives strong protection for its intellectual property, confidential information, relationships, and core commercial field.
+2. Definitions
+2.1 Cause
+"Cause" means any of the following: 
+(i) A material breach of this Agreement or any other written agreement with the Company that remains uncured for 30 days after written notice.
+(ii) Fraud, embezzlement, willful misconduct, or gross negligence that causes material harm to the Company.
+(iii) Conviction of, or plea of guilty or nolo contendere to, a felony or a crime involving dishonesty.
+(iv) Unauthorized use or disclosure of the Company's Confidential Information or Trade Secrets.
+(v) Material violation of the Company's written policies applicable to Co-Founder and provided in writing.
+ "Cause" specifically excludes any failure to meet Milestone-linked vesting criteria under Schedule B.
+
+2.2 Change of Control
+(i) A merger, consolidation, or reorganization in which the Company's stockholders immediately before the transaction hold less than 50% of the voting power of the surviving entity immediately after the transaction
+(ii) A sale of all or substantially all of the Company's assets.
+(iii) A transaction or related series of transactions in which a person or group acquires more than 50% of the Company's outstanding voting securities.
+
+2.3 Confidential Information
+"Confidential Information" means all non-public information of the Company, whether oral, written, visual, or electronic, including:
+(i) algorithms, formulas, scoring methods, software, source code, product roadmaps, datasets, model logic, training or validation methods, and technical documentation;
+(ii) business plans, pricing, fundraising materials, investor information, customer and partner information, pipeline data, and strategic plans; and
+(iii) any information that is designated confidential or that reasonably should be understood to be confidential given its nature and the circumstances of disclosure.
+Confidential Information does not include information that Co-Founder can prove:
+(iv) became public through no breach of this Agreement;
+(v) was lawfully known by Co-Founder before disclosure by the Company;
+(vi) was lawfully received from a third party without breach of any obligation; or
+(vii) was independently developed
+
+2.4 Good Reason
+"Good Reason" means, without Co-Founder's prior written consent:
+(i) a material reduction in Co-Founder's title, authority, responsibilities, or clinical oversight;
+(ii) a material breach of this Agreement by the Company that remains uncured for 30 days after written notice
+(iii) a Company directive requiring unlawful conduct or conduct that violates applicable professional ethics rules.
+
+2.5 Mutual Dependency
+"Mutual Dependency" means a condition where a Milestone is delayed or impaired due to a lack of Company-provided technical resources, data access, API availability, or engineering support. In such events, the Milestone shall be deemed "Satisfied" for the purpose of vesting tranches.
+
+2.6 Reserved Company Field
+"Reserved Company Field" means products or services that, during the last 12 months of Co-Founder's service, the Company was actively developing or commercializing and that involve both:
+(i) scoring patient-trial or patient-therapy fit using molecular, mechanistic, or biomarker alignment; and
+(ii) use of functional genomics, dependency, or analogous cancer-biology datasets for oncology patient
+
+2.7 Work Product
+"Work Product" means all works of authorship, inventions, improvements, analyses, models, algorithms, documents, software, data compilations, processes, protocols, presentations, and other materials created, conceived, developed, or reduced to practice by Co-Founder, alone or with others, in connection with services performed for the Company.
+2.8 Trade Secrets
+"Trade Secrets" means information constituting a trade secret under applicable law, including the Defend Trade Secrets Act and Delaware law, including algorithms, formulas, source code, models, datasets, validation methods, business strategies, and non-public clinical-commercial methods.
+
+3. Status, Role, and Services
+3.1 Co-Founder Status
+The Company recognizes Co-Founder as a strategic clinical co-founder.
+
+3.2 Title
+Co-Founder shall serve as Chief Medical Officer ("CMO").
+
+3.3 Full Time Employee
+Co-Founder provides services as a full time employee.. Co-Founder is solely responsible for all taxes and insurance.
+
+3.4 Services and Commitment
+Co-Founder shall provide services on a full-time basis.Co-Founder shall use commercially reasonable efforts to perform the following services: 
+(i) clinical strategy and governance;
+(ii) medical and scientific input on the Platform
+(iii) support for clinical partnerships, advisory positioning, and scientific credibility
+(iv) review of clinical framing, patient stratification logic, and translational positioning
+(v)  other mutually agreed services within Co-Founder's expertise.
+
+3.5 Decision Authority
+Co-Founder may provide clinical and scientific guidance and may participate in approved discussions with clinical, academic, or strategic counterparties. Co-Founder may not, without prior written approval from the Chief Executive Officer:
+(i) bind the Company contractually;
+(ii) make public statements on behalf of the Company;
+(iii) hire or terminate personnel; or
+(iv) commit Company funds.
+
+4. Outside Activities; Win-Win Structure
+4.1 Permitted Activities
+The Company acknowledges that Co-Founder may continue to engage in the following activities, provided they do not violate this Agreement:
+(i) clinical practice, including surgery and medicine;
+(ii) academic research, teaching, publication, peer review, and conference participation;
+(iii) hospital, health system, and academic medical center advisory roles;
+(iv) pharmaceutical or biotechnology advisory work on clinical development, medical affairs, patient care, or trial design; and
+(v) service on medical, scientific, or guideline committees.
+(vi) pre-existing financial and professional endeavors,  those disclosed on Schedule C-1.
+
+4.2 Personal Branding
+Co-Founder retains the right to build a personal professional brand on LinkedIn. Co-Founder may identify as "Co-Founder & CMO of CrisPRO.ai" to promote Company visibility while maintaining an individual professional voice and thought leadership.
+4.3 Disclosure of Outside Roles
+Co-Founder shall disclose in writing all current outside roles listed on Schedule C-1 and shall promptly disclose any new outside employment, advisory, consulting, board, or equity role that could reasonably overlap with oncology AI, trial matching, precision medicine software, clinical decision support, or the Reserved Company Field.
+The Company shall review any newly disclosed role within 10 business days and shall not unreasonably withhold approval unless the role presents a material conflict of interest or material risk to the Company's Confidential Information, Trade Secrets, business relationships, or Reserved Company Field.
+4.4 Company Support for Co-Founder
+Subject to budget, timing, and business priorities, the Company may support Co-Founder in mutually beneficial professional activities, including:
+(i) coordinated conference positioning and speaking opportunities;
+(ii) approved use of Company-generated materials in support of Co-Founder's thought leadership;
+(iii) co-authorship or scientific visibility on approved projects where authorship is appropriate; and
+(iv) strategic use of Co-Founder's name, biography, and credentials in fundraising, partnership, scientific, and commercial materials.
+Nothing in this Section obligates the Company to fund any activity unless expressly approved in writing.
+4.5 Publicity Rights
+Co-Founder grants the Company the right to use Co-Founder's name, likeness, biography, and professional credentials in fundraising materials, investor materials, grant applications, website materials, partner materials, and press or media materials, subject to reasonable prior review by Co-Founder for accuracy where Co-Founder is prominently featured.
+5. Equity Grant and Compliance
+5.1 Grant
+Subject to Board approval, the Company shall issue shares representing 25% of the Company's fully diluted capitalization (calculated including the 19% investor/early-team pool and the employee option pool) as set forth on Schedule A. The binding figure shall be the share number of [_____] of the total current existing share number of [______].  Ownership applies to the parent entity and all present and future subsidiaries (VetOnco, Longivity, DeepCrispr.ai).
+
+5.2 Vesting Schedule
+(i) Initial Vesting: 5% of the Equity Grant shall vest on the Effective Date of ratifying the agreement. 
+(ii) Cliff: No additional shares vest until the 12-month anniversary.
+(iii) Monthly Vesting: Thereafter, remaining shares vest in equal monthly installments over 36 months.
+
+5.3 Milestones
+Milestone-linked Vesting: Tranches under Schedule B are subject to the Mutual Dependency clause.If milestone-linked vesting applies, Schedule B shall state for each milestone:
+
+
+● Go-to-market opportunities 
+
+ The Company shall evaluate claimed completion in good faith within 15 business days after written notice from Co-Founder. If a milestone is not achieved, the Company shall specify the deficiency in writing, and Co-Founder shall have the applicable cure period stated in Schedule B. Any affected vesting tranche shall pause until the milestone is satisfied and shall not permanently forfeit unless Co-Founder's service terminates before satisfaction.
+
+5.4 Repurchase Right
+All unvested shares shall be subject to the Company's repurchase right at the original purchase price, as set forth in the Restricted Stock Purchase Agreement. The Company shall have no repurchase right as to vested shares except as provided in separate stockholder agreements or applicable law.
+
+5.5 Acceleration
+(i) Change of Control, single trigger: 25% of then-unvested shares shall accelerate upon a Change of Control.
+(ii) Change of Control, double trigger: If, within 12 months after a Change of Control, Co-Founder's service is terminated by the Company without Cause or by Co-Founder for Good Reason, 100% of then-unvested shares shall accelerate.
+(iii) Termination without Cause outside a Change of Control: six months of additional vesting shall accelerate.
+5.6 Tax & Administrative Compliance
+The Restricted Stock Purchase Agreement (RSPA) shall be executed concurrently with this contract. The Board Consent authorizing this grant shall be issued and signed alongside this Agreement. Co-Founder shall file a Section 83(b) election via certified mail within 30 days of the grant.
+
+6. Liability Shield and Insurance
+6.1 RUO Status
+All Platform and Company Product outputs are for Research Use Only (RUO) during this phase.
+
+6.2 Indemnification
+The Company shall maintain Directors & Officers (D&O) Insurance.
+
+6.3 Professional Liability
+The Company shall maintain a policy covering "AI-assisted clinical decision support."
+
+6.4 Clinical Disclaimer
+All external predictions must clarify that AI provides clinical decision support, not diagnosis.
+
+7. Intellectual Property & Transparency
+7.1 Present Assignment
+Co-Founder hereby irrevocably assigns to the Company, effective immediately upon creation, all right, title, and interest in and to all Work Product, including all related intellectual property rights worldwide. This is a present assignment and is intended to be self-executing. This assignment explicitly extends to all Company Products, including VetOnco, Long8vity, DeepCrispr.ai, and other subsidiaries.
+
+7.2 Disclosure of Work Product
+Co-Founder shall promptly disclose Work Product created in connection with Company services to ensure the clinical and technical integration of the Platform.
+
+7.3 Pre-Existing IP
+The assignment above does not apply to inventions, materials, or intellectual property specifically identified on Schedule C as pre-existing property of Co-Founder ("Pre-Existing IP"). 
+
+If Co-Founder later identifies omitted pre-existing intellectual property that Co-Founder believes predates the Effective Date and was incorporated into Work Product, Co-Founder shall promptly disclose it in writing, and the Parties shall in good faith determine whether such material is excluded Pre-Existing IP, licensed to the Company, or assigned to the Company based on the facts and timing.
+
+To the extent any Pre-Existing IP is incorporated into Work Product, Co-Founder grants the Company a perpetual, irrevocable, worldwide, royalty-free license to use, reproduce, modify, distribute, display, perform, and create derivative works from such incorporated Pre-Existing IP as part of the Work Product and the Company's business.
+
+7.4 Further Assurances
+Co-Founder shall execute any documents and take any reasonable actions necessary to perfect, confirm, or enforce the Company's rights in Work Product. This obligation survives termination.
+
+7.5 Transparency and Mutual Representation
+The Company represents and warrants that all co-founders (including Fahad Kiani and Dr. Rahima Nayeem) have executed substantially similar Intellectual Property assignments and vesting schedules. This ensures that the "IP Moat" and all mechanism-aware technology remain fully contained within the Company for the benefit of all stockholders.
+8. Confidentiality and Trade Secrets
+8.1 Confidentiality Obligations
+Co-Founder shall: 
+(i) hold Confidential Information and Trade Secrets in strict confidence;
+(ii) use them solely for the Company's benefit;
+(iii) not disclose them except as expressly permitted by this Agreement; and
+(iv) protect them using at least reasonable care. 
+
+8.2 Permitted Disclosures
+Co-Founder may disclose Confidential Information only:
+(i) to Company personnel or advisers with a need to know and adequate confidentiality obligations; 
+(ii) to Co-Founder's legal or tax advisers;
+(iii) as required by law, subpoena, or court order, with prompt notice where legally permitted; or 
+(iv) as permitted by applicable whistleblower laws or protected-disclosure laws.
+
+8.3 Return and Deletion
+Upon termination or upon written request, Co-Founder shall promptly return or destroy all Company materials containing Confidential Information and certify compliance in writing, except to the extent retention is required by law or automatic archival backup systems not reasonably accessible in the ordinary course.
+
+8.4 DTSA Notice
+Pursuant to 18 U.S.C. § 1833(b), Co-Founder is notified that an individual may not be held criminally or civilly liable under federal or state trade secret law for certain protected disclosures made in confidence to a government official or attorney for the purpose of reporting or investigating a suspected violation of law.
+
+9. Conflicts, Reserved Field Protection, and Non-Diversion
+9.1 No Misuse of Company Position or Information
+Co-Founder shall not use the Company's Confidential Information, Trade Secrets, Work Product, or business relationships for the benefit of any third party or for any purpose adverse to the Company.
+
+9.2 Reserved Field Restriction; Personal Branding
+During the term of this Agreement, Co-Founder shall not knowingly provide founder-level, executive-level, or product-strategy services to a third party in the Reserved Company Field. Notwithstanding the foregoing: The Company acknowledges Co-Founder's right to build and maintain a personal professional brand on LinkedIn. Co-Founder may identify as "Co-Founder & CMO of CrisPRO.ai" and share insights to build thought leadership, provided such activities do not disclose Trade Secrets.
+
+9.3 Corporate Opportunities; Non-Diversion
+If Co-Founder becomes aware of a business opportunity, partner opportunity, or strategic collaboration that falls within the Company's actual or contemplated business (including VetOnco, Longivity, or DeepCrispr.ai), Co-Founder shall first disclose the opportunity to the Company and shall not divert or exploit it personally without the Company's written consent.
+
+9.4 Non-Solicitation of Personnel
+During the term of this Agreement and for 12 months thereafter, Co-Founder shall not knowingly solicit for hire any employee or contractor of the Company with whom Co-Founder had material business contact during the final 12 months of service.
+
+9.5 Non-Solicitation of Counterparties
+During the term of this Agreement and for 12 months thereafter, Co-Founder shall not knowingly divert or solicit any customer, partner, investor, or grant counterparty of the Company for the purpose of providing a product or service competitive with the Company's then-current products or services.
+
+10. Compensation and Expenses 
+10.1 Cash Compensation
+Unless otherwise approved in writing, cash compensation shall be $0 during the Company's pre-revenue stage. The Parties may negotiate cash compensation in good faith upon institutional financing or other material business milestones.
+
+10.2 Expenses
+The Company shall reimburse Co-Founder for all reasonable, documented, and pre-approved business expenses incurred by Co-Founder in connection with the performance of services under this Agreement, in accordance with the Company's standard expense reimbursement policy.
+
+11. Representations
+11.1 Co-Founder Representations
+Co-Founder represents and warrants that:
+(i) Co-Founder has the full right, power, and authority to enter into this Agreement and to perform the services described herein;
+(ii) the performance of services will not violate any other agreement or obligation binding on Co-Founder;
+(iii) Co-Founder will not use or disclose any third-party confidential information or intellectual property in performing services for the Company;
+(iv) Co-Founder has disclosed all material outside roles and financial endeavors on Schedule C-1; and
+(v) Schedule C accurately identifies all known Pre-Existing IP to be excluded from the assignment to the Company.
+
+11.2 Company Representations
+The Company represents and warrants that it has the corporate power and authority to enter into this Agreement and to submit the Equity Grant for Board approval. The Company further represents that all other co-founders (including Fahad Kiani and Dr. Rahima Nayeem) have executed substantially similar Intellectual Property assignments and vesting schedules to ensure the IP Moat is fully contained within the Company.
+
+12. Termination
+12.1 Term
+This Agreement begins on the Effective Date and continues until terminated in accordance with this Section.
+
+12.2 Termination by Company
+The Company may terminate this Agreement immediately for Cause.
+
+12.3 Termination by Co-Founder
+Co-Founder may terminate this Agreement for Good Reason after compliance with the notice and cure procedure.
+
+12.4 Effect of Termination
+Upon termination, Co-Founder's authority to act for the Company immediately ceases. Unvested shares remain subject to the Company's repurchase rights as set forth in the RSPA. Co-Founder shall promptly return or destroy all Company materials containing Confidential Information in accordance with Section 7.3. Sections 6, 7, 8, 9, 13, and 14 shall survive termination.
+13. Remedies
+The Parties acknowledge that breach of Sections 6, 7, 8 or 9 may cause irreparable harm for which monetary damages may be inadequate. Accordingly, either Party may seek temporary, preliminary, or permanent equitable relief in a court of competent jurisdiction to protect confidential information, trade secrets, intellectual property, or business relationships, without waiving the right to arbitrate other claims. Carve-outs for equitable relief should be drafted narrowly to avoid arbitration conflicts, and this clause is intended to preserve arbitration
+14. General Provisions
+14.1 Governing Law
+This Agreement shall be governed by and construed in accordance with the laws of the State of Delaware, without regard to conflict-of-law rules.
+
+14.2 Dispute Resolution
+Except for requests for equitable relief under Section 13, any dispute arising out of or relating to this Agreement shall be resolved by binding arbitration administered by JAMS in Delaware before one arbitrator.
+
+14.3 Entire Agreement
+This Agreement, including all schedules, constitutes the entire agreement of the Parties and supersedes all prior discussions, drafts, or oral agreements regarding its subject matter.
+
+14.4 Amendment
+This Agreement may be amended only by a written instrument signed by both Parties.
+
+14.5 Assignment
+The Company may assign this Agreement in connection with a merger, acquisition, financing, or sale of substantially all assets. Co-Founder may not assign this Agreement without the Company's written consent.
+
+14.6 Notices
+All notices under this Agreement shall be in writing and delivered by personal delivery, overnight courier, certified mail, or email with confirmation of receipt.
+
+14.7 Counterparts; Electronic Signatures
+This Agreement may be executed in counterparts and by electronic signature, each of which shall be deemed an original.
+
+14.8 Severability
+If any provision of this Agreement is held invalid or unenforceable, the remaining provisions shall remain in effect to the fullest extent permitted by law.
+
+Schedule A - Cap Table Reference
+Exact share count of Equity Grant: [NUMBER]
+Dr. Robin Kim (CMO): 25% (Fully Diluted)
+Fahad Kiani (CEO/CTO): 51% (Fully Diluted)
+Dr. Rahima Nayeem: 5% (Fully Diluted)
+Investors / Early Pool: 19% (Fully Diluted)
+Schedule B - Milestones
+All shared missions and milestones are subject to the Mutual Dependency clause. If a milestone is missed due to Company technical delays or lack of resources, it is deemed achieved for vesting purposes.
+Milestone ID
+Deliverable
+Acceptance Criteria
+Target Date
+Vesting Tranche
+Cure Period
+[M-01]
+Clinical Governance Framework
+Submission of written protocol
+[Date]
+[Shares]
+30 Days
+
+Schedule C - Pre-Existing IP
+[List pre-existing intellectual property excluded from assignment here.]
+Schedule C-1 - Outside Roles and Interests
+Co-Founder Disclosures: private businesses, assets, brands and endeavors not related to CrisPRO.ai or its subsidiaries; Clinical/Surgical Affiliations; Academic Research Appointments.
+Signature Page
+CRISPRO.ai, Inc.
+By: __________________________
+Name: Fahad Kiani
+Title: Founder and Chief Executive Officer
+CO-FOUNDER
+By: __________________________
+Name: Dr. Robin Kim, MD
+Title: Co-Founder; Chief Medical Officer
+
+Drafting note: This draft is business-oriented and tightened for clarity, but it should be reviewed by Delaware startup counsel before execution, particularly as to securities issuance, restrictive covenants, tax treatment, and contractor classification. Delaware continues to scrutinize overbroad restrictive covenants, even while narrower, properly limited restraints and equity-supported agreements may be enforceable.

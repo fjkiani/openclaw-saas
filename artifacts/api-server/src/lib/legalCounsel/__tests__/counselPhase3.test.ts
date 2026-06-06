@@ -1,0 +1,130 @@
+/**
+ * Phase 3 counsel unit tests — version split, diff, digest, grounding.
+ */
+
+import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import { splitContractVersions } from "../splitVersions.js";
+import { diffContractVersions, buildVersionRedlines } from "../diffVersions.js";
+import { buildFullContractDigest, buildMultiRetrievalQueries } from "../buildDigest.js";
+import { chunkContractSections } from "../chunkContract.js";
+import { partitionAndValidateFindings } from "../grounding.js";
+import { runLegalCounselDiff } from "../pipeline.js";
+import { counselGovernanceBlock } from "../disclaimer.js";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const CRISPRO_FIXTURE = resolve(__dirname, "../../legalCorpus/__tests__/fixtures/crispro-v3.1.txt");
+
+describe("legalCounsel Phase 3 — splitVersions", () => {
+  it("splits CrisPRO fixture into two versions", () => {
+    const text = readFileSync(CRISPRO_FIXTURE, "utf-8");
+    const { versions, single } = splitContractVersions(text);
+    expect(single).toBe(false);
+    expect(versions.length).toBe(2);
+    expect(versions[0]!.text).toMatch(/Independent Contractor|Dr\. Robin Kim/i);
+    expect(versions[1]!.text).toMatch(/Full Time Employee|Robin Kim, MD/i);
+  });
+
+  it("returns single for one agreement", () => {
+    const one = "1. Purpose\nThis is a test agreement with enough text to pass validation.\n".repeat(20);
+    const { single, versions } = splitContractVersions(one);
+    expect(single).toBe(true);
+    expect(versions).toHaveLength(1);
+  });
+});
+
+describe("legalCounsel Phase 3 — diffVersions", () => {
+  it("flags contractor vs employee classification change", () => {
+    const text = readFileSync(CRISPRO_FIXTURE, "utf-8");
+    const { versions } = splitContractVersions(text);
+    const diffs = diffContractVersions(versions[0]!, versions[1]!);
+    expect(diffs.length).toBeGreaterThan(5);
+    const statusDiff = diffs.find((d) => /Status|Services|3/i.test(d.section_heading));
+    expect(statusDiff).toBeDefined();
+    const redlines = buildVersionRedlines(diffs);
+    expect(redlines.some((r) => /classification|employee|contractor/i.test(r.negotiation_note + r.change_summary))).toBe(true);
+  });
+
+  it("runLegalCounselDiff returns governance disclaimer", () => {
+    const text = readFileSync(CRISPRO_FIXTURE, "utf-8");
+    const { versions } = splitContractVersions(text);
+    const out = runLegalCounselDiff(versions[0]!.text, versions[1]!.text);
+    expect(out.governance.not_legal_advice).toBe(true);
+    expect(out.summary.critical).toBeGreaterThan(0);
+  });
+});
+
+describe("legalCounsel Phase 3 — full document digest", () => {
+  it("includes all sections within budget for CrisPRO v2", () => {
+    const text = readFileSync(CRISPRO_FIXTURE, "utf-8");
+    const { versions } = splitContractVersions(text);
+    const sections = chunkContractSections(versions[1]!.text);
+    const digest = buildFullContractDigest(sections);
+    expect(digest.sections_included).toBe(sections.length);
+    expect(digest.coverage_pct).toBe(1);
+    expect(digest.chars_sent).toBeGreaterThan(10_000);
+  });
+
+  it("buildMultiRetrievalQueries samples start/middle/end", () => {
+    const text = readFileSync(CRISPRO_FIXTURE, "utf-8");
+    const sections = chunkContractSections(text);
+    const queries = buildMultiRetrievalQueries(sections, "CrisPRO cofounder", 500, text);
+    expect(queries.length).toBeGreaterThanOrEqual(3);
+    expect(queries[0]).toContain("CrisPRO");
+  });
+});
+
+describe("legalCounsel Phase 3 — grounding", () => {
+  it("drops invalid chunk_id and keeps valid slug match", () => {
+    const partitioned = partitionAndValidateFindings(
+      {
+        findings_grounded: [
+          {
+            lens: "tax",
+            severity: "high",
+            issue: "83b window",
+            chunk_id: 999999,
+            slug: "irc-83b",
+            recommendation: "File within 30 days",
+          },
+          {
+            lens: "tax",
+            severity: "high",
+            issue: "valid hit",
+            chunk_id: 42,
+            slug: "irc-83b",
+            recommendation: "File on time",
+          },
+        ],
+        findings_inferred: [],
+        lens_findings: [],
+      },
+      [
+        {
+          chunk_id: 42,
+          document_id: 1,
+          slug: "irc-83b",
+          title: "IRC 83b",
+          citation: "IRC §83(b)",
+          domain: "cofounder",
+          priority: "critical",
+          rank: 0.9,
+          content: "Section 83(b) election must be filed within 30 days of grant.",
+        },
+      ],
+    );
+    expect(partitioned.findings_grounded).toHaveLength(1);
+    expect(partitioned.findings_grounded[0]!.chunk_id).toBe(42);
+    expect(partitioned.findings_inferred.some((i) => i.reason.includes("not in retrieval"))).toBe(true);
+  });
+});
+
+describe("legalCounsel Phase 3 — governance", () => {
+  it("includes not_legal_advice disclaimer", () => {
+    const g = counselGovernanceBlock();
+    expect(g.not_legal_advice).toBe(true);
+    expect(g.disclaimer.toLowerCase()).toContain("not legal advice");
+  });
+});
