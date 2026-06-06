@@ -15,6 +15,7 @@ export interface ContractSignals {
   has_ip_moat_rep: boolean;
   has_without_cause_termination: boolean;
   has_cause_only_company_termination: boolean;
+  has_termination_for_cause: boolean;
 }
 
 export function detectContractSignals(text: string): ContractSignals {
@@ -38,6 +39,7 @@ export function detectContractSignals(text: string): ContractSignals {
     has_cause_only_company_termination:
       /termination by company[\s\S]{0,200}immediately for cause/i.test(text) &&
       !/without cause/i.test(text.split(/termination by company/i)[1]?.slice(0, 300) ?? ""),
+    has_termination_for_cause: /for cause|termination by company/i.test(text),
   };
 }
 

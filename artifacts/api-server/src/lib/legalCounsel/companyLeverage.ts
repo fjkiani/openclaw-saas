@@ -200,5 +200,51 @@ export function enrichGroundedStatuteFindings(
     }
   }
 
+  if (signals.has_schedule_c_blank || signals.has_ip_moat_rep) {
+    const hit = hitBySlug("cuad-ip-assignment-prior-inventions") ?? hitBySlug("cuad-ip-assignment-scoped");
+    if (hit && !hasSlug(hit.slug)) {
+      out.push({
+        lens: "ip_assignment",
+        severity: "critical",
+        issue: "Pre-existing IP must be listed on Schedule C — blank schedule risks over-broad assignment or missing carve-outs.",
+        chunk_id: hit.chunk_id,
+        slug: hit.slug,
+        corpus_excerpt: hit.content.slice(0, 400).replace(/\s+/g, " ").trim(),
+        contract_excerpt: "Schedule C - Pre-Existing IP [List pre-existing intellectual property excluded from assignment here.]",
+        recommendation: "Complete Schedule C before signing; use scoped assignment language and license-back for incorporated pre-existing IP.",
+      });
+    }
+  }
+
+  if (signals.has_acceleration) {
+    const hit = hitBySlug("cuad-coc-acceleration");
+    if (hit && !hasSlug(hit.slug)) {
+      out.push({
+        lens: "equity",
+        severity: "high",
+        issue: "Change-of-control acceleration terms should be double-trigger and capped to limit dilution on exit.",
+        chunk_id: hit.chunk_id,
+        slug: hit.slug,
+        corpus_excerpt: hit.content.slice(0, 400).replace(/\s+/g, " ").trim(),
+        recommendation: "Negotiate double-trigger only; model single-trigger and without-Cause acceleration cost on cap table.",
+      });
+    }
+  }
+
+  if (signals.has_termination_for_cause) {
+    const hit = hitBySlug("cuad-termination-for-cause");
+    if (hit && !hasSlug(hit.slug)) {
+      out.push({
+        lens: "termination",
+        severity: "medium",
+        issue: "Cause-based termination definitions and cure periods should be objective and company-protective.",
+        chunk_id: hit.chunk_id,
+        slug: hit.slug,
+        corpus_excerpt: hit.content.slice(0, 400).replace(/\s+/g, " ").trim(),
+        recommendation: "Preserve narrow Cause definition with cure for curable breaches; avoid without-Cause company termination.",
+      });
+    }
+  }
+
   return out;
 }
