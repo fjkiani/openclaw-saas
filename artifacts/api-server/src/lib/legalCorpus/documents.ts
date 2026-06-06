@@ -163,6 +163,44 @@ When multiple products/subsidiaries exist, equity percentage must specify which 
 
 Red flags: Single percentage across unnamed entities; no participation rights on future rounds; spinout language absent.`,
   },
+  {
+    slug: "cofounder-schedule-c-prior-ip",
+    title: "Schedule C — Prior Inventions & IP Carve-Out (Empty Schedule Risk)",
+    citation: "NVCA / startup RSPA practice",
+    domain: "cofounder",
+    tags: ["schedule c", "prior inventions", "ip assignment", "carve-out", "blank schedule"],
+    priority: "critical",
+    content: `SCHEDULE C — PRIOR INVENTIONS AND IP CARVE-OUT
+
+When an agreement contains broad IP assignment (all inventions related to the business) AND Schedule C (Prior Inventions) is empty or marked "None", the counterparty may have inadvertently assigned pre-existing IP, clinical datasets, or product-specific know-how.
+
+Company counsel checklist:
+1. Require exhaustive Schedule C listing all prior inventions, publications, clinical trial data, and side-project domains before signing.
+2. If Schedule C is blank while IP assignment is present, treat as CRITICAL — blocking until amended.
+3. Carve-out language must survive assignment clause: "Except as listed on Schedule C, Company claims no right to..."
+4. For CMO/clinical co-founders: list VetOnco, prior employer inventions, and any FDA-regulated artifacts explicitly.
+
+Redline pattern: "Schedule C is intentionally incomplete. Co-Founder shall deliver a complete Schedule C within 10 business days; IP assignment is suspended as to listed items until Board acceptance."`,
+  },
+  {
+    slug: "cofounder-mutual-dependency",
+    title: "Mutual Dependency / Symbiotic Business Clauses",
+    citation: "Delaware enforceability — restraint of trade",
+    domain: "cofounder",
+    tags: ["mutual dependency", "symbiotic", "non-compete", "enforceability", "16600"],
+    priority: "normal",
+    content: `MUTUAL DEPENDENCY AND SYMBIOTIC BUSINESS CLAUSES
+
+"Mutual Dependency" clauses tie each party's equity or role to the other's continued participation in named products or entities. These create enforceability and tax characterization risks.
+
+Enforceability (Lens 1): Over-broad dependency may function as a de facto non-compete or forfeiture trigger. In California-adjacent hires or multi-state operations, cross-check CA Bus. & Prof. Code §16600 escalation rules in governance engine.
+
+Company exposure (Lens 4): Dependency clauses can trap the Company if a co-founder departs — product roadmap stalls, equity forfeiture disputes, or forced buyback at unclear price.
+
+Tax (Lens 2): Forfeiture on dependency breach may recharacterize equity as compensatory; verify 83(b) and QSBS holding period impact.
+
+Counsel action: Narrow dependency to objective milestones; add Company termination-for-convenience without equity clawback beyond standard vesting; define "Dependency Event" with cure period.`,
+  },
 ];
 
 export const LEGAL_CORPUS_VERSION = "legal-corpus-pg-v1";

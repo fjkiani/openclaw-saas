@@ -4,6 +4,7 @@ import { pool } from "@workspace/db";
 import { runSeed } from "./seed";
 import { startForgeScheduler, stopForgeScheduler } from "./lib/forgeScheduler";
 import { migrateLegalCorpus } from "./lib/legalCorpus/migrate.js";
+import { backfillLegalCorpusEmbeddings } from "./lib/legalCorpus/backfillEmbeddings.js";
 
 const rawPort = process.env["PORT"];
 
@@ -240,8 +241,11 @@ async function runZieMigration(): Promise<void> {
   `);
 
   await migrateLegalCorpus();
+  setImmediate(() => {
+    void backfillLegalCorpusEmbeddings();
+  });
 
-    logger.info("ZIE migration complete.");
+  logger.info("ZIE migration complete.");
   } catch (err) {
     logger.error({ err }, "ZIE migration failed — ZIE tables may be missing");
     throw err;

@@ -44,7 +44,7 @@ import {
 } from "../lib/governanceEngine.js";
 import { runPlaybook } from "../lib/legalPlaybook.js";
 import { type CofounderClauseType } from "../lib/cofounderCorpus.js";
-import { legalCorpusRetrieve } from "../lib/legalCorpus/retrieve.js";
+import { legalCorpusHybridRetrieve } from "../lib/legalCorpus/hybridRetrieve.js";
 import {
   signReceipt,
   verifyReceiptToken,
@@ -204,7 +204,7 @@ function generateUsageEventId(): string {
 
 // ── Postgres legal corpus retrieval (replaces keywordRetrieve slop) ─────────
 async function retrieveContractContext(text: string, maxChars = 4000): Promise<string> {
-  const rag = await legalCorpusRetrieve({
+  const rag = await legalCorpusHybridRetrieve({
     query: text,
     domains: ["contract", "delaware"],
     topK: 5,
@@ -523,7 +523,7 @@ async function contractAnalyze(text: string): Promise<{
   rag_sources: string[];
   rag_corpus_version: string;
 }> {
-  const rag = await legalCorpusRetrieve({
+  const rag = await legalCorpusHybridRetrieve({
     query: text,
     domains: ["contract", "delaware", "tax"],
     topK: 8,
@@ -776,7 +776,7 @@ async function cofounderAnalyze(text: string): Promise<{
   fallback_used: boolean;
   latency_ms: number;
 }> {
-  const rag = await legalCorpusRetrieve({
+  const rag = await legalCorpusHybridRetrieve({
     query: text,
     domains: ["cofounder", "tax", "delaware", "regulatory", "contract"],
     topK: 10,

@@ -38,6 +38,11 @@ export async function migrateLegalCorpus(): Promise<void> {
         ON legal_corpus_chunks USING gin(tsv)
     `);
 
+    await client.query(`
+      ALTER TABLE legal_corpus_chunks
+        ADD COLUMN IF NOT EXISTS embedding real[]
+    `);
+
     for (const doc of LEGAL_CORPUS_SEED) {
       const upsert = await client.query<{ id: number }>(
         `INSERT INTO legal_corpus_documents
