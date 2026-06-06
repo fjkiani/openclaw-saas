@@ -28,20 +28,18 @@ alwaysApply: false
 
 Track every claim against live proof. Update status after deploy + curl/SQL.
 
-| Claim | Was | Now (code @ unreleased) | Proof after deploy |
-|-------|-----|-------------------------|-------------------|
-| `vault_written` proves DB write | ❌ hardcoded | ✅ `pair_id` + `vault.*` from `persistDraftVault()` | Response includes `vault.pair_id` UUID |
-| 13 curls without `mode:generate` | ❌ 400 | ✅ `normalizeDraftBody()` infers generate | curl with `clause_type`+`instructions` only |
-| Analyze → `/matter` | ❌ KEY_2 required | ✅ `resolveApiKey()` KEY_2→KEY_1 fallback | POST `/matter` returns clauses |
-| Judge overnight | ❌ manual only | ✅ `scheduleAutoJudge()` on vault write (`AUTO_JUDGE_VAULT=false` to disable) | `judge_verified=true` without manual POST |
-| Modal at 50 verified | ❌ no `training_jobs` | ✅ `training_jobs` in `runZieMigration()` | SQL + hourly scheduler |
-| End-to-end chain | ⚠️ partial | ⚠️ draft→vault→judge automated; analyze+Modal still env-dependent | flywheel `verified_pairs` increases |
-| Agent B / 5-agent pipeline | ❌ external | ❌ not in scope this pass | — |
+| Claim | Was | Now (k30t @ fc1c886) | Proof |
+|-------|-----|----------------------|-------|
+| `vault_written` proves DB write | ❌ hardcoded | ✅ LIVE | `pair_id` UUID in response |
+| 13 curls without `mode:generate` | ❌ 400 | ✅ LIVE | 200 + contract text |
+| Analyze → `/matter` | ❌ KEY_2 / timeout | ✅ LIVE | `matter_id` + `cofounder` routing |
+| Judge overnight | ❌ manual only | ✅ LIVE | `legal_agreement_generate` verified 0→3 without manual POST |
+| Modal at 50 verified | ❌ no `training_jobs` | ⚠️ PARTIAL | table migrates on boot; 3/50 verified, Modal tokens still needed |
+| End-to-end chain | ⚠️ partial | ⚠️ PARTIAL | draft→vault→auto-judge live; Modal train still ops |
+| Agent B / 5-agent pipeline | ❌ external | ❌ not in scope | — |
 | KB / QSBS RAG | ❌ | ❌ needs ingestion decision | — |
-| NONSENSE_TYPE clause_type | ❌ 400 (no mode) | ✅ any string + inferred generate | 200 + contract text |
-| Canonical deploy (k30t vs Railway) | ❓ | ❓ **Decision:** k30t for legal flywheel | one DB, one API |
-
-**Live today (pre-deploy):** k30t still 400 on 13-curl shape and KEY_2 on `/matter` — push + Render redeploy required.
+| NONSENSE_TYPE clause_type | ❌ 400 | ✅ LIVE | 200 + 6k chars contract text |
+| Canonical deploy (k30t vs Railway) | ❓ | ✅ k30t | flywheel + draft + matter on one API |
 
 **Post-deploy verification (run in order):**
 
