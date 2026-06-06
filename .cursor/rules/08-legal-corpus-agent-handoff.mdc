@@ -1,0 +1,446 @@
+---
+description: HANDOFF for Agent 2 — legal corpus ingestion. Read FIRST. Defines exactly what to build vs forbidden work (no FastAPI fork, no repo clones).
+globs: ["**/legalCorpus/**", "scripts/ingest-legal-corpus/**", "artifacts/api-server/corpus/**"]
+alwaysApply: false
+---
+
+# Agent 2 Handoff — Legal Corpus (read before any code)
+
+> **If you are Agent 2:** Your job is **data + ingest script only**. You are **not** allowed to say "Implementation Complete" until **§ Verification checklist** passes with pasted command output. Describing files that are not in git = sandbagging.
+
+**You are NOT building a new product.** You are **filling OpenClaw’s existing Postgres legal KB** and **ingest tooling** inside `openclaw-saas`. The counsel API already exists on Render k30t.
+
+**Master plan + gates:** `08-legal-corpus-plan.mdc` (G1–G8 must pass before anyone marks corpus LIVE).
+
+**Canonical deploy:** `https://openclaw-api-k30t.onrender.com`  
+**Stack:** Node.js / Express (`artifacts/api-server`), Postgres, OpenRouter embeddings — **not Python/FastAPI**.
+
+---
+
+## START HERE — your job in 3 bullets
+
+1. **Put real legal text files in the repo** under `artifacts/api-server/corpus/sources/` and list them in `legal-corpus-manifest.json`.
+2. **Write a TypeScript CLI** at `scripts/ingest-legal-corpus/` that loads those files → chunks → embeds → writes to Postgres table `legal_corpus_documents` / `legal_corpus_chunks`.
+3. **Run the CLI** against Render DB so k30t shows **≥200 chunks**, then paste verification output in chat.
+
+**You are NOT:** starting FastAPI, cloning GitHub legal RAG repos, building a second counsel API, or adding Pinecone.
+
+---
+
+## Verification checklist (MANDATORY before "done")
+
+Agent 2 must run these and **paste actual output** in chat. If any check fails, status is **NOT COMPLETE**.
+
+### Check 1 — Files exist in git (not just described)
+
+```bash
+cd openclaw-saas
+test -f artifacts/api-server/corpus/legal-corpus-manifest.json && echo "manifest OK" || echo "FAIL: no manifest"
+find artifacts/api-server/corpus/sources -type f | wc -l    # expect >= 50
+test -f scripts/ingest-legal-corpus/src/main.ts && echo "CLI OK" || echo "FAIL: no CLI"
+test -f artifacts/api-server/src/lib/legalCorpus/ingestBatch.ts && echo "ingestBatch OK" || echo "FAIL"
+test -f artifacts/api-server/src/lib/legalCorpus/rrfMerge.ts && echo "rrfMerge OK" || echo "FAIL"
+git log -1 --oneline   # must show YOUR commit, not only plan docs
+```
+
+**Fail example:** Agent claims "59 manifest entries" but `find corpus/sources | wc -l` is 0 → **FICTION**.
+
+### Check 2 — k30t corpus grew (not local-only)
+
+```bash
+curl -s https://openclaw-api-k30t.onrender.com/api/v1/legal/kb/status
+```
+
+| Field | Required after ingest | Current baseline (2026-06-06) |
+|-------|----------------------|----------------------------------|
+| `documents` | **≥ 40** | 12 |
+| `chunks` | **≥ 200** | 12 |
+| `by_source.statute` | **≥ 3** | not in API yet — add in D3 |
+| `by_source.cuad` | **≥ 50** | not in API yet |
+
+If k30t still shows `documents: 12, chunks: 12` → **ingest never ran on prod DB**.
+
+### Check 3 — Statute text is primary source (not summary-only)
+
+```bash
+curl -s -X POST https://openclaw-api-k30t.onrender.com/api/v1/legal/kb/search \
+  -H "Content-Type: application/json" \
+  -d '{"query":"DGCL section 144 restricted securities safe harbor","limit":3}' \
+  | jq '.hits[].slug, .hits[].excerpt[:120]'
+```
+
+Must return a slug like `dgcl-144-statute` with **statutory prose**, not a 3-paragraph playbook summary.
+
+### Check 4 — Tests exist and pass
+
+```bash
+cd artifacts/api-server && pnpm test legalCorpus
+```
+
+No test file = not done.
+
+### Check 5 — Idempotent re-ingest
+
+Run ingest twice; second run must report **0 new chunks** (same `source_hash`).
+
+---
+
+## What "complete" looks like vs what Agent 2 may falsely claim
+
+| Agent 2 claim | How to verify | If missing |
+|---------------|---------------|------------|
+| "59 manifest entries" | `jq length artifacts/api-server/corpus/legal-corpus-manifest.json` | Claim is fiction |
+| "6 statute files" | `ls artifacts/api-server/corpus/sources/statutes/` | Claim is fiction |
+| "49 CUAD clauses" | `ls artifacts/api-server/corpus/sources/cuad/ \| wc -l` | Claim is fiction |
+| "ingest CLI package" | `scripts/ingest-legal-corpus/package.json` exists | Claim is fiction |
+| "pgvector + HNSW" | `grep embedding_vec artifacts/api-server/src/lib/legalCorpus/migrate.ts` | Claim is fiction |
+| "by_source in status API" | curl kb/status shows `by_source` object | Claim is fiction |
+| "Deployed to k30t" | kb/status chunks ≥ 200 | **Never ran prod ingest** |
+
+**Audit 2026-06-06:** Agent 2 report said "Implementation Complete" but repo has **zero** `corpus/` files, **zero** ingest script, **no commits**, k30t still **12/12 chunks**. Treat that report as **not delivered**.
+
+---
+
+## One-page decision table
+
+| Question | Answer for Agent 2 |
+|----------|-------------------|
+| **Create a new FastAPI service?** | **NO.** Do not add `legal-rag-api/`, uvicorn, or a second HTTP server. |
+| **Clone legalRAG / lawglance / contract-analyzer repos?** | **NO.** Do not `git clone` them into the monorepo. Read patterns only; implement in TypeScript here. |
+| **Build a new RAG pipeline from scratch?** | **NO.** RAG **already exists** — extend `lib/legalCorpus/*` and `lib/legalCounsel/pipeline.ts`. |
+| **Build a new knowledge base?** | **NO new DB/product.** Use existing tables `legal_corpus_documents` + `legal_corpus_chunks`. |
+| **What ARE you building?** | **(1) Corpus manifest + raw source files (2) Ingest CLI script (3) Schema migrations (4) Bulk data in Postgres (5) Eval tests.** |
+| **Who owns counsel / analyze API?** | **Already shipped:** `POST /api/v1/legal/counsel/analyze` — do not duplicate in Python. |
+| **Embeddings model?** | **Already wired:** `nvidia/llama-nemotron-embed-vl-1b-v2:free` via `lib/legalCorpus/embeddings.ts` — reuse, do not swap stack. |
+
+---
+
+## Architecture (what exists — do not replace)
+
+```
+                    ┌─────────────────────────────────────────┐
+  EXISTS TODAY      │  Express api-server (Node)              │
+                    │  POST /api/v1/legal/counsel/analyze     │
+                    │  POST /api/v1/legal/kb/search           │
+                    │  GET  /api/v1/legal/kb/status           │
+                    │  POST /api/v1/legal/kb/ingest (single)  │
+                    └──────────────┬──────────────────────────┘
+                                   │
+                    ┌──────────────▼──────────────────────────┐
+  EXISTS TODAY      │  lib/legalCorpus/                       │
+                    │    retrieve.ts      (BM25 tsvector)     │
+                    │    hybridRetrieve.ts (BM25 + embed)     │
+                    │    embeddings.ts    (OpenRouter Nemotron)│
+                    │    ingest.ts        (single doc upsert) │
+                    │    documents.ts     (12 playbook seeds)│
+                    └──────────────┬──────────────────────────┘
+                                   │
+                    ┌──────────────▼──────────────────────────┐
+  EXISTS TODAY      │  Postgres (Render openclaw-db)            │
+                    │    legal_corpus_documents               │
+                    │    legal_corpus_chunks (+ embedding[])  │
+                    └─────────────────────────────────────────┘
+
+  YOUR WORK ───────►  scripts/ingest-legal-corpus/  ──► same Postgres tables
+                      corpus/legal-corpus-manifest.json
+                      corpus/sources/*  (raw text)
+                      migrations (source_hash, pgvector, by_source status)
+                      __tests__/retrieval.eval.ts
+```
+
+---
+
+## Your deliverables (in order)
+
+### D1 — Manifest + raw sources (no application code yet)
+
+| Item | Path |
+|------|------|
+| Manifest | `artifacts/api-server/corpus/legal-corpus-manifest.json` |
+| Statute text files | `artifacts/api-server/corpus/sources/statutes/*.txt` |
+| CUAD extract (JSON or text) | `artifacts/api-server/corpus/sources/cuad/` |
+| NVCA excerpts | `artifacts/api-server/corpus/sources/nvca/*.txt` |
+
+Each manifest entry:
+
+```json
+{
+  "slug": "dgcl-144-statute",
+  "title": "8 Del. C. § 144",
+  "source_type": "statute",
+  "source_url": "https://...",
+  "license": "public",
+  "domain": "delaware",
+  "priority": "critical",
+  "fetch_strategy": "file",
+  "file_path": "sources/statutes/dgcl-144.txt"
+}
+```
+
+**Default source pack (Option A):** CUAD clause subset + Cornell LII DGCL/IRC text + NVCA excerpt files. See `08-legal-corpus-plan.mdc` §2.
+
+---
+
+### D2 — Ingest CLI (TypeScript, not FastAPI)
+
+| Item | Path |
+|------|------|
+| Package | `scripts/ingest-legal-corpus/` |
+| Entry | `scripts/ingest-legal-corpus/src/main.ts` |
+| Shared upsert | `artifacts/api-server/src/lib/legalCorpus/ingestBatch.ts` (extract from `ingest.ts`) |
+
+**CLI must:**
+
+1. Read manifest  
+2. Load raw text (file or fetcher)  
+3. Chunk via existing `chunkLegalText()`  
+4. Embed via existing `embedText()` (import from api-server or shared package)  
+5. Upsert `legal_corpus_documents` + `legal_corpus_chunks`  
+6. Idempotent on `source_hash`  
+7. Checkpoint file for resume on 429  
+
+**Commands to document in README:**
+
+```bash
+pnpm --filter ingest-legal-corpus run ingest -- --manifest artifacts/api-server/corpus/legal-corpus-manifest.json --dry-run
+pnpm --filter ingest-legal-corpus run ingest -- --manifest ... --embed
+```
+
+**Run against prod:** `DATABASE_URL=<render>` — document in README; do not commit secrets.
+
+---
+
+### D3 — Schema + API extensions (small, in api-server)
+
+| Change | File |
+|--------|------|
+| `source_type`, `source_url`, `source_hash` columns | `lib/legalCorpus/migrate.ts` |
+| pgvector `embedding_vec vector(2048)` + index | same |
+| `GET /kb/status` → `by_source`, `embedded_pct` | `routes/legal.kb.ts` |
+| `POST /kb/ingest/batch` (optional, admin token) | `routes/legal.kb.ts` |
+| RRF merge, pgvector query | `lib/legalCorpus/hybridRetrieve.ts`, `rrfMerge.ts` |
+| `forceCofounderCritical` default **false** | `lib/legalCorpus/retrieve.ts` |
+
+---
+
+### D4 — Eval (proves retrieval, not vibes)
+
+| Item | Path |
+|------|------|
+| Fixture | `artifacts/api-server/src/lib/legalCorpus/__tests__/fixtures/crispro-v3.1.txt` |
+| Required slugs | `.../fixtures/crispro-required-slugs.json` |
+| Eval | `.../__tests__/retrieval.eval.ts` |
+
+Run: `cd artifacts/api-server && pnpm test legalCorpus`
+
+---
+
+### D5 — Production ingest + receipt
+
+1. Deploy api-server (migrations run on boot).  
+2. Run ingest CLI against Render `DATABASE_URL`.  
+3. Verify gates G1–G8 (see master plan).  
+4. Post JSON receipt in chat (commit SHA, kb/status, eval scores) — **not** a new markdown ledger file.
+
+---
+
+## Explicit DO / DON'T
+
+### DO
+
+- Work **inside** `openclaw-saas` monorepo only  
+- Use **TypeScript** for ingest script and api-server changes  
+- **Reuse** `embedText`, `chunkLegalText`, `pool` from `@workspace/db`  
+- Fetch **primary source text** (statutes, CUAD clauses, NVCA excerpts)  
+- Target **≥200 chunks, ≥40 documents** (gate G1)  
+- Write **tests** that fail if chunk count drops  
+- Read external repos **in browser** for patterns only  
+
+### DON'T
+
+- **Don't** create FastAPI, Flask, Django, or separate microservice  
+- **Don't** add Pinecone, Weaviate, Chroma, or LangChain as required deps  
+- **Don't** `git clone` arulkumarann/legalRAG, lawglance, etc. into the repo  
+- **Don't** build Agent B Python 4-lens pipeline (Node counsel exists)  
+- **Don't** add hand-written playbook paragraphs when statute text is available  
+- **Don't** mark RAG LIVE in docs until G1–G8 pass on k30t  
+- **Don't** replace Express counsel with a new endpoint in another language  
+- **Don't** wire Kairos / `knowledge_graphs` tables for this task — use `legal_corpus_*` only  
+
+---
+
+## What to borrow from external repos (patterns only)
+
+| Repo | Copy this idea | Implement here |
+|------|----------------|----------------|
+| legalRAG | document → chunk → embed → search → cite | `ingestBatch.ts` + existing `hybridRetrieve.ts` |
+| contract-analyzer | analyze per contract section | already `legalCounsel/chunkContract.ts` |
+| Policy-Compliance-Checker | grounded vs ungrounded answers | Phase 3 in master plan — extend `pipeline.ts` |
+| legal-rag-hy | jurisdiction filter | `domain` column + retrieve filter (exists) |
+| GraphAugmented-Legal-RAG | knowledge graph | **Out of scope v1** — do not start |
+| lawglance | multi-doc context | `buildContextBlock` maxChars (exists) |
+
+---
+
+## Success criteria (Agent 2 is done when)
+
+```bash
+# On k30t after deploy + ingest
+curl -s https://openclaw-api-k30t.onrender.com/api/v1/legal/kb/status
+# → documents >= 40, chunks >= 200, by_source.statute >= 3, by_source.cuad >= 50
+
+cd artifacts/api-server && pnpm test legalCorpus
+# → recall@5 >= 0.8, crispro required slugs hit >= 8/10
+
+curl -s -X POST .../api/v1/legal/counsel/analyze -d @crispro.json
+# → findings_grounded[].chunk_id present (after Phase 3)
+```
+
+Until these pass, status remains **PARTIAL** in `07-legal-vertical.mdc`.
+
+---
+
+## Files you will touch (allowlist)
+
+```
+artifacts/api-server/corpus/**
+artifacts/api-server/src/lib/legalCorpus/**
+artifacts/api-server/src/routes/legal.kb.ts
+scripts/ingest-legal-corpus/**
+artifacts/api-server/src/lib/legalCorpus/__tests__/**
+.cursor/rules/08-legal-corpus-plan.mdc   (update gate checklist only)
+.cursor/rules/07-legal-vertical.mdc      (LIVE label only after gates)
+```
+
+**Do not touch unless coordinated:** `legalCounsel/pipeline.ts` (Phase 3 owner), `CounselUI.tsx`, `forge.ts`, Kairos, Modal.
+
+---
+
+## Env vars (ingest + embed)
+
+| Var | Required | Notes |
+|-----|----------|-------|
+| `DATABASE_URL` | Yes for ingest | Render Postgres |
+| `OPENROUTER_API_KEY` | Yes for `--embed` | Nemotron embeddings |
+| `LEGAL_EMBED_MODEL` | No | default Nemotron free |
+| `LEGAL_EMBED_DISABLE` | No | set true only for dry-run without embed |
+| `LEGAL_KB_INGEST_TOKEN` | Optional | protect `/kb/ingest/batch` |
+
+---
+
+## Anti-pattern: duplicating embed/chunk code in CLI
+
+Agent 2 reported duplicating `chunkLegalText` + `embedText` + `pool` in the CLI "to avoid cross-package build coupling."
+
+**Prefer:** import from api-server via workspace package or extract shared `@workspace/legal-corpus-core` — but **do not skip ingest** because of import pain. Minimum bar: CLI calls the same upsert logic as `ingestBatch.ts` in api-server (single source of truth).
+
+---
+
+## Step-by-step (do in this order, stop if step fails verification)
+
+| Step | Action | Proof |
+|------|--------|-------|
+| **1** | Create `corpus/legal-corpus-manifest.json` + `corpus/sources/statutes/dgcl-144.txt` (one real statute) | `cat` first 20 lines shows statute text |
+| **2** | Commit + push step 1 | `git log -1` |
+| **3** | Add `scripts/ingest-legal-corpus/` dry-run (no embed) | `--dry-run` prints chunk counts |
+| **4** | Add `ingestBatch.ts` + migrate columns in `migrate.ts` | `pnpm build` in api-server passes |
+| **5** | Run ingest locally with `DATABASE_URL` | local kb query shows new slugs |
+| **6** | Add remaining sources (CUAD, NVCA) to manifest | `find corpus/sources \| wc -l` ≥ 50 |
+| **7** | Run ingest on **Render** DATABASE_URL | k30t kb/status chunks ≥ 200 |
+| **8** | Add eval tests + Phase 3 counsel grounded fields | tests green + counsel has chunk_id |
+| **9** | Paste full verification output in chat | all checks in § Verification pass |
+
+**Do not skip to step 9 with a markdown summary.**
+
+---
+
+## First message to Agent 2 (copy-paste)
+
+> You are Agent 2 for OpenClaw legal corpus. Read `.cursor/rules/08-legal-corpus-agent-handoff.mdc` first.  
+> **Do NOT build FastAPI or clone legalRAG.** Ingest into existing Postgres `legal_corpus_*` via TypeScript CLI.  
+> **Do NOT say "Implementation Complete"** until you paste output from § Verification checklist (files in git + k30t chunks ≥ 200).  
+> Start Step 1 only: one manifest entry + one statute `.txt` file, then commit.
+
+---
+
+## Option lock
+
+| Option | Status |
+|--------|--------|
+| **A** — CUAD + statutes + NVCA excerpts | **DEFAULT** unless user says B or C |
+| B — CourtListener API | Needs token; separate scope |
+| C — User uploads only | Defer statutes |
+
+Record user choice in `08-legal-corpus-plan.mdc` §11 when confirmed.
+
+---
+
+## Supabase MCP + ingest (Agent 2 pgvector path)
+
+**Why Supabase:** Agent 2 added `CREATE EXTENSION vector` + HNSW in `migrate.ts` with comment *"Supabase has vector ext enabled"*. Render Postgres may **not** support pgvector — k30t shows `embedded_pct: 0` and still **12 seed docs** until ingest runs.
+
+**Supabase MCP is NOT in your global `~/.cursor/mcp.json`.** Project template added at `openclaw-saas/.cursor/mcp.json`.
+
+### Step 1 — Enable Supabase MCP (you, one time)
+
+1. **Project config:** `openclaw-saas/.cursor/mcp.json` uses hosted MCP via `mcp-remote` → `https://mcp.supabase.com/mcp?project_ref=gpirjathvfoqjurjhdxq`
+2. **Cursor → Settings → Tools & MCP** — enable `supabase`, complete browser OAuth when prompted, **restart Cursor**
+3. **Optional CI/PAT:** add header `Authorization: Bearer $SUPABASE_ACCESS_TOKEN` to mcp-remote args (do not commit PAT)
+
+**Do NOT** use `@supabase/mcp-server-supabase` via npx — broken dependency on Node 25; use hosted MCP URL above.
+
+### Step 2 — MCP tasks (Agent 2 or you via MCP chat)
+
+| MCP action | Purpose |
+|------------|---------|
+| List projects | Pick OpenClaw legal corpus project |
+| Run SQL | Execute `artifacts/api-server/corpus/supabase/bootstrap.sql` |
+| Verify tables | `SELECT count(*) FROM legal_corpus_documents` |
+
+**Do NOT** create a FastAPI service or clone legalRAG via MCP — only SQL + optional table inspection.
+
+### Step 3 — Ingest corpus (CLI, not MCP)
+
+MCP does **not** replace the ingest CLI. After bootstrap SQL:
+
+```bash
+cd openclaw-saas/scripts/ingest-legal-corpus && npm install
+
+export DATABASE_URL="postgresql://postgres.[ref]:[password]@aws-0-[region].pooler.supabase.com:6543/postgres"
+export OPENROUTER_API_KEY="..."
+
+npx tsx src/main.ts \
+  --manifest ../../artifacts/api-server/corpus/legal-corpus-manifest.json \
+  --embed --delay 1500 --resume
+```
+
+**Or** use Render `DATABASE_URL` if pgvector works there — same CLI.
+
+### Step 4 — Wire k30t to the DB that has data
+
+Either:
+
+- **A)** Point Render `DATABASE_URL` at Supabase pooler (single DB for api + corpus), **or**  
+- **B)** Keep Render Postgres and run ingest against Render (if `CREATE EXTENSION vector` succeeds on boot logs)
+
+### Step 5 — Verify (mandatory)
+
+```bash
+curl -s https://openclaw-api-k30t.onrender.com/api/v1/legal/kb/status
+# documents >= 40, chunks >= 200, by_source.statute >= 3, embedded_pct > 50
+```
+
+### Current status (Supabase `gpirjathvfoqjurjhdxq` — ACTIVE)
+
+| Check | Result |
+|-------|--------|
+| Schema bootstrap | ✅ `legal_corpus_documents` + `legal_corpus_chunks` + `vector` ext |
+| Data ingested | ✅ **59 docs / 72 chunks** (49 cuad, 6 statute, 4 nvca) — boot seeds removed |
+| Embeddings | ✅ **100%** on k30t (`embedded_pct: 1`) |
+| k30t wired to Supabase | ✅ |
+| Boot seed re-add | ✅ blocked when ingested corpus present (`migrate.ts`) |
+| HNSW index | ❌ skipped — 2048-dim Nemotron exceeds Supabase HNSW 2000 cap; cosine fallback OK at this scale |
+
+**Pooler host:** `aws-0-us-east-1.pooler.supabase.com:6543` · **user:** `postgres.gpirjathvfoqjurjhdxq`
+
+**MCP note:** Restart Cursor after editing `.cursor/mcp.json`. Set `SUPABASE_ACCESS_TOKEN` in your shell env (do not commit PAT to git).

@@ -5,12 +5,14 @@
  * POST /api/v1/legal/kb/search
  * POST /api/v1/legal/kb/ingest
  * POST /api/v1/legal/kb/embed-backfill
+ * POST /api/v1/legal/kb/cleanup-seeds
  */
 
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import { legalCorpusHybridRetrieve } from "../lib/legalCorpus/hybridRetrieve.js";
 import { backfillLegalCorpusEmbeddings } from "../lib/legalCorpus/backfillEmbeddings.js";
+import { cleanupBootSeedDocuments } from "../lib/legalCorpus/cleanupSeeds.js";
 import { legalCorpusStatus } from "../lib/legalCorpus/retrieve.js";
 import { ingestLegalDocument } from "../lib/legalCorpus/ingest.js";
 
@@ -99,6 +101,21 @@ router.post("/v1/legal/kb/embed-backfill", async (req: Request, res: Response): 
     ...result,
     embedded_pct: status.embedded_pct,
     chunks: status.chunks,
+  });
+});
+
+router.post("/v1/legal/kb/cleanup-seeds", async (_req: Request, res: Response): Promise<void> => {
+  const cleanup = await cleanupBootSeedDocuments();
+  const status = await legalCorpusStatus();
+
+  res.json({
+    ok: true,
+    deleted: cleanup.deleted,
+    slugs: cleanup.slugs,
+    documents: status.documents,
+    chunks: status.chunks,
+    by_source: status.by_source,
+    embedded_pct: status.embedded_pct,
   });
 });
 

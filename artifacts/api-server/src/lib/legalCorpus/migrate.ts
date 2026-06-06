@@ -66,49 +66,67 @@ export async function migrateLegalCorpus(): Promise<void> {
 
     // HNSW limited to 2000 dims on Supabase; skip ANN index for 2048-dim Nemotron.
 
-    // ── Seed the 12 playbook documents ──────────────────────────────────────
-    for (const doc of LEGAL_CORPUS_SEED) {
-      const upsert = await client.query<{ id: number }>(
-        `INSERT INTO legal_corpus_documents
-           (slug, title, citation, domain, tags, priority, corpus_version, content, source_type, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'seed', now())
-         ON CONFLICT (slug) DO UPDATE SET
-           title = EXCLUDED.title,
-           citation = EXCLUDED.citation,
-           domain = EXCLUDED.domain,
-           tags = EXCLUDED.tags,
-           priority = EXCLUDED.priority,
-           corpus_version = EXCLUDED.corpus_version,
-           content = EXCLUDED.content,
-           updated_at = now()
-         RETURNING id`,
-        [
-          doc.slug,
-          doc.title,
-          doc.citation,
-          doc.domain,
-          doc.tags,
-          doc.priority,
-          LEGAL_CORPUS_VERSION,
-          doc.content,
-        ],
+    const ingestedCount = await client.query<{ n: number }>(
+      `SELECT COUNT(*)::int AS n FROM legal_corpus_documents
+       WHERE source_type IN ('cuad', 'statute', 'nvca')`,
+    );
+    const hasIngestedCorpus = (ingestedCount.rows[0]?.n ?? 0) > 0;
+    const bootSeedEnabled = process.env.LEGAL_CORPUS_BOOT_SEED === "true";
+
+    if (hasIngestedCorpus && !bootSeedEnabled) {
+      logger.info(
+        { ingested: ingestedCount.rows[0]?.n },
+        "legalCorpus: skip boot seed — ingested corpus present",
       );
-
-      const documentId = upsert.rows[0].id;
-      await client.query(`DELETE FROM legal_corpus_chunks WHERE document_id = $1`, [documentId]);
-
-      const chunks = chunkLegalText(doc.content);
-      for (let i = 0; i < chunks.length; i++) {
-        await client.query(
-          `INSERT INTO legal_corpus_chunks (document_id, chunk_index, content)
-           VALUES ($1, $2, $3)`,
-          [documentId, i, chunks[i]],
+    } else {
+      // ── Legacy playbook seeds (empty DB or LEGAL_CORPUS_BOOT_SEED=true only) ──
+      for (const doc of LEGAL_CORPUS_SEED) {
+        const upsert = await client.query<{ id: number }>(
+          `INSERT INTO legal_corpus_documents
+             (slug, title, citation, domain, tags, priority, corpus_version, content, source_type, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'seed', now())
+           ON CONFLICT (slug) DO UPDATE SET
+             title = EXCLUDED.title,
+             citation = EXCLUDED.citation,
+             domain = EXCLUDED.domain,
+             tags = EXCLUDED.tags,
+             priority = EXCLUDED.priority,
+             corpus_version = EXCLUDED.corpus_version,
+             content = EXCLUDED.content,
+             updated_at = now()
+           RETURNING id`,
+          [
+            doc.slug,
+            doc.title,
+            doc.citation,
+            doc.domain,
+            doc.tags,
+            doc.priority,
+            LEGAL_CORPUS_VERSION,
+            doc.content,
+          ],
         );
+
+        const documentId = upsert.rows[0].id;
+        await client.query(`DELETE FROM legal_corpus_chunks WHERE document_id = $1`, [documentId]);
+
+        const chunks = chunkLegalText(doc.content);
+        for (let i = 0; i < chunks.length; i++) {
+          await client.query(
+            `INSERT INTO legal_corpus_chunks (document_id, chunk_index, content)
+             VALUES ($1, $2, $3)`,
+            [documentId, i, chunks[i]],
+          );
+        }
       }
     }
 
     logger.info(
-      { documents: LEGAL_CORPUS_SEED.length, version: LEGAL_CORPUS_VERSION },
+      {
+        documents: bootSeedEnabled || !hasIngestedCorpus ? LEGAL_CORPUS_SEED.length : 0,
+        version: LEGAL_CORPUS_VERSION,
+        skipped_boot_seed: hasIngestedCorpus && !bootSeedEnabled,
+      },
       "legalCorpus: migration complete",
     );
   } finally {
