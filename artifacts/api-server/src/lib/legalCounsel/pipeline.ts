@@ -20,23 +20,55 @@ import { logger } from "../logger.js";
 
 const COUNSEL_CHAIN: ModelRouteConfig[] = [
   {
+    id: "llama-3.3-70b-versatile",
+    provider: "groq",
+    apiKeyEnv: "GROQ_API_KEY",
+    maxTokens: 4096,
+    timeoutMs: 55_000,
+    tags: ["70b", "counsel-primary"],
+  },
+  {
+    id: "meta-llama/llama-3.3-70b-instruct:free",
+    provider: "openrouter",
+    apiKeyEnv: "OPENROUTER_API_KEY",
+    maxTokens: 4096,
+    timeoutMs: 55_000,
+    tags: ["70b", "counsel-or-k1"],
+  },
+  {
+    id: "meta-llama/llama-3.3-70b-instruct:free",
+    provider: "openrouter",
+    apiKeyEnv: "OPENROUTER_API_KEY_2",
+    maxTokens: 4096,
+    timeoutMs: 55_000,
+    tags: ["70b", "counsel-or-k2"],
+  },
+  {
     id: "openai/gpt-oss-120b:free",
     provider: "openrouter",
     apiKeyEnv: "OPENROUTER_API_KEY",
-    maxTokens: 8192,
-    timeoutMs: 120_000,
-    tags: ["120b", "counsel-primary"],
+    maxTokens: 4096,
+    timeoutMs: 90_000,
+    tags: ["120b", "counsel-fallback"],
+  },
+  {
+    id: "openai/gpt-oss-20b:free",
+    provider: "openrouter",
+    apiKeyEnv: "OPENROUTER_API_KEY_2",
+    maxTokens: 4096,
+    timeoutMs: 55_000,
+    tags: ["20b", "counsel-last-resort"],
   },
 ];
 
 const LensFindingSchema = z.object({
   lens: z.string(),
   severity: z.enum(["critical", "high", "medium", "low", "info"]),
-  issue: z.string().min(10),
+  issue: z.string().min(5),
   contract_excerpt: z.string().optional(),
   statutory_basis: z.string().optional(),
   corpus_slugs: z.array(z.string()).optional(),
-  recommendation: z.string().min(10),
+  recommendation: z.string().min(5),
 });
 
 const OpportunitySchema = z.object({
@@ -64,7 +96,7 @@ const RedlineSchema = z.object({
 export const CounselOutputSchema = z.object({
   doc_class: z.enum(["cofounder_agreement", "contract", "employment", "other"]),
   overall_risk: z.enum(["critical", "high", "medium", "low"]),
-  executive_summary: z.string().min(50),
+  executive_summary: z.string().min(20),
   lens_findings: z.array(LensFindingSchema).min(1),
   opportunities_for_company: z.array(OpportunitySchema),
   redlines: z.array(RedlineSchema),
