@@ -221,6 +221,170 @@ export const CORE_SCENARIOS: PlaybookScenario[] = [
   },
 ];
 
+// ── Counsel scenarios (C8 gate: ≥5 required) ─────────────────────────────────
+// These use the orchestrator path (mode=orchestrator) and assert on counsel-specific
+// response fields: findings_grounded, deal_memo, meta.orchestrator_mode, meta.grounded_ratio.
+
+export interface CounselScenario {
+  id: number;
+  description: string;
+  input_text: string;
+  perspective: "company" | "counterparty" | "neutral";
+  /** Slugs that MUST appear in rag_sources for the scenario to pass (C4 gate). */
+  required_slugs?: string[];
+  /** Minimum number of grounded findings (C4 gate: ≥6). */
+  min_grounded?: number;
+  /** deal_memo.sign_blockers.length must be ≥ this value (C6 gate). */
+  min_sign_blockers?: number;
+  /** meta.grounded_ratio must be ≥ this value (C10 gate). */
+  min_grounded_ratio?: number;
+  /** If true, Mutual Dependency must be labeled counterparty-favorable (C5 gate). */
+  assert_mutual_dependency_counterparty?: boolean;
+}
+
+export const COUNSEL_SCENARIOS: CounselScenario[] = [
+  // ── CS1: CrisPRO Cofounder RSPA — full orchestrator run ──────────────────
+  {
+    id: 101,
+    description:
+      "CrisPRO cofounder restricted stock purchase agreement with 83(b), QSBS, vesting acceleration, " +
+      "and Mutual Dependency clause. Orchestrator must return ≥6 grounded findings including irc-83b " +
+      "and dgcl-144. deal_memo.sign_blockers ≥ 1. Mutual Dependency labeled counterparty-favorable.",
+    perspective: "company",
+    required_slugs: ["irc-83b", "dgcl-144"],
+    min_grounded: 6,
+    min_sign_blockers: 1,
+    min_grounded_ratio: 0.5,
+    assert_mutual_dependency_counterparty: true,
+    input_text: `RESTRICTED STOCK PURCHASE AGREEMENT
+
+This Restricted Stock Purchase Agreement ("Agreement") is entered into as of January 1, 2025, between CrisPRO Therapeutics, Inc., a Delaware corporation ("Company"), and Dr. Jane Smith ("Purchaser"), a co-founder and Chief Medical Officer.
+
+1. PURCHASE AND SALE. Company hereby sells to Purchaser 2,000,000 shares of Common Stock at a purchase price of $0.001 per share (aggregate $2,000).
+
+2. VESTING. Shares vest over 4 years: 25% cliff at 12 months, then monthly thereafter. Unvested shares are subject to Company repurchase right at original purchase price.
+
+3. ACCELERATION. Upon a Change of Control, 100% of unvested shares shall accelerate ("double trigger" requires both CoC and termination without Cause within 12 months).
+
+4. MUTUAL DEPENDENCY. The parties acknowledge that the Company's success is mutually dependent on Purchaser's continued service. In the event of termination without Cause, Company shall pay Purchaser a lump sum equal to 12 months base salary as liquidated damages.
+
+5. IP ASSIGNMENT. Purchaser assigns to Company all inventions, discoveries, and works of authorship made during the term. Schedule C (attached) lists pre-existing IP excluded from assignment. Schedule C is currently blank.
+
+6. 83(b) ELECTION. Purchaser acknowledges the availability of an IRC §83(b) election and agrees to consult tax counsel. No deadline is specified in this Agreement.
+
+7. QSBS. Company represents it is a qualified small business under IRC §1202 with gross assets below $50,000,000 at time of issuance.
+
+8. GOVERNING LAW. This Agreement shall be governed by the laws of the State of Delaware.`,
+  },
+
+  // ── CS2: QSBS ceiling error — post-OBBBA $75M not $50M ──────────────────
+  {
+    id: 102,
+    description:
+      "Agreement incorrectly states QSBS gross asset ceiling as $50M (pre-OBBBA). " +
+      "Orchestrator must flag the $75M post-OBBBA ceiling via irc-1202 slug. " +
+      "deal_memo.sign_blockers must include the QSBS ceiling error.",
+    perspective: "company",
+    required_slugs: ["irc-1202"],
+    min_grounded: 2,
+    min_sign_blockers: 1,
+    min_grounded_ratio: 0.4,
+    input_text: `STOCK PURCHASE AGREEMENT
+
+This Agreement is entered into between Acme Biotech, Inc. ("Company") and John Doe ("Investor").
+
+1. PURCHASE. Investor purchases 500,000 shares of Series A Preferred Stock at $1.00 per share.
+
+2. QSBS REPRESENTATION. Company represents that it is a Qualified Small Business Corporation under IRC §1202. Company's gross assets do not exceed $50,000,000 at the time of this issuance, qualifying shares for potential exclusion of up to 100% of capital gains under §1202.
+
+3. HOLDING PERIOD. Investor acknowledges that QSBS benefits require a minimum 5-year holding period.
+
+4. GOVERNING LAW. Delaware.`,
+  },
+
+  // ── CS3: IRC §83(b) 30-day window missing — sign blocker ─────────────────
+  {
+    id: 103,
+    description:
+      "Restricted stock grant with no 83(b) election deadline specified. " +
+      "Orchestrator must flag the 30-day non-waivable IRS window as a sign blocker " +
+      "grounded to irc-83b slug. deal_memo.sign_blockers.length ≥ 1.",
+    perspective: "company",
+    required_slugs: ["irc-83b"],
+    min_grounded: 1,
+    min_sign_blockers: 1,
+    min_grounded_ratio: 0.3,
+    input_text: `FOUNDER RESTRICTED STOCK AGREEMENT
+
+This Agreement is entered into between TechCo, Inc. ("Company") and Alice Chen ("Founder").
+
+1. GRANT. Company grants Founder 1,500,000 shares of Common Stock at $0.0001 per share.
+
+2. VESTING. 4-year vesting with 1-year cliff. Unvested shares subject to repurchase at cost.
+
+3. TAX MATTERS. Founder acknowledges that the shares may be subject to ordinary income tax upon vesting. Founder is encouraged to consult a tax advisor regarding available elections.
+
+4. TERMINATION. Upon termination for any reason, unvested shares are immediately repurchased by Company at original purchase price.
+
+5. GOVERNING LAW. California.`,
+  },
+
+  // ── CS4: DGCL §144 affiliate transaction — board approval required ────────
+  {
+    id: 104,
+    description:
+      "Affiliate transaction between company and director without DGCL §144 safe harbor compliance. " +
+      "Orchestrator must flag missing disinterested director approval grounded to dgcl-144 slug.",
+    perspective: "company",
+    required_slugs: ["dgcl-144"],
+    min_grounded: 1,
+    min_sign_blockers: 1,
+    min_grounded_ratio: 0.3,
+    input_text: `CONSULTING AGREEMENT — AFFILIATE TRANSACTION
+
+This Consulting Agreement is entered into between MedTech Delaware Corp ("Company") and Dr. Robert Lee ("Consultant"), who is also a member of the Company's Board of Directors.
+
+1. SERVICES. Consultant shall provide strategic advisory services related to FDA regulatory strategy for 12 months.
+
+2. COMPENSATION. Company shall pay Consultant $25,000 per month. Total contract value: $300,000.
+
+3. CONFLICT OF INTEREST. The parties acknowledge that Consultant is a director of Company. This Agreement has been reviewed by the full Board of Directors including Consultant.
+
+4. IP. All work product created by Consultant under this Agreement is assigned to Company.
+
+5. GOVERNING LAW. Delaware.`,
+  },
+
+  // ── CS5: Contractor vs employee misclassification — regulatory escalation ─
+  {
+    id: 105,
+    description:
+      "Agreement classifies worker as independent contractor but includes behavioral control indicators " +
+      "suggesting employee status. Orchestrator must flag misclassification risk in regulatory_employment lens. " +
+      "No without-Cause termination redline should be added when perspective=company.",
+    perspective: "company",
+    required_slugs: [],
+    min_grounded: 1,
+    min_sign_blockers: 0,
+    min_grounded_ratio: 0.2,
+    input_text: `INDEPENDENT CONTRACTOR AGREEMENT
+
+This Agreement is entered into between StartupCo, Inc. ("Company") and Mark Johnson ("Contractor").
+
+1. CLASSIFICATION. Contractor is an independent contractor and not an employee of Company.
+
+2. SERVICES. Contractor shall perform software engineering services as directed by Company's VP of Engineering. Contractor shall work at Company's offices Monday through Friday, 9am to 6pm. Contractor shall use Company-provided equipment and follow Company's development processes and coding standards.
+
+3. COMPENSATION. Contractor shall be paid $15,000 per month. Company will not withhold taxes or provide benefits.
+
+4. TERMINATION. Company may terminate this Agreement at any time without cause upon 2 weeks notice.
+
+5. IP. All work product is assigned to Company.
+
+6. GOVERNING LAW. New York.`,
+  },
+];
+
 // ── Content quality assertions ────────────────────────────────────────────────
 
 function assertContentQuality(

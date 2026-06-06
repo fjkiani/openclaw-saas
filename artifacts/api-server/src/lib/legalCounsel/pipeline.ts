@@ -1,5 +1,9 @@
 /**
  * legalCounsel/pipeline.ts — Phase 3: full-doc coverage, version diff, grounded/inferred split.
+ *
+ * mode="orchestrator" → 4 parallel lens agents + reconcile + compliance (C1, C4, C5, C10, C12)
+ * mode="monolith"     → single LLM call (legacy baseline)
+ * default             → orchestrator (C1 gate: meta.orchestrator_mode=true without ?mode= param)
  */
 
 import { z } from "zod";
@@ -17,6 +21,8 @@ import { counselGovernanceBlock } from "./disclaimer.js";
 import { detectContractSignals, buildStatuteRetrievalQueries } from "./contractSignals.js";
 import { buildCompanyLeverageFindings, enrichGroundedStatuteFindings } from "./companyLeverage.js";
 import { COFOUNDER_STATUTE_SLUGS } from "../legalCorpus/cofounderSlugs.js";
+import { runOrchestrator } from "./orchestrator.js";
+import { buildDealMemo, type DealMemo } from "./dealMemo.js";
 
 const COUNSEL_CHAIN: ModelRouteConfig[] = [
   {
@@ -126,6 +132,11 @@ export interface CounselAnalyzeInput {
   docHint?: string;
   /** Analyze only this version index when multiple versions detected (0-based). */
   versionIndex?: number;
+  /**
+   * mode="orchestrator" → 4 parallel lens agents (default, satisfies C1 gate)
+   * mode="monolith"     → single LLM call (legacy)
+   */
+  mode?: "orchestrator" | "monolith";
 }
 
 export interface VersionAnalysisMeta {
@@ -148,6 +159,7 @@ export interface CounselAnalyzeResult {
       coverage_pct: number;
     };
     version_analysis?: VersionAnalysisMeta;
+    deal_memo: DealMemo;
   };
   rag_sources: string[];
   rag_corpus_version: string;
@@ -165,6 +177,12 @@ export interface CounselAnalyzeResult {
     contract_signals: ReturnType<typeof detectContractSignals>;
     queries_run: number;
     multi_version: boolean;
+    /** C1 gate: true when orchestrator path was used */
+    orchestrator_mode: boolean;
+    /** C10 gate: grounded / (grounded + inferred) */
+    grounded_ratio: number;
+    /** Models used per lens (orchestrator mode) or single model (monolith) */
+    lens_models: string[];
   };
 }
 
@@ -207,10 +225,9 @@ Output ONLY valid JSON (no markdown):
   "reasoning_notes": "string"
 }`;
 
-export async function runLegalCounselAnalyze(
-  input: CounselAnalyzeInput,
-): Promise<CounselAnalyzeResult> {
-  const t0 = Date.now();
+// ── Shared RAG + digest prep (used by both orchestrator and monolith paths) ───
+
+async function prepSharedContext(input: CounselAnalyzeInput) {
   const { text, perspective = "company", docHint, versionIndex } = input;
 
   const { versions, single } = splitContractVersions(text);
@@ -258,9 +275,180 @@ export async function runLegalCounselAnalyze(
     corpusChunksTotal = 0;
   }
 
+  return {
+    analyzeText,
+    sections,
+    digest,
+    signals,
+    rag,
+    isCofounder,
+    corpusChunksTotal,
+    versionAnalysis,
+    perspective,
+  };
+}
+
+// ── Orchestrator path (C1 default) ────────────────────────────────────────────
+
+async function runOrchestratorPath(
+  input: CounselAnalyzeInput,
+  t0: number,
+): Promise<CounselAnalyzeResult> {
+  const ctx = await prepSharedContext(input);
+  const {
+    analyzeText,
+    sections,
+    digest,
+    signals,
+    rag,
+    isCofounder,
+    corpusChunksTotal,
+    versionAnalysis,
+    perspective,
+  } = ctx;
+
+  const orchResult = await runOrchestrator({
+    contractText: analyzeText,
+    digest: digest.digest,
+    ragHits: rag.hits,
+    signals,
+    perspective,
+    versionDiffs: versionAnalysis?.diff_items,
+  });
+
+  const {
+    reconciled_findings_grounded,
+    reconciled_findings_inferred,
+    reconciled_redlines,
+    reconciled_opportunities,
+    blocking_issues,
+    compliance_flags,
+    meta: orchMeta,
+  } = orchResult;
+
+  // Build a synthetic CounselOutput from reconciled lens results
+  const overallRisk: "critical" | "high" | "medium" | "low" =
+    reconciled_findings_grounded.some((f) => f.severity === "critical") ||
+    blocking_issues.length > 0
+      ? "critical"
+      : reconciled_findings_grounded.some((f) => f.severity === "high")
+        ? "high"
+        : reconciled_findings_grounded.some((f) => f.severity === "medium")
+          ? "medium"
+          : "low";
+
+  const execSummary =
+    `${orchMeta.lens_models.length}-lens orchestrator analysis. ` +
+    `${reconciled_findings_grounded.length} grounded findings, ` +
+    `${reconciled_findings_inferred.length} inferred. ` +
+    `Grounded ratio: ${(orchMeta.grounded_ratio * 100).toFixed(0)}%. ` +
+    (blocking_issues.length > 0
+      ? `${blocking_issues.length} sign blocker(s) identified.`
+      : "No critical sign blockers.");
+
+  const parsedOutput: CounselOutput = {
+    doc_class: signals.has_restricted_stock || signals.has_83b ? "cofounder_agreement" : "contract",
+    overall_risk: overallRisk,
+    executive_summary: execSummary,
+    findings_grounded: reconciled_findings_grounded,
+    findings_inferred: reconciled_findings_inferred,
+    lens_findings: [],
+    opportunities_for_company: reconciled_opportunities,
+    redlines: reconciled_redlines,
+    blocking_issues,
+    missing_clauses: compliance_flags,
+    next_steps: [
+      "Review sign_blockers in deal_memo before execution.",
+      "Confirm 83(b) election filed within 30 days of grant.",
+      "Validate Schedule C IP assignment scope with IP counsel.",
+    ],
+    reasoning_notes: `Orchestrator mode: ${orchMeta.lens_models.join(", ")}`,
+  };
+
+  const dealMemo = buildDealMemo({
+    perspective,
+    overall_risk: overallRisk,
+    executive_summary: execSummary,
+    findings_grounded: reconciled_findings_grounded,
+    findings_inferred: reconciled_findings_inferred,
+    blocking_issues,
+    signals,
+    versionDiffs: versionAnalysis?.diff_items,
+  });
+
+  const slugs = [...new Set(rag.hits.map((h) => h.slug))];
+
+  logger.info(
+    {
+      overall_risk: overallRisk,
+      grounded: reconciled_findings_grounded.length,
+      inferred: reconciled_findings_inferred.length,
+      grounded_ratio: orchMeta.grounded_ratio,
+      orchestrator_mode: true,
+      lens_models: orchMeta.lens_models,
+    },
+    "legalCounsel: orchestrator analysis complete",
+  );
+
+  return {
+    output: {
+      ...parsedOutput,
+      governance: counselGovernanceBlock(),
+      coverage: {
+        sections_total: digest.sections_total,
+        sections_included: digest.sections_included,
+        chars_sent: digest.chars_sent,
+        full_text_length: analyzeText.length,
+        coverage_pct: digest.coverage_pct,
+      },
+      version_analysis: versionAnalysis,
+      deal_memo: dealMemo,
+    },
+    rag_sources: slugs,
+    rag_corpus_version: LEGAL_CORPUS_VERSION,
+    retrieval_mode: rag.retrieval_mode,
+    section_count: sections.length,
+    model_used: orchMeta.lens_models[0] ?? "orchestrator",
+    latency_ms: Date.now() - t0,
+    meta: {
+      chunks_retrieved: rag.hits.length,
+      corpus_chunks_total: corpusChunksTotal,
+      retrieval_mode: rag.retrieval_mode,
+      force_critical_used: isCofounder,
+      forced_slugs_requested: [...COFOUNDER_STATUTE_SLUGS],
+      forced_slugs_retrieved: rag.forced_slugs_retrieved,
+      contract_signals: signals,
+      queries_run: rag.queries_run,
+      multi_version: versionAnalysis != null,
+      orchestrator_mode: true,
+      grounded_ratio: orchMeta.grounded_ratio,
+      lens_models: orchMeta.lens_models,
+    },
+  };
+}
+
+// ── Monolith path (legacy, mode="monolith") ───────────────────────────────────
+
+async function runMonolithPath(
+  input: CounselAnalyzeInput,
+  t0: number,
+): Promise<CounselAnalyzeResult> {
+  const ctx = await prepSharedContext(input);
+  const {
+    analyzeText,
+    sections,
+    digest,
+    signals,
+    rag,
+    isCofounder,
+    corpusChunksTotal,
+    versionAnalysis,
+    perspective,
+  } = ctx;
+
   const userContent = JSON.stringify({
     perspective,
-    doc_hint: docHint ?? null,
+    doc_hint: input.docHint ?? null,
     knowledge_base: rag.context_block,
     knowledge_base_chunks: rag.hits.map((h) => ({
       chunk_id: h.chunk_id,
@@ -338,6 +526,20 @@ export async function runLegalCounselAnalyze(
     ...new Set([...(result.parsed.blocking_issues ?? []), ...leverage.blocking]),
   ];
 
+  const totalFindings = findingsGrounded.length + findingsInferred.length;
+  const groundedRatio = totalFindings > 0 ? findingsGrounded.length / totalFindings : 0;
+
+  const dealMemo = buildDealMemo({
+    perspective,
+    overall_risk: result.parsed.overall_risk,
+    executive_summary: result.parsed.executive_summary,
+    findings_grounded: findingsGrounded,
+    findings_inferred: findingsInferred,
+    blocking_issues: blockingIssues,
+    signals,
+    versionDiffs: versionAnalysis?.diff_items,
+  });
+
   const slugs = [...new Set(rag.hits.map((h) => h.slug))];
 
   const output = {
@@ -373,6 +575,7 @@ export async function runLegalCounselAnalyze(
       coverage_pct: digest.coverage_pct,
     },
     version_analysis: versionAnalysis,
+    deal_memo: dealMemo,
   };
 
   logger.info(
@@ -384,8 +587,9 @@ export async function runLegalCounselAnalyze(
       coverage_pct: digest.coverage_pct,
       retrieval_mode: rag.retrieval_mode,
       model: result.model_used,
+      orchestrator_mode: false,
     },
-    "legalCounsel: analysis complete",
+    "legalCounsel: monolith analysis complete",
   );
 
   return {
@@ -405,9 +609,27 @@ export async function runLegalCounselAnalyze(
       forced_slugs_retrieved: rag.forced_slugs_retrieved,
       contract_signals: signals,
       queries_run: rag.queries_run,
-      multi_version: !single,
+      multi_version: versionAnalysis != null,
+      orchestrator_mode: false,
+      grounded_ratio: groundedRatio,
+      lens_models: [result.model_used],
     },
   };
+}
+
+// ── Public entry point ────────────────────────────────────────────────────────
+
+export async function runLegalCounselAnalyze(
+  input: CounselAnalyzeInput,
+): Promise<CounselAnalyzeResult> {
+  const t0 = Date.now();
+  // Default to orchestrator (C1 gate: meta.orchestrator_mode=true without ?mode= param)
+  const mode = input.mode ?? "orchestrator";
+
+  if (mode === "monolith") {
+    return runMonolithPath(input, t0);
+  }
+  return runOrchestratorPath(input, t0);
 }
 
 /** Version diff only (no LLM) — fast structural redline between two texts. */

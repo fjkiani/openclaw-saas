@@ -671,6 +671,29 @@ async function runMigrations(): Promise<void> {
 
     // ZIE tables created by runZieMigration() (called separately)
 
+    // ── Counsel runs (async receipt store, C12) ──────────────────────────────
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS "counsel_runs" (
+        "id" uuid PRIMARY KEY NOT NULL,
+        "input_sha256" text NOT NULL,
+        "perspective" text NOT NULL DEFAULT 'company',
+        "status" text NOT NULL DEFAULT 'running',
+        "counsel_mode" text NOT NULL DEFAULT 'orchestrator',
+        "result" jsonb,
+        "error" text,
+        "grounded_count" integer,
+        "grounded_ratio" double precision,
+        "created_at" timestamptz NOT NULL DEFAULT now(),
+        "completed_at" timestamptz
+      )
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS "counsel_runs_status_idx" ON "counsel_runs" ("status");
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS "counsel_runs_sha_idx" ON "counsel_runs" ("input_sha256");
+    `);
+
     logger.info("DB migrations complete.");
   } finally {
     client.release();
