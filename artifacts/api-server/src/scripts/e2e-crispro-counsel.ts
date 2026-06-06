@@ -4,7 +4,7 @@
  *
  * Gates tested:
  *   C1  meta.orchestrator_mode === true (no ?mode= param)
- *   C2  corpus chunks ≥ 200 (via /v1/legal/corpus/status)
+ *   C2  corpus chunks ≥ 200 (via /v1/legal/kb/status)
  *   C3  recall@5 ≥ 0.80 on CrisPRO query (≥8/10 required slugs in rag_sources)
  *   C4  ≥6 grounded findings; includes irc-83b and dgcl-144
  *   C5  Mutual Dependency labeled counterparty-favorable; no without-Cause redline when perspective=company
@@ -118,7 +118,7 @@ async function pollRun(runId: string, maxWaitMs: number): Promise<unknown> {
 async function checkC2(): Promise<GateResult> {
   try {
     const res = await fetchWithTimeout(
-      `${BASE_URL}/v1/legal/corpus/status`,
+      `${BASE_URL}/v1/legal/kb/status`,
       { method: "GET" },
       10_000,
     );
