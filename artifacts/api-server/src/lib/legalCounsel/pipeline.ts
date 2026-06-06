@@ -184,7 +184,7 @@ export async function runLegalCounselAnalyze(
     {
       validator: (raw) => CounselOutputSchema.parse(raw),
       routeChainId: "legal-counsel-v1",
-      schemaType: "premium",
+      schemaType: "seo",
     },
   );
 

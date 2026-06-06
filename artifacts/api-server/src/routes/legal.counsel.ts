@@ -43,9 +43,14 @@ router.post("/v1/legal/counsel/analyze", async (req: Request, res: Response): Pr
     });
   } catch (err: unknown) {
     logger.error({ err }, "legal.counsel.analyze failed");
+    const attemptLog =
+      err instanceof Error && err.name === "RouterExhaustedError" && "attempt_log" in err
+        ? (err as { attempt_log: unknown }).attempt_log
+        : undefined;
     res.status(503).json({
       error: "Counsel analysis failed",
       details: err instanceof Error ? err.message : String(err),
+      attempt_log: attemptLog,
     });
   }
 });
