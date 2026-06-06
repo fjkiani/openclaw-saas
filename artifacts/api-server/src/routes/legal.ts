@@ -43,11 +43,8 @@ import {
   type GovernanceInput,
 } from "../lib/governanceEngine.js";
 import { runPlaybook } from "../lib/legalPlaybook.js";
-import {
-  cofounderRetrieve,
-  getCriticalEntries,
-  type CofounderClauseType,
-} from "../lib/cofounderCorpus.js";
+import { type CofounderClauseType } from "../lib/cofounderCorpus.js";
+import { legalCorpusRetrieve } from "../lib/legalCorpus/retrieve.js";
 import {
   signReceipt,
   verifyReceiptToken,
@@ -205,29 +202,15 @@ function generateUsageEventId(): string {
   return randomUUID();
 }
 
-// ── Keyword retrieval proxy ───────────────────────────────────────────────────
-function keywordRetrieve(text: string): string {
-  const lower = text.toLowerCase();
-  const examples: Array<{ type: ClauseType; snippet: string }> = [];
-
-  if (lower.includes("governed by") || lower.includes("laws of the state") || lower.includes("jurisdiction") || lower.includes("choice of law")) {
-    examples.push({ type: "governing_law", snippet: "This Agreement shall be governed by the laws of the State of Delaware, without regard to conflict of law provisions." });
-  }
-  if (lower.includes("terminat") || lower.includes("notice of termination") || lower.includes("right to terminate")) {
-    examples.push({ type: "termination", snippet: "Either party may terminate this Agreement upon 30 days written notice. Upon termination, all licenses granted hereunder shall immediately cease." });
-  }
-  if (lower.includes("intellectual property") || lower.includes("assigns") || lower.includes("work made for hire") || lower.includes("invention") || lower.includes("patent")) {
-    examples.push({ type: "ip_assignment", snippet: "Employee hereby assigns to Company all right, title, and interest in any inventions or works created during the term of employment." });
-  }
-  if (lower.includes("in no event") || lower.includes("shall not exceed") || lower.includes("limitation of liability") || lower.includes("indirect") || lower.includes("consequential")) {
-    examples.push({ type: "limitation_of_liability", snippet: "IN NO EVENT SHALL EITHER PARTY BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, OR CONSEQUENTIAL DAMAGES, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGES." });
-  }
-  if (lower.includes("indemnif") || lower.includes("hold harmless") || lower.includes("defend") || lower.includes("third-party claim")) {
-    examples.push({ type: "indemnification", snippet: "Company shall indemnify, defend, and hold harmless the other party from and against any third-party claims arising from Company's breach of this Agreement." });
-  }
-
-  if (examples.length === 0) return "";
-  return examples.slice(0, 3).map((e, i) => `Example ${i + 1} (${e.type}): "${e.snippet}"`).join("\n");
+// ── Postgres legal corpus retrieval (replaces keywordRetrieve slop) ─────────
+async function retrieveContractContext(text: string, maxChars = 4000): Promise<string> {
+  const rag = await legalCorpusRetrieve({
+    query: text,
+    domains: ["contract", "delaware"],
+    topK: 5,
+    maxChars,
+  });
+  return rag.context_block;
 }
 
 // ── OpenRouter call with model fallback (clause extraction) ───────────────────
@@ -271,7 +254,7 @@ Respond with valid JSON only. No explanation, no markdown, no extra text.`;
   for (let i = 0; i < chain.length; i++) {
     const model = chain[i];
     const useRag = requestedUseRag && model.use_rag;
-    const context = useRag ? keywordRetrieve(text) : "";
+    const context = useRag ? await retrieveContractContext(text) : "";
 
     // Rotate keys: odd-indexed fallback attempts use key2 for separate quota
     const activeKey = (i % 2 === 0 || !apiKey2) ? (apiKey || apiKey2) : (apiKey2 || apiKey);
@@ -537,8 +520,22 @@ async function contractAnalyze(text: string): Promise<{
   model_used: string;
   fallback_used: boolean;
   latency_ms: number;
+  rag_sources: string[];
+  rag_corpus_version: string;
 }> {
+  const rag = await legalCorpusRetrieve({
+    query: text,
+    domains: ["contract", "delaware", "tax"],
+    topK: 8,
+    maxChars: 8000,
+  });
+
   const systemPrompt = `You are a contract analysis specialist. Extract and analyze contract clauses. Identify risk levels and provide specific, actionable recommendations that reference the detected clause.
+
+STATUTORY AND PATTERN KNOWLEDGE (authoritative for this analysis — cite when relevant):
+${rag.context_block || "(no corpus hits — use general knowledge and flag uncertainty)"}
+
+QSBS rule: Use post-OBBBA $75M gross asset ceiling for Section 1202 analysis, NOT the obsolete $50M figure.
 
 Respond with valid JSON only:
 {
@@ -566,6 +563,8 @@ Rules:
     model_used,
     fallback_used,
     latency_ms,
+    rag_sources: rag.hits.map((h) => h.slug),
+    rag_corpus_version: rag.corpus_version,
   };
 }
 
@@ -770,31 +769,20 @@ async function cofounderAnalyze(text: string): Promise<{
     notes: string;
   }>;
   rag_entries_used: number;
+  rag_sources: string[];
+  rag_corpus_version: string;
+  rag_truncated: boolean;
   model_used: string;
   fallback_used: boolean;
   latency_ms: number;
 }> {
-  // Retrieve relevant corpus entries (keyword-matched + always include all critical)
-  const retrieved = cofounderRetrieve(text, 5);
-  const critical = getCriticalEntries();
-  // Merge: critical entries always included, retrieved entries add context
-  const allEntries = [...critical];
-  for (const e of retrieved) {
-    if (!allEntries.find((x) => x.clause_type === e.clause_type)) {
-      allEntries.push(e);
-    }
-  }
-
-  // Build RAG context block for the prompt
-  const ragContext = allEntries
-    .map(
-      (e) =>
-        `[${e.clause_type.toUpperCase()} — ${e.risk_level.toUpperCase()} RISK]\n` +
-        `Rule: ${e.rule}\n` +
-        `Red flags: ${e.red_flags.join("; ")}\n` +
-        (e.governance_trigger ? `Governance trigger: ${e.governance_trigger}\n` : ""),
-    )
-    .join("\n---\n");
+  const rag = await legalCorpusRetrieve({
+    query: text,
+    domains: ["cofounder", "tax", "delaware", "regulatory", "contract"],
+    topK: 10,
+    maxChars: 8000,
+    forceCofounderCritical: true,
+  });
 
   const systemPrompt = `You are a co-founder agreement specialist with deep expertise in startup equity, 83(b) elections, RUO regulatory compliance, and co-founder dispute prevention.
 
@@ -810,9 +798,11 @@ CRITICAL RULES (always apply, regardless of what is in the text):
 - Equity dilution: If equity % is mentioned without multi-product pool definition, flag as CRITICAL.
 - IP assignment: If "all inventions" or broad assignment is present without carve-out, flag as CRITICAL.
 - Entity type: If S-Corp or non-profit is mentioned without resolution, flag as HIGH.
+- QSBS / Section 1202: Use post-OBBBA $75M gross asset ceiling — NOT the obsolete $50M figure.
+- DGCL §144: Flag restricted-stock/resale issues for Delaware entities when equity transfers are discussed.
 
-KNOWLEDGE BASE (use these rules when analyzing):
-${ragContext}
+KNOWLEDGE BASE (authoritative for this analysis — cite slugs when applying a rule):
+${rag.context_block || "(corpus empty — flag high uncertainty)"}
 
 Respond with valid JSON only. No prose, no markdown. Start with { and end with }.
 
@@ -855,7 +845,10 @@ Respond with valid JSON only. No prose, no markdown. Start with { and end with }
     overall_risk: parsed?.overall_risk ?? "high",
     next_steps: parsed?.next_steps ?? [],
     draft_clauses: parsed?.draft_clauses ?? [],
-    rag_entries_used: allEntries.length,
+    rag_entries_used: rag.hits.length,
+    rag_sources: rag.hits.map((h) => h.slug),
+    rag_corpus_version: rag.corpus_version,
+    rag_truncated: rag.truncated,
     model_used,
     fallback_used,
     latency_ms,

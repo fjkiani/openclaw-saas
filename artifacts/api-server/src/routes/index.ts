@@ -16,6 +16,7 @@ import seoRouter from "./seo";
 import judgeRouter from "./judge";
 import clauseDraftRouter from "./legal.clause.draft.js";
 import flywheelRouter from "./flywheel.js";
+import legalKbRouter from "./legal.kb.js";
 
 const router: IRouter = Router();
 
@@ -36,5 +37,6 @@ router.use(seoRouter);
 router.use(judgeRouter);
 router.use(clauseDraftRouter);
 router.use(flywheelRouter);
+router.use(legalKbRouter);
 
 export default router;

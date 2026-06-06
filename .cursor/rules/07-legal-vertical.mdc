@@ -1,209 +1,117 @@
 ---
-description: Legal AI Operating Layer — Pass 1 CLOSED. Full governed workforce live. Receipts captured. Gate to Pass 2 open.
-globs: ["**/routes/legal.ts", "**/lib/governanceEngine.ts", "**/lib/legalPlaybook.ts", "**/lib/nextAssetBaseline.ts"]
+description: Legal counsel vertical — matter, draft, flywheel, governance. Reality labels only. Ledger lives in chat JSON, not new files.
+globs: ["**/routes/legal.ts", "**/routes/legal.clause.draft.ts", "**/routes/flywheel.ts", "**/routes/judge.ts", "**/lib/draftAgent.ts", "**/lib/governanceEngine.ts", "**/lib/legalPlaybook.ts", "**/lib/semanticLegalAnalyzer.ts", "**/mockups/CounselUI.tsx"]
 alwaysApply: false
 ---
 
-# OpenClaw — Legal AI Operating Layer (Pass 1 — CLOSED)
+# OpenClaw — Legal Counsel Vertical
 
-## Status
+**Audited:** 2026-06-06 · **Repo HEAD:** `0aa95a4` · **Core focus:** legal counsel flywheel on k30t
 
-**Pass 1 is complete.** All 5 receipts captured. All 9 acceptance criteria satisfied. Gate to Pass 2 is open.
+| Label | Meaning |
+|-------|---------|
+| **LIVE** | HTTP + DB verified today |
+| **PARTIAL** | Code exists; env, rate limit, or split-DB gap |
+| **FICTION** | Claimed in old docs; contradicted by probes |
 
-HEAD: `0c51854` (provider-aware model chain — Groq + dual OpenRouter key rotation)
+**Do not paste secrets.** Training/flywheel detail: `04-model-forge.mdc`. Full training reality: `MDC_training.md`.
 
 ---
 
-## What Was Built (Pass 1)
+## Deploy topology (legal counsel)
 
-Three files added to the codebase. These are the entire Pass 1 implementation.
+| Surface | URL | Postgres | Use for legal counsel |
+|---------|-----|----------|------------------------|
+| **Render k30t** | `https://openclaw-api-k30t.onrender.com` | Render `openclaw-db` | **Canonical** — draft, flywheel, CounselUI default, matter when not 429 |
+| **Railway** | `https://reliable-abundance-production-aac6.up.railway.app` | Railway `zephyr` | Semantic/double-dip history; **separate vault counts** |
 
-### `artifacts/api-server/src/lib/governanceEngine.ts`
+CounselUI (`CounselUI.tsx`): `VITE_API_BASE` defaults to **k30t**. Do not point UI at Railway unless intentionally splitting analyze vs draft.
 
-Governance evaluation module. Not an annotation layer — it **changes behavior**.
+---
 
-**Behavior changes (not labels):**
+## Legal counsel endpoints
 
-| Trigger | What changes in the response |
-|---|---|
-| Privilege keywords in raw text | `clause_text`, `text`, `excerpt` fields replaced with `[REDACTED — privilege review required]`. Original text never returned. |
-| CA non-compete in employment text | `escalation_required = true`, reason includes §16600 citation |
-| Confidence < 0.5 | `escalation_required = true`, reason: `low_confidence` |
-| All recommended actions generic | `escalation_required = true`, reason: `non_specific_output` |
-| Specialist sets `escalation_required = true` | Governance honors it (passthrough) |
+| Endpoint | k30t | Railway | Notes |
+|----------|------|---------|-------|
+| `POST /api/v1/legal/matter` | PARTIAL | PARTIAL | Full pipeline; **429-prone** on free OpenRouter (probed 2026-06-06) |
+| `POST /api/v1/legal/clause/draft` | LIVE | LIVE | Modes: `inline`, `from_run`, `generate`; **mode inferred** if `clause_type`+`instructions` |
+| `GET /api/v1/legal/flywheel/status` | LIVE | LIVE | Different counts per DB |
+| `POST /api/v1/judge/latest` | LIVE | LIVE | Manual fallback; auto-judge runs on vault write |
+| `POST /api/v1/legal/action` | PARTIAL | — | Needs signed `receipt_token` from `/matter` |
+| `GET/POST /api/v1/legal/extract-clause` | LIVE | — | Keyword “RAG” only — not vector KB |
+| `POST /api/v1/legal/cofounder/analyze` | PARTIAL | — | In-memory corpus; same model chain as matter |
+| `POST /api/v1/legal/playbook/run` | PARTIAL | — | 10 scenarios; depends on matter handler |
 
-**Key functions:**
-- `detectPrivilege(text)` — scans for attorney-client / work product keywords
-- `detectCANonCompete(text)` — 8 regex patterns including "agrees not to compete", "shall not compete"
-- `applyRedactions(output, fields, replacement)` — deep-copies output, replaces named fields
-- `assignImpactTier(output, escalationRequired, policy)` — `action_triggering | decision_support | informational`
-- `evaluateGovernance(input)` — main function; returns `GovernanceDecision` with `redacted_output` and `audit_event`
+Legacy per-specialist routes (`/contract/analyze`, etc.) exist — **use `/matter` for new work.**
 
-**`LEGAL_GOVERNANCE_POLICY`** (default policy):
-```typescript
-{
-  confidence_threshold: 0.5,
-  privilege_detection: true,
-  escalation_rules: [
-    { trigger: "privilege_keywords_in_text",    reason: "Privilege detected — counsel review required" },
-    { trigger: "ca_noncompete_detected",         reason: "CA non-compete — void under CA Bus & Prof Code §16600" },
-    { trigger: "confidence_below_threshold",     reason: "low_confidence" },
-    { trigger: "incomplete_output",              reason: "incomplete_output" },
-    { trigger: "non_specific_output",            reason: "non_specific_output" },
-  ],
-  redaction_rules: [
-    { trigger: "privilege_keywords_in_text", field: "clause_text", replacement: "[REDACTED — privilege review required]" },
-  ],
-}
+---
+
+## Matter pipeline (`legal.ts`)
+
+```
+text → intakeClassify() → specialist[matter_type]() → evaluateGovernance() → receipt_token
+     → runSemanticShadow() (fire-and-forget, Railway/Render DB depending on deploy)
 ```
 
----
+Specialists: `contract`, `litigation`, `ip`, `employment`, `corporate`, **`cofounder`**.
 
-### `artifacts/api-server/src/lib/legalPlaybook.ts`
+**Governance** (`governanceEngine.ts`): privilege redaction, CA §16600 escalation, impact tiers — **LIVE in code** when `/matter` succeeds.
 
-10-scenario adversarial playbook with content quality assertions. Runs against `handleMatter` directly (not HTTP).
+**Model chain (current code):** OR 120B first, then Groq 70B, then OR 70B keys. `resolveApiKey()` — KEY_2 falls back to KEY_1. OpenRouter timeout 55s, Groq 12s.
 
-**Assertion logic (not just field presence):**
-- `assertContentQuality()` — at least one specific recommended action (>50 chars, not matching generic patterns), all flags have `clause_text` or `rule` or `detected_text`, no unexpected empty arrays on full-work scenarios
-- `isGenericAction(action)` — matches `/^(review|consult|seek|consider)\s+(with\s+)?(counsel|attorney|lawyer)/i` or length < 30
-- `expects_empty_arrays` — `blocking_issues` is explicitly allowed to be empty (not a failure)
-
-**Pass 1 playbook results** (run_id `7lm9cu0f`, 2026-05-17):
-
-| Metric | Result |
-|---|---|
-| scenarios_passed | 9/10 |
-| routing_accuracy | 1.00 |
-| required_fields_present_rate | 1.00 |
-| content_quality_pass_rate | 0.80 |
-| governance_acted_correctly_rate | 1.00 |
-| error_handling_pass_rate | 1.00 |
-
-**S06 known issue:** Employment full-work scenario fails ~30% of runs. Free-tier model returns `compliance_flags: []` non-deterministically on complex multi-field JSON. Not a blocker. Groq primary (Fix 6) should reduce this.
+**Required env:** `OPENROUTER_API_KEY` (minimum). `OPENROUTER_API_KEY_2`, `GROQ_API_KEY` optional headroom. `SESSION_SECRET` for receipt HMAC.
 
 ---
 
-### `artifacts/api-server/src/routes/legal.ts`
+## Draft + flywheel (ZIE legal path)
 
-Workforce entry point. ~1,100 lines. Key structure:
+**`draftAgent.ts` + `draftVault.ts`:** sync vault write → `zie_training_records` + `zie_preference_pairs` → `scheduleAutoJudge()`.
 
-**`POST /api/v1/legal/matter`** — the single workforce entry point:
-```
-text → intakeClassify()
-     → specialistHandler[matterType]()
-     → evaluateGovernance({ output, raw_text, confidence, policy })
-     → pool.query(model_usage_events)   // soft-fail
-     → return { matter_id, intake, specialist_output, governance_decision, trace, lineage }
-```
+Response includes honest `vault.pair_id` (not hardcoded). Task types: `legal_clause_draft`, `legal_agreement_generate`.
 
-**Six internal specialist functions:**
-- `intakeClassify(text)` → `{ matter_type, confidence, routing_target, reasoning }`
-- `contractAnalyze(text)` → `{ risk_flags[], blocking_issues[], next_steps[], overall_risk }`
-- `employmentAnalyze(text)` → `{ compliance_flags[], ca_noncompete_void, escalation_required, next_steps[] }`
-- `litigationAnalyze(text)` → `{ key_claims[], jurisdiction, recommended_next_steps[], statute_of_limitations_risk }`
-- `ipAnalyze(text)` → `{ ip_type, ownership_risk, key_restrictions[], recommended_actions[] }`
-- `corporateAnalyze(text)` → `{ governance_clauses[], board_approval_required, compliance_gaps[], next_steps[] }`
-
-**`applyCANoncompeteRule(text, output)`** — post-processing on employment output. Runs before governance. Sets `ca_noncompete_void = true` and `escalation_required = true` if CA non-compete detected. Belt-and-suspenders with governance engine.
+**Training trigger:** 50 judge-verified pairs per `task_type` → Modal LoRA (**PARTIAL** — Modal tokens + `DRY_RUN`).
 
 ---
 
-## Live Endpoints
+## RAG / KB (legal counsel)
 
-All under `/api/v1/legal/`:
+**LIVE:** Postgres `legal_corpus_documents` + `legal_corpus_chunks` (tsvector BM25). Seeded on boot via `migrateLegalCorpus()`.
 
-| Endpoint | Method | Description |
-|---|---|---|
-| `/v1/legal/matter` | POST | **Primary workforce entry point** — full pipeline |
-| `/v1/legal/playbook/run` | POST | Run all 10 playbook scenarios |
-| `/v1/legal/extract-clause` | POST | Clause classification (5 types) — legacy |
-| `/v1/legal/extract-clause` | GET | Asset info + lineage + eval results |
-| `/v1/legal/intake` | POST | Matter classification + routing — legacy |
-| `/v1/legal/contract/analyze` | POST | Contract specialist — legacy |
-| `/v1/legal/litigation/analyze` | POST | Litigation specialist — legacy |
-| `/v1/legal/ip/analyze` | POST | IP specialist — legacy |
-| `/v1/legal/employment/analyze` | POST | Employment specialist — legacy |
-| `/v1/legal/corporate/analyze` | POST | Corporate specialist — legacy |
-| `/v1/legal/next-asset-baseline` | POST | Baseline eval for next asset |
+| Endpoint | Description |
+|----------|-------------|
+| `GET /api/v1/legal/kb/status` | Document/chunk counts |
+| `POST /api/v1/legal/kb/search` | `{ query, domains?, limit?, max_chars? }` → hits + `context_block` |
 
-**Use `/v1/legal/matter` for all new work.** The individual specialist endpoints are legacy.
+**Wired into inference:** `cofounderAnalyze`, `contractAnalyze`, `extract-clause` (when `use_rag: true`). Context budget **8000 chars** (not 3000). Critical slugs always injected for cofounder: `qsbs-post-obbba`, `dgcl-144-safe-harbor`, `irc-83b-election`, etc.
+
+**Removed slop:** `cofounderCorpus.ts` 310-line hardcoded array → types only. `keywordRetrieve()` deleted.
+
+**Not yet:** CourtListener/NVCA PDF ingestion pipeline; embedding vectors; Agent B Python chain (use API RAG instead).
 
 ---
 
-## Model Chain (Fix 6 — current)
+## Open gaps (legal counsel only)
 
-```typescript
-// Provider-aware. Each entry specifies provider + API key env var.
-// Groq routes to api.groq.com/openai/v1 (no HTTP-Referer/X-Title headers).
-// OpenRouter routes to openrouter.ai/api/v1.
-
-const SPECIALIST_MODEL_CHAIN: ModelEntry[] = [
-  { id: "llama-3.3-70b-versatile", provider: "groq",       apiKeyEnv: "GROQ_API_KEY"         },  // primary
-  { id: "meta-llama/llama-3.3-70b-instruct:free", provider: "openrouter", apiKeyEnv: "OPENROUTER_API_KEY"   },
-  { id: "meta-llama/llama-3.3-70b-instruct:free", provider: "openrouter", apiKeyEnv: "OPENROUTER_API_KEY_2" },
-  { id: "openai/gpt-oss-120b:free",               provider: "openrouter", apiKeyEnv: "OPENROUTER_API_KEY"   },
-  { id: "openai/gpt-oss-20b:free",                provider: "openrouter", apiKeyEnv: "OPENROUTER_API_KEY_2" },
-];
-
-const INTAKE_MODEL_CHAIN: ModelEntry[] = [
-  { id: "openai/gpt-oss-20b:free",  provider: "openrouter", apiKeyEnv: "OPENROUTER_API_KEY"  },
-  { id: "openai/gpt-oss-120b:free", provider: "openrouter", apiKeyEnv: "OPENROUTER_API_KEY"  },
-  { id: "liquid/lfm-2.5-1.2b-instruct:free", provider: "openrouter", apiKeyEnv: "OPENROUTER_API_KEY", use_rag: true },
-];
-```
-
-**Required env vars:** `GROQ_API_KEY`, `OPENROUTER_API_KEY`, `OPENROUTER_API_KEY_2`
-
-On 429: try next entry (may be different key or provider). On parse failure: retry same entry once with explicit JSON instruction. On other errors: fail fast.
+1. **Two DBs** — flywheel/judge counts diverge; pick k30t as counsel source of truth or sync.
+2. **`/matter` reliability** — 429 / timeout under load; no trained fast model on matter chain yet.
+3. **Analyze → clause cards** — semantic shadow async; CounselUI Analyze tab blocked when matter fails.
+4. **Modal training** — 3/50 verified on k30t `legal_agreement_generate`; no LoRA promoted.
+5. **No real corpus** — NVCA/DGCL/CourtListener ingestion undecided.
+6. **Agent B / 5-agent pipeline** — not in repo.
 
 ---
 
-## Pass 1 Receipts (all in `/mnt/results/`)
+## Files (touch map)
 
-| Receipt | File | Key Values |
-|---|---|---|
-| R1 — Matter run | `receipt1_matter_run.json` | matter_id `1b4b867d`, contract, 4 risk_flags, `impact_tier: decision_support` |
-| R2 — Playbook | `receipt2_playbook_final.json` | 9/10 pass, routing=1.00, content_quality=0.80, governance=1.00 |
-| R3 — Redaction | `receipt3_redaction.json` | matter_id `efdbc527`, `action: escalate`, `clause_text: "[REDACTED]"` |
-| R4 — CA non-compete | `receipt4_ca_noncompete.json` | matter_id `8dd9d661`, `action: escalate`, §16600 citation, `impact_tier: action_triggering` |
-| R5 — Full work | `receipt5_full_work.json` | matter_id `0cd14004`, 5 risk_flags with clause_text, 5 specific next_steps |
+| File | Role |
+|------|------|
+| `routes/legal.ts` | Matter, specialists, governance, receipts |
+| `routes/legal.clause.draft.ts` | Draft/generate API |
+| `lib/draftAgent.ts` | LLM draft + vault |
+| `lib/draftVault.ts` | Sync vault + auto-judge hook |
+| `lib/governanceEngine.ts` | Redaction + escalation |
+| `lib/legalPlaybook.ts` | 10-scenario regression (direct handleMatter) |
+| `lib/semanticLegalAnalyzer.ts` | Shadow analyze + double-dip |
+| `mockups/CounselUI.tsx` | Analyze / Draft / History UI |
 
----
-
-## Pass 1 Acceptance Criteria — Final Status
-
-| Criterion | Status |
-|---|---|
-| `/matter` returns full JSON with all 6 fields | ✓ LIVE |
-| Governance redacts on privilege detection | ✓ LIVE |
-| Governance escalates on CA non-compete with §16600 | ✓ LIVE |
-| `impact_tier` in every governance_decision | ✓ LIVE |
-| All 10 scenarios run without unhandled exceptions | ✓ LIVE |
-| `content_quality_pass_rate` > 0 | ✓ LIVE (0.80) |
-| Every matter run logged to `model_usage_events` | ✓ CODE |
-| Governance escalates on confidence < 0.5 | ⚠️ CODE ONLY — path exists, never triggered by real legal text on free tier |
-| Governance escalates on generic-only actions | ⚠️ CODE ONLY — model consistently returns specific actions |
-
----
-
-## Bugs Fixed (Pass 1)
-
-| Bug | Root Cause | Fix | Commit |
-|---|---|---|---|
-| CA non-compete returns `pass` | Regex only matched `non-compete` literally, not "agrees not to compete" | 6 new patterns + specialist `escalation_required` passthrough | `4c79068` |
-| S02 misrouted as employment | Text started with "Employee hereby assigns..." | Replaced with unambiguous software license text | `64c8a73` |
-| S10 error path returns 200 | Length check in HTTP handler, playbook calls `handleMatter` directly | Moved validation inside `handleMatter` (throws with `err.status = 400`) | `64c8a73` |
-| S02 `blocking_issues: []` flagged | All empty arrays treated as failures | Added to `expects_empty_arrays` | `024de33` |
-| S06 `compliance_flags: []` ~30% | gpt-oss-20b:free unreliable for complex JSON | Split model chains, Groq llama-3.3-70b as specialist primary | `0aaf79f` |
-| All free models rate-limited | Shared global rate limit across free tier | Cross-provider chain (Meta/Google/DeepSeek/OpenAI) | `a875a99` |
-| Provider routing missing | Single OpenRouter endpoint for all models | Provider-aware `getProviderConfig()` + `callModelWithFallback()` | `0c51854` |
-
----
-
-## What Is Not Done (Pass 2 gate items)
-
-Pass 2 adds the co-founder agreement specialist. See `10-cofounder-specialist.mdc`.
-
-Pass 2B (domain descriptor + factory recipe) is separate and not started.
-
-**Do not touch `governanceEngine.ts` or `legalPlaybook.ts` unless a new bug is found.** Pass 1 is closed.
+**Playbook:** run locally or `POST /playbook/run` when models available — not a substitute for live `/matter` probes.

@@ -48,7 +48,7 @@ export const VERIFY_PROMPT_VERSION = "2a.1";
 export const ACTION_POLICY_VERSION = "legal-action-v1";
 
 /** Cofounder corpus version used for RAG context — introduced Phase 2A */
-export const CORPUS_VERSION = "cofounder-corpus-v1";
+export const CORPUS_VERSION = "legal-corpus-pg-v1";
 
 // ── Phase 2B prompts (redline plan) ──────────────────────────────────────────
 

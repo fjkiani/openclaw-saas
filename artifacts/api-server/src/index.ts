@@ -3,6 +3,7 @@ import { logger } from "./lib/logger";
 import { pool } from "@workspace/db";
 import { runSeed } from "./seed";
 import { startForgeScheduler, stopForgeScheduler } from "./lib/forgeScheduler";
+import { migrateLegalCorpus } from "./lib/legalCorpus/migrate.js";
 
 const rawPort = process.env["PORT"];
 
@@ -237,6 +238,8 @@ async function runZieMigration(): Promise<void> {
       ('seo_content_audit',      'liquid/lfm-2.5-1.2b-instruct:free', 'openrouter')
     ON CONFLICT ("task_type") DO NOTHING
   `);
+
+  await migrateLegalCorpus();
 
     logger.info("ZIE migration complete.");
   } catch (err) {
