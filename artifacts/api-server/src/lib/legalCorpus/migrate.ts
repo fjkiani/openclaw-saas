@@ -64,10 +64,7 @@ export async function migrateLegalCorpus(): Promise<void> {
         ADD COLUMN IF NOT EXISTS embedding_vec vector(2048)
     `);
 
-    await client.query(`
-      CREATE INDEX IF NOT EXISTS legal_corpus_chunks_embedding_vec_idx
-        ON legal_corpus_chunks USING hnsw (embedding_vec vector_cosine_ops)
-    `);
+    // HNSW limited to 2000 dims on Supabase; skip ANN index for 2048-dim Nemotron.
 
     // ── Seed the 12 playbook documents ──────────────────────────────────────
     for (const doc of LEGAL_CORPUS_SEED) {

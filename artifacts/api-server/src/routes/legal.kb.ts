@@ -4,11 +4,13 @@
  * GET  /api/v1/legal/kb/status
  * POST /api/v1/legal/kb/search
  * POST /api/v1/legal/kb/ingest
+ * POST /api/v1/legal/kb/embed-backfill
  */
 
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import { legalCorpusHybridRetrieve } from "../lib/legalCorpus/hybridRetrieve.js";
+import { backfillLegalCorpusEmbeddings } from "../lib/legalCorpus/backfillEmbeddings.js";
 import { legalCorpusStatus } from "../lib/legalCorpus/retrieve.js";
 import { ingestLegalDocument } from "../lib/legalCorpus/ingest.js";
 
@@ -76,6 +78,27 @@ router.post("/v1/legal/kb/search", async (req: Request, res: Response): Promise<
       excerpt: h.content.slice(0, 400),
     })),
     context_block: result.context_block,
+  });
+});
+
+router.post("/v1/legal/kb/embed-backfill", async (req: Request, res: Response): Promise<void> => {
+  const secret = process.env.LEGAL_EMBED_BACKFILL_SECRET?.trim();
+  if (secret) {
+    const provided = req.header("x-embed-backfill-secret");
+    if (provided !== secret) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+  }
+
+  const result = await backfillLegalCorpusEmbeddings({ maxChunks: 500, delayMs: 400 });
+  const status = await legalCorpusStatus();
+
+  res.json({
+    ok: true,
+    ...result,
+    embedded_pct: status.embedded_pct,
+    chunks: status.chunks,
   });
 });
 
