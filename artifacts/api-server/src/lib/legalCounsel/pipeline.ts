@@ -23,41 +23,25 @@ const COUNSEL_CHAIN: ModelRouteConfig[] = [
     id: "llama-3.3-70b-versatile",
     provider: "groq",
     apiKeyEnv: "GROQ_API_KEY",
-    maxTokens: 4096,
-    timeoutMs: 55_000,
+    maxTokens: 3072,
+    timeoutMs: 35_000,
     tags: ["70b", "counsel-primary"],
   },
   {
     id: "meta-llama/llama-3.3-70b-instruct:free",
     provider: "openrouter",
     apiKeyEnv: "OPENROUTER_API_KEY",
-    maxTokens: 4096,
-    timeoutMs: 55_000,
+    maxTokens: 3072,
+    timeoutMs: 50_000,
     tags: ["70b", "counsel-or-k1"],
-  },
-  {
-    id: "meta-llama/llama-3.3-70b-instruct:free",
-    provider: "openrouter",
-    apiKeyEnv: "OPENROUTER_API_KEY_2",
-    maxTokens: 4096,
-    timeoutMs: 55_000,
-    tags: ["70b", "counsel-or-k2"],
-  },
-  {
-    id: "openai/gpt-oss-120b:free",
-    provider: "openrouter",
-    apiKeyEnv: "OPENROUTER_API_KEY",
-    maxTokens: 4096,
-    timeoutMs: 90_000,
-    tags: ["120b", "counsel-fallback"],
   },
   {
     id: "openai/gpt-oss-20b:free",
     provider: "openrouter",
     apiKeyEnv: "OPENROUTER_API_KEY_2",
-    maxTokens: 4096,
-    timeoutMs: 55_000,
-    tags: ["20b", "counsel-last-resort"],
+    maxTokens: 3072,
+    timeoutMs: 50_000,
+    tags: ["20b", "counsel-fallback"],
   },
 ];
 
@@ -135,7 +119,19 @@ Statutory anchors you must apply correctly:
 - IRC §83(b): 30-day non-waivable election window for restricted stock
 - RUO vs clinical use for AI/oncology products with a CMO co-founder
 
-Output ONLY valid JSON matching the schema. No markdown outside JSON.
+Output ONLY valid JSON matching this shape (no markdown):
+{
+  "doc_class": "cofounder_agreement|contract|employment|other",
+  "overall_risk": "critical|high|medium|low",
+  "executive_summary": "string",
+  "lens_findings": [{"lens":"string","severity":"critical|high|medium|low|info","issue":"string","contract_excerpt":"string","statutory_basis":"string","corpus_slugs":["slug"],"recommendation":"string"}],
+  "opportunities_for_company": [{"type":"tax_optimization|loophole_for_company|missing_protective_clause|negotiation_leverage|compliance_fix","title":"string","description":"string","suggested_language":"string","corpus_slugs":["slug"]}],
+  "redlines": [{"section":"string","original_excerpt":"string","suggested_text":"string","rationale":"string","favors":"company|balanced|counterparty"}],
+  "blocking_issues": ["string"],
+  "missing_clauses": ["string"],
+  "next_steps": ["string"],
+  "reasoning_notes": "string"
+}
 Be specific: quote contract excerpts, name sections, propose actual clause language in redlines.
 For opportunities_for_company and redlines where favors=company, optimize for the Company's protection while staying enforceable under Delaware law.`;
 
@@ -152,8 +148,8 @@ export async function runLegalCounselAnalyze(
   const rag = await legalCorpusHybridRetrieve({
     query: retrievalQuery,
     domains: ["cofounder", "tax", "delaware", "regulatory", "contract"],
-    topK: 12,
-    maxChars: 9000,
+    topK: 8,
+    maxChars: 5500,
     forceCofounderCritical: /co-founder|cofounder|cmo|restricted stock/i.test(text),
   });
 
@@ -177,8 +173,8 @@ export async function runLegalCounselAnalyze(
       systemPrompt: SYSTEM_PROMPT,
       userContent,
       title: "OpenClaw Legal Counsel Multi-Lens",
-      maxTokens: 8192,
-      temperature: 0.15,
+      maxTokens: 3072,
+      temperature: 0.1,
     },
     COUNSEL_CHAIN,
     {
