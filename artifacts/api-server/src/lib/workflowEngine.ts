@@ -17,7 +17,7 @@
  *   const runId = await workflowEngine.startRun(definitionId, tenantId, input);
  */
 
-import { Pool } from "pg";
+import type { Pool } from "pg";
 import { logger } from "./logger.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
