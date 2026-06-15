@@ -3,6 +3,7 @@ import { logger } from "./lib/logger";
 import { pool } from "@workspace/db";
 import { runSeed } from "./seed";
 import { startForgeScheduler, stopForgeScheduler } from "./lib/forgeScheduler";
+import { workflowEngine } from "./lib/workflowEngine.js";
 import { migrateLegalCorpus } from "./lib/legalCorpus/migrate.js";
 import { backfillLegalCorpusEmbeddings } from "./lib/legalCorpus/backfillEmbeddings.js";
 
@@ -694,6 +695,125 @@ async function runMigrations(): Promise<void> {
       CREATE INDEX IF NOT EXISTS "counsel_runs_sha_idx" ON "counsel_runs" ("input_sha256");
     `);
 
+
+    // ── Workflow engine tables (Sprint 1+2 from HANDOFF doc) ─────────────────
+    // business_objects: tenant-scoped shared objects (invoice, contract, speaker, opportunity)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS "business_objects" (
+        "id"          uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+        "tenant_id"   text        NOT NULL,
+        "workspace_id" integer,
+        "object_type" text        NOT NULL,
+        "slug"        text        NOT NULL,
+        "display_name" text       NOT NULL,
+        "data"        jsonb       NOT NULL DEFAULT '{}',
+        "status"      text        NOT NULL DEFAULT 'active',
+        "created_by"  text,
+        "created_at"  timestamptz NOT NULL DEFAULT now(),
+        "updated_at"  timestamptz NOT NULL DEFAULT now()
+      )
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS "business_objects_tenant_idx"
+        ON "business_objects" ("tenant_id", "object_type");
+    `);
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS "business_objects_tenant_slug_idx"
+        ON "business_objects" ("tenant_id", "slug");
+    `);
+
+    // workflow_definitions: reusable step templates
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS "workflow_definitions" (
+        "id"          uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+        "tenant_id"   text        NOT NULL,
+        "workspace_id" integer,
+        "name"        text        NOT NULL,
+        "description" text,
+        "trigger"     text        NOT NULL DEFAULT 'manual',
+        "steps"       jsonb       NOT NULL DEFAULT '[]',
+        "policy_id"   uuid,
+        "version"     integer     NOT NULL DEFAULT 1,
+        "is_active"   boolean     NOT NULL DEFAULT true,
+        "created_by"  text,
+        "created_at"  timestamptz NOT NULL DEFAULT now(),
+        "updated_at"  timestamptz NOT NULL DEFAULT now()
+      )
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS "workflow_definitions_tenant_idx"
+        ON "workflow_definitions" ("tenant_id");
+    `);
+
+    // workflow_runs: instances of workflow_definitions
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS "workflow_runs" (
+        "id"            uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+        "definition_id" uuid        REFERENCES "workflow_definitions"("id") ON DELETE SET NULL,
+        "tenant_id"     text        NOT NULL,
+        "workspace_id"  integer,
+        "status"        text        NOT NULL DEFAULT 'pending',
+        "trigger_kind"  text        NOT NULL DEFAULT 'manual',
+        "input"         jsonb       NOT NULL DEFAULT '{}',
+        "output"        jsonb,
+        "error"         text,
+        "started_at"    timestamptz,
+        "completed_at"  timestamptz,
+        "created_by"    text,
+        "created_at"    timestamptz NOT NULL DEFAULT now()
+      )
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS "workflow_runs_tenant_status_idx"
+        ON "workflow_runs" ("tenant_id", "status");
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS "workflow_runs_definition_idx"
+        ON "workflow_runs" ("definition_id");
+    `);
+
+    // workflow_step_results: per-step outputs for a run
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS "workflow_step_results" (
+        "id"          uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+        "run_id"      uuid        NOT NULL REFERENCES "workflow_runs"("id") ON DELETE CASCADE,
+        "step_index"  integer     NOT NULL,
+        "skill_id"    text,
+        "status"      text        NOT NULL DEFAULT 'pending',
+        "input"       jsonb       NOT NULL DEFAULT '{}',
+        "output"      jsonb,
+        "error"       text,
+        "duration_ms" integer,
+        "started_at"  timestamptz,
+        "completed_at" timestamptz,
+        "created_at"  timestamptz NOT NULL DEFAULT now()
+      )
+    `);
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS "workflow_step_results_run_step_idx"
+        ON "workflow_step_results" ("run_id", "step_index");
+    `);
+
+    // platform_policies: governance gate (Sprint 5 from HANDOFF doc)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS "platform_policies" (
+        "id"          uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+        "tenant_id"   text        NOT NULL,
+        "policy_type" text        NOT NULL,
+        "name"        text        NOT NULL,
+        "description" text,
+        "rules"       jsonb       NOT NULL DEFAULT '{}',
+        "is_active"   boolean     NOT NULL DEFAULT true,
+        "created_by"  text,
+        "created_at"  timestamptz NOT NULL DEFAULT now(),
+        "updated_at"  timestamptz NOT NULL DEFAULT now()
+      )
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS "platform_policies_tenant_type_idx"
+        ON "platform_policies" ("tenant_id", "policy_type");
+    `);
+
     logger.info("DB migrations complete.");
   } finally {
     client.release();
@@ -725,6 +845,9 @@ app.listen(port, (err) => {
     .then(() => {
       logger.info("DB migrations and seed complete.");
       // Start the pg-boss forge scheduler after DB is confirmed live
+      // Initialize workflow engine with the shared pool
+      workflowEngine.init(pool);
+      logger.info({ skills: workflowEngine.listSkills() }, "workflowEngine initialized");
       return startForgeScheduler();
     })
     .then(() => {

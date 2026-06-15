@@ -12,6 +12,7 @@
  */
 import { pool } from "@workspace/db";
 import { logger } from "./lib/logger";
+import { seedAACRFlywheel } from "./lib/aacr_flywheel_seed.js";
 
 const DEMO_USER_ID = process.env.DEMO_USER_ID || "user_3DhVktxcTmcEqDWgYpMihDOy00t";
 
@@ -729,6 +730,167 @@ export async function runSeed(): Promise<void> {
         VALUES ($1, $2, 'legal_governance', $3, true)
         ON CONFLICT DO NOTHING
       `, [tenantId, `${spec.name} Governance Policy`, LEGAL_GOVERNANCE_RULES]).catch(() => {});
+    }
+
+
+    // ── 7. Connectors registry — supabase-aacr ───────────────────────────────
+    // Registers the AACR 2026 Intelligence corpus as a named connector.
+    // Tenants can install it via POST /api/tenants/:id/connectors.
+    // Real connector (not mock) — see src/connectors/supabase_aacr.ts
+    const connectorRows = [
+      {
+        slug: "supabase-aacr",
+        name: "AACR 2026 Intelligence",
+        description: "AACR 2026 conference intelligence corpus: 862 speakers, 926 competitive intel records, 1,480 clinical data entries, 3,024 pgvector embeddings. Semantic search via match_embeddings RPC.",
+        icon_url: "https://supabase.com/favicon/favicon-32x32.png",
+      },
+      {
+        slug: "crunchbase",
+        name: "Crunchbase",
+        description: "Investor and company data from Crunchbase. Search investors, funding rounds, and company profiles.",
+        icon_url: "https://www.crunchbase.com/favicon.ico",
+      },
+    ];
+
+    for (const c of connectorRows) {
+      await client.query(`
+        INSERT INTO connectors (name, slug, description, icon_url)
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT (slug) DO UPDATE SET
+          name=EXCLUDED.name,
+          description=EXCLUDED.description,
+          icon_url=EXCLUDED.icon_url
+      `, [c.name, c.slug, c.description, c.icon_url]);
+    }
+
+    // ── 8. AACR dataset in Model Forge (workspace_id=5 = Legal Intelligence Lab) ──
+    // Registers the AACR 2026 corpus as a trainable dataset so operators can
+    // create training jobs (mode=rag_adaptation) from the Forge UI.
+    // Check if AACR dataset already exists before inserting (model_datasets has no unique constraint)
+    const existingAacrDataset = await client.query(
+      `SELECT id FROM model_datasets WHERE tenant_id = $1 AND workspace_id = $2 AND name = $3 LIMIT 1`,
+      [tenantId, workspaceId, "AACR 2026 Conference Corpus"]
+    );
+    const aacr2026DatasetRes = existingAacrDataset.rows.length > 0
+      ? existingAacrDataset
+      : await client.query(`
+          INSERT INTO model_datasets (tenant_id, workspace_id, name, description, source_type, sensitivity, status, document_count)
+          VALUES ($1, $2, $3, $4, 'connector', 'internal', 'ready', 272)
+          RETURNING id
+        `, [
+          tenantId,
+          workspaceId,
+          "AACR 2026 Conference Corpus",
+          "272 AACR 2026 session transcripts with dual-schema LLM extraction. 862 speakers, 926 competitive intel records, 1,480 clinical data entries. Source: Supabase connector supabase-aacr.",
+        ]);
+
+    if (aacr2026DatasetRes.rows.length > 0) {
+      const aacr2026DatasetId = aacr2026DatasetRes.rows[0].id;
+
+      // Version snapshot
+      await client.query(`
+        INSERT INTO dataset_versions (tenant_id, dataset_id, version, document_count, total_bytes)
+        VALUES ($1, $2, 1, 272, 4038664)
+        ON CONFLICT DO NOTHING
+      `, [tenantId, aacr2026DatasetId]);
+
+      // Seed a queued training job for competitive intel extraction (only if not already seeded)
+      const existingAacrJob = await client.query(
+        `SELECT id FROM training_jobs WHERE tenant_id = $1 AND name = $2 LIMIT 1`,
+        [tenantId, "Competitive Intel Extractor v1"]
+      );
+      if (existingAacrJob.rows.length === 0) {
+        await client.query(`
+          INSERT INTO training_jobs (
+            tenant_id, workspace_id, name, mode, base_model,
+            dataset_id, dataset_version_id, status, compute_backend, hyperparams
+          )
+          SELECT
+            $1, $2, $3, $4, $5,
+            $6, dv.id, 'queued', 'kairos',
+            $7::jsonb
+          FROM dataset_versions dv
+          WHERE dv.dataset_id = $6 AND dv.version = 1
+            tenantId,
+          workspaceId,
+          "Competitive Intel Extractor v1",
+          "rag_adaptation",
+          "liquid/lfm-2.5-1.2b-instruct:free",
+          aacr2026DatasetId,
+          JSON.stringify({
+            task_type: "competitive_intel_extraction",
+            domain: "aacr",
+            retriever: { top_k: 3, threshold: 0.65 },
+            description: "RAG adaptation for competitive intelligence extraction from oncology conference transcripts",
+          }),
+        ]);
+      }
+    }
+
+    // ── 9. AACR flywheel seed (router policy only — SFT/pref data flows via search) ──
+    // Seeds the zie_router_policies row for competitive_intel_extraction.
+    // Full SFT + preference pair data is loaded via the intelligence.ts search route
+    // (rerank=true) and the aacr_flywheel_seed.ts module.
+    try {
+      await seedAACRFlywheel({ sft_rows: [], pref_rows: [] });
+      logger.info("aacr_flywheel_seed: router policy seeded for competitive_intel_extraction");
+    } catch (flywheelErr: unknown) {
+      logger.warn({ err: flywheelErr }, "aacr_flywheel_seed: skipped (tables may not exist yet)");
+    }
+
+    // ── 10. AACR workflow definition seed ────────────────────────────────────────
+    // Seeds the "Conference Intelligence → CRM Pipeline" workflow definition
+    // for the demo tenant. Idempotent — skips if a definition with this name exists.
+    try {
+      const existingWf = await client.query(
+        `SELECT id FROM workflow_definitions WHERE tenant_id = $1 AND name = $2 LIMIT 1`,
+        [DEMO_USER_ID, "Conference Intelligence → CRM Pipeline"]
+      );
+      if (existingWf.rows.length === 0) {
+        await client.query(
+          `INSERT INTO workflow_definitions
+             (tenant_id, workspace_id, name, description, trigger, steps, created_by)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          [
+            DEMO_USER_ID,
+            workspaceId,
+            "Conference Intelligence → CRM Pipeline",
+            "Semantic search AACR 2026 corpus → score CrisPRO opportunities → extract cognitive dissonance → push to CRM",
+            "manual",
+            JSON.stringify([
+              {
+                skill_id: "aacr-semantic-search",
+                description: "Find relevant speakers by query",
+                output_key: "speakers",
+              },
+              {
+                skill_id: "crispro-scorer",
+                description: "Score CrisPRO opportunities",
+                input_mapping: { speakers: "speakers" },
+                output_key: "crispro_opps",
+              },
+              {
+                skill_id: "cd-hit-extractor",
+                description: "Extract cognitive dissonance hits",
+                input_mapping: { speakers: "speakers" },
+                output_key: "cd_hits",
+              },
+              {
+                skill_id: "crm-push",
+                description: "Push scored opportunities to CRM",
+                input_mapping: { crispro_opps: "opportunities", cd_hits: "cd_hits" },
+                output_key: "crm_result",
+              },
+            ]),
+            DEMO_USER_ID,
+          ]
+        );
+        logger.info("AACR workflow definition seeded: Conference Intelligence → CRM Pipeline");
+      } else {
+        logger.info("AACR workflow definition already exists — skipping");
+      }
+    } catch (wfErr: unknown) {
+      logger.warn({ err: wfErr }, "AACR workflow definition seed skipped (table may not exist yet)");
     }
 
     logger.info(

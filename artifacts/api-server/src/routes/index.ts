@@ -18,6 +18,8 @@ import clauseDraftRouter from "./legal.clause.draft.js";
 import flywheelRouter from "./flywheel.js";
 import legalKbRouter from "./legal.kb.js";
 import legalCounselRouter from "./legal.counsel.js";
+import intelligenceRouter from "./intelligence.js";
+import workflowsRouter from "./workflows.js";
 
 const router: IRouter = Router();
 
@@ -40,5 +42,7 @@ router.use(clauseDraftRouter);
 router.use(flywheelRouter);
 router.use(legalKbRouter);
 router.use(legalCounselRouter);
+router.use(intelligenceRouter);
+router.use(workflowsRouter);
 
 export default router;

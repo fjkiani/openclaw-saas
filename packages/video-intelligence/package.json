@@ -1,0 +1,26 @@
+{
+  "name": "@workspace/video-intelligence",
+  "version": "1.0.0",
+  "description": "AACR 2026 conference intelligence pipeline — crawler, extractor, Supabase SDK",
+  "type": "module",
+  "main": "./sdk/index.js",
+  "types": "./sdk/index.d.ts",
+  "exports": {
+    ".": "./sdk/index.js",
+    "./sdk": "./sdk/index.js",
+    "./sdk/client": "./sdk/client.js",
+    "./sdk/search": "./sdk/search.js",
+    "./sdk/loader": "./sdk/loader.js",
+    "./sdk/types": "./sdk/types.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  },
+  "keywords": ["aacr", "conference-intelligence", "competitive-intel", "pgvector", "supabase"],
+  "license": "MIT"
+}
