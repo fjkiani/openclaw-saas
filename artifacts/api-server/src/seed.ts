@@ -800,8 +800,8 @@ export async function runSeed(): Promise<void> {
         [tenantId, "Competitive Intel Extractor v1"]
       );
       if (existingAacrJob.rows.length === 0) {
-        await client.query(`
-          INSERT INTO training_jobs (
+        await client.query(
+          `INSERT INTO training_jobs (
             tenant_id, workspace_id, name, mode, base_model,
             dataset_id, dataset_version_id, status, compute_backend, hyperparams
           )
@@ -810,20 +810,22 @@ export async function runSeed(): Promise<void> {
             $6, dv.id, 'queued', 'kairos',
             $7::jsonb
           FROM dataset_versions dv
-          WHERE dv.dataset_id = $6 AND dv.version = 1
+          WHERE dv.dataset_id = $6 AND dv.version = 1`,
+          [
             tenantId,
-          workspaceId,
-          "Competitive Intel Extractor v1",
-          "rag_adaptation",
-          "liquid/lfm-2.5-1.2b-instruct:free",
-          aacr2026DatasetId,
-          JSON.stringify({
-            task_type: "competitive_intel_extraction",
-            domain: "aacr",
-            retriever: { top_k: 3, threshold: 0.65 },
-            description: "RAG adaptation for competitive intelligence extraction from oncology conference transcripts",
-          }),
-        ]);
+            workspaceId,
+            "Competitive Intel Extractor v1",
+            "rag_adaptation",
+            "liquid/lfm-2.5-1.2b-instruct:free",
+            aacr2026DatasetId,
+            JSON.stringify({
+              task_type: "competitive_intel_extraction",
+              domain: "aacr",
+              retriever: { top_k: 3, threshold: 0.65 },
+              description: "RAG adaptation for competitive intelligence extraction from oncology conference transcripts",
+            }),
+          ]
+        );
       }
     }
 
