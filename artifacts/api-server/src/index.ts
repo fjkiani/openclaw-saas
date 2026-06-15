@@ -4,6 +4,7 @@ import { pool } from "@workspace/db";
 import { runSeed } from "./seed";
 import { startForgeScheduler, stopForgeScheduler } from "./lib/forgeScheduler";
 import { workflowEngine } from "./lib/workflowEngine.js";
+import { registerAACRSkills } from "./lib/skills/aacr/index.js";
 import { migrateLegalCorpus } from "./lib/legalCorpus/migrate.js";
 import { backfillLegalCorpusEmbeddings } from "./lib/legalCorpus/backfillEmbeddings.js";
 
@@ -847,7 +848,8 @@ app.listen(port, (err) => {
       // Start the pg-boss forge scheduler after DB is confirmed live
       // Initialize workflow engine with the shared pool
       workflowEngine.init(pool);
-      logger.info({ skills: workflowEngine.listSkills() }, "workflowEngine initialized");
+      registerAACRSkills();
+      logger.info({ skills: workflowEngine.listSkills() }, "workflowEngine initialized with AACR skills");
       return startForgeScheduler();
     })
     .then(() => {
