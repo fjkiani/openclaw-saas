@@ -56,7 +56,7 @@ function getUserId(req: Request): string {
  * List all active workflow definitions for the authenticated user's tenant.
  */
 router.get(
-  "/api/workflows/definitions",
+  "/workflows/definitions",
   requireAuth,
   async (req: Request, res: Response): Promise<void> => {
     const userId = getUserId(req);
@@ -87,7 +87,7 @@ router.get(
  * Create a new workflow definition.
  */
 router.post(
-  "/api/workflows/definitions",
+  "/workflows/definitions",
   requireAuth,
   async (req: Request, res: Response): Promise<void> => {
     const userId = getUserId(req);
@@ -131,7 +131,7 @@ router.post(
  * GET /api/workflows/definitions/:id
  */
 router.get(
-  "/api/workflows/definitions/:id",
+  "/workflows/definitions/:id",
   requireAuth,
   async (req: Request, res: Response): Promise<void> => {
     const userId = getUserId(req);
@@ -159,7 +159,7 @@ router.get(
  * Soft-delete (deactivate) a workflow definition.
  */
 router.delete(
-  "/api/workflows/definitions/:id",
+  "/workflows/definitions/:id",
   requireAuth,
   async (req: Request, res: Response): Promise<void> => {
     const userId = getUserId(req);
@@ -195,7 +195,7 @@ router.delete(
  * Body: { definition_id, input?, trigger_kind? }
  */
 router.post(
-  "/api/workflows/runs",
+  "/workflows/runs",
   requireAuth,
   async (req: Request, res: Response): Promise<void> => {
     const userId = getUserId(req);
@@ -231,7 +231,7 @@ router.post(
  * List runs for the authenticated user (paginated).
  */
 router.get(
-  "/api/workflows/runs",
+  "/workflows/runs",
   requireAuth,
   async (req: Request, res: Response): Promise<void> => {
     const userId = getUserId(req);
@@ -269,7 +269,7 @@ router.get(
  * GET /api/workflows/runs/:id
  */
 router.get(
-  "/api/workflows/runs/:id",
+  "/workflows/runs/:id",
   requireAuth,
   async (req: Request, res: Response): Promise<void> => {
     const userId = getUserId(req);
@@ -293,7 +293,7 @@ router.get(
  * GET /api/workflows/runs/:id/steps
  */
 router.get(
-  "/api/workflows/runs/:id/steps",
+  "/workflows/runs/:id/steps",
   requireAuth,
   async (req: Request, res: Response): Promise<void> => {
     const userId = getUserId(req);
@@ -319,7 +319,7 @@ router.get(
  * POST /api/workflows/runs/:id/cancel
  */
 router.post(
-  "/api/workflows/runs/:id/cancel",
+  "/workflows/runs/:id/cancel",
   requireAuth,
   async (req: Request, res: Response): Promise<void> => {
     const userId = getUserId(req);
@@ -347,7 +347,7 @@ router.post(
  * GET /api/workflows/policies
  */
 router.get(
-  "/api/workflows/policies",
+  "/workflows/policies",
   requireAuth,
   async (req: Request, res: Response): Promise<void> => {
     const userId = getUserId(req);
@@ -380,7 +380,7 @@ router.get(
  * POST /api/workflows/policies
  */
 router.post(
-  "/api/workflows/policies",
+  "/workflows/policies",
   requireAuth,
   async (req: Request, res: Response): Promise<void> => {
     const userId = getUserId(req);
@@ -411,7 +411,7 @@ router.post(
  * DELETE /api/workflows/policies/:id
  */
 router.delete(
-  "/api/workflows/policies/:id",
+  "/workflows/policies/:id",
   requireAuth,
   async (req: Request, res: Response): Promise<void> => {
     const userId = getUserId(req);
@@ -446,7 +446,7 @@ router.delete(
  * Returns the list of registered skill handler IDs.
  */
 router.get(
-  "/api/workflows/skills",
+  "/workflows/skills",
   requireAuth,
   async (_req: Request, res: Response): Promise<void> => {
     res.json({ skills: workflowEngine.listSkills() });
