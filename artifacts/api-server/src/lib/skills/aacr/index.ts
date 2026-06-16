@@ -300,3 +300,21 @@ export function registerAACRSkills(): void {
     "AACR skill handlers registered"
   );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Eval shim — exposes handlers by skill_id for skillEval.ts direct invocation.
+// Not called from production routes. Only used by the eval pipeline.
+// ─────────────────────────────────────────────────────────────────────────────
+
+import type { SkillHandler } from "../../workflowEngine.js";
+
+const HANDLER_MAP: Record<string, SkillHandler> = {
+  "aacr-semantic-search": acrSemanticSearch,
+  "crispro-scorer":       crisPROScorer,
+  "cd-hit-extractor":     cdHitExtractor,
+  "crm-push":             crmPush,
+};
+
+export function _getHandler(skillId: string): SkillHandler | undefined {
+  return HANDLER_MAP[skillId];
+}

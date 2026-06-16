@@ -20,6 +20,7 @@ import legalKbRouter from "./legal.kb.js";
 import legalCounselRouter from "./legal.counsel.js";
 import intelligenceRouter from "./intelligence.js";
 import workflowsRouter from "./workflows.js";
+import evalRouter from "./eval.js";
 
 const router: IRouter = Router();
 
@@ -44,5 +45,6 @@ router.use(legalKbRouter);
 router.use(legalCounselRouter);
 router.use(intelligenceRouter);
 router.use(workflowsRouter);
+router.use("/eval", evalRouter);
 
 export default router;
