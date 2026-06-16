@@ -157,7 +157,7 @@ function captureSearchPreferencePair(
 
 // GET /api/intelligence/sessions
 router.get(
-  "/api/intelligence/sessions",
+  "/intelligence/sessions",
   requireAuth,
   async (req: Request, res: Response): Promise<void> => {
     try {
@@ -178,7 +178,7 @@ router.get(
 
 // GET /api/intelligence/speakers
 router.get(
-  "/api/intelligence/speakers",
+  "/intelligence/speakers",
   requireAuth,
   async (req: Request, res: Response): Promise<void> => {
     try {
@@ -210,7 +210,7 @@ router.get(
 
 // GET /api/intelligence/cd-hits
 router.get(
-  "/api/intelligence/cd-hits",
+  "/intelligence/cd-hits",
   requireAuth,
   async (req: Request, res: Response): Promise<void> => {
     try {
@@ -247,7 +247,7 @@ router.get(
 
 // GET /api/intelligence/crispro
 router.get(
-  "/api/intelligence/crispro",
+  "/intelligence/crispro",
   requireAuth,
   async (req: Request, res: Response): Promise<void> => {
     try {
@@ -288,7 +288,7 @@ router.get(
 
 // POST /api/intelligence/search
 router.post(
-  "/api/intelligence/search",
+  "/intelligence/search",
   requireAuth,
   async (req: Request, res: Response): Promise<void> => {
     try {
@@ -408,7 +408,7 @@ router.post(
 
 // GET /api/intelligence/stats — public, no auth
 router.get(
-  "/api/intelligence/stats",
+  "/intelligence/stats",
   async (_req: Request, res: Response): Promise<void> => {
     try {
       const tables = [
@@ -467,7 +467,7 @@ router.get(
 
 // GET /api/intelligence/flywheel — AACR domain flywheel status
 router.get(
-  "/api/intelligence/flywheel",
+  "/intelligence/flywheel",
   requireAuth,
   async (_req: Request, res: Response): Promise<void> => {
     try {
