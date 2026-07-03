@@ -406,6 +406,9 @@ export const ListSkillsResponseItem = zod.object({
   installs: zod.number(),
   featured: zod.boolean(),
   tags: zod.array(zod.string()),
+  source: zod.string().nullable().optional(),
+  grade: zod.string().nullable().optional(),
+  archonRunId: zod.string().nullable().optional(),
 });
 export const ListSkillsResponse = zod.array(ListSkillsResponseItem);
 
