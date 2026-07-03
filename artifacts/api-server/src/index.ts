@@ -273,6 +273,7 @@ async function runMigrations(): Promise<void> {
         "id" text PRIMARY KEY NOT NULL,
         "user_id" text NOT NULL,
         "name" text NOT NULL,
+        "plan" text NOT NULL DEFAULT 'free',
         "description" text,
         "status" text NOT NULL DEFAULT 'stopped',
         "skill_pack" text,
@@ -297,6 +298,7 @@ async function runMigrations(): Promise<void> {
         ADD COLUMN IF NOT EXISTS "ws_endpoint" text,
         ADD COLUMN IF NOT EXISTS "gateway_token" text,
         ADD COLUMN IF NOT EXISTS "render_service_id" text,
+        ADD COLUMN IF NOT EXISTS "plan" text NOT NULL DEFAULT 'free',
         ADD COLUMN IF NOT EXISTS "updated_at" timestamp with time zone NOT NULL DEFAULT now()
     `);
 

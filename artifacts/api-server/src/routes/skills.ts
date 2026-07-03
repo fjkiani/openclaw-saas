@@ -1,4 +1,4 @@
-import { Router, type IRouter } from "express";
+import { Router, type IRouter, type Request, type Response } from "express";
 import { eq, ilike, or, sql } from "drizzle-orm";
 import { db, skillsTable, skillBenchmarksTable } from "@workspace/db";
 import {
@@ -228,7 +228,48 @@ router.post("/skills/refresh", async (_req, res): Promise<void> => {
   res.json({ ok: true, skillsLoaded: count });
 });
 
-router.post("/skills/:id/benchmark", async (req, res): Promise<void> => {
+// ─── Service-token auth helper ────────────────────────────────────────────────
+function isServiceTokenRequest(req: Request): boolean {
+  const envToken = process.env.OPENCLAW_SERVICE_TOKEN;
+  if (!envToken) return false;
+  const authHeader = req.headers.authorization ?? "";
+  const bearer = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+  return bearer.length > 0 && bearer === envToken;
+}
+
+// ─── POST /skills — Create a skill (Archon catalog insert) ───────────────────
+router.post("/skills", async (req: Request, res: Response): Promise<void> => {
+  const serviceAuth = isServiceTokenRequest(req);
+  const clerkAuth = !!(req as any).auth?.userId;
+  if (!serviceAuth && !clerkAuth) {
+    res.status(401).json({ error: "Unauthorized — provide a valid service token or Clerk JWT" });
+    return;
+  }
+
+  const { name, slug, description, category, featured = false, tags = [], source = "archon", implementation, archonRunId } =
+    req.body as { name?: string; slug?: string; description?: string; category?: string; featured?: boolean; tags?: string[]; source?: string; implementation?: string; archonRunId?: string };
+
+  if (!name || !slug || !description || !category) {
+    res.status(400).json({ error: "name, slug, description, and category are required" });
+    return;
+  }
+
+  try {
+    const [inserted] = await db
+      .insert(skillsTable)
+      .values({ name, slug, description, category, featured, tags: tags ?? [], source, implementation: implementation ?? null, archonRunId: archonRunId ?? null })
+      .onConflictDoUpdate({
+        target: skillsTable.slug,
+        set: { name: sql`EXCLUDED.name`, description: sql`EXCLUDED.description`, category: sql`EXCLUDED.category`, featured: sql`EXCLUDED.featured`, tags: sql`EXCLUDED.tags`, source: sql`EXCLUDED.source`, implementation: sql`EXCLUDED.implementation`, archonRunId: sql`EXCLUDED.archon_run_id` },
+      })
+      .returning();
+    res.status(201).json({ id: inserted.id, slug: inserted.slug, name: inserted.name });
+  } catch (err: unknown) {
+    res.status(500).json({ error: `Failed to insert skill: ${err instanceof Error ? err.message : String(err)}` });
+  }
+});
+
+router.post("/skills/:id/benchmark", async (req: Request, res: Response): Promise<void> => {
   const skillId = parseInt(req.params.id);
   if (isNaN(skillId)) {
     res.status(400).json({ error: "Invalid skill id" });
@@ -245,7 +286,7 @@ router.post("/skills/:id/benchmark", async (req, res): Promise<void> => {
       skill_name: skill.name,
       skill_description: skill.description,
       skill_category: skill.category,
-      test_suite: (req.query.suite as any) || "standard",
+      test_suite: (["standard","adversarial","quick"].includes(req.query.suite as string) ? req.query.suite as "standard"|"adversarial"|"quick" : "standard"),
     });
     res.json({ benchmark_id: run.benchmark_id, status: run.status, skill_id: skillId });
   } catch (err: any) {
@@ -253,7 +294,7 @@ router.post("/skills/:id/benchmark", async (req, res): Promise<void> => {
   }
 });
 
-router.get("/skills/:id/benchmark-result", async (req, res): Promise<void> => {
+router.get("/skills/:id/benchmark-result", async (req: Request, res: Response): Promise<void> => {
   const skillId = parseInt(req.params.id);
   if (isNaN(skillId)) {
     res.status(400).json({ error: "Invalid skill id" });
@@ -274,9 +315,9 @@ router.get("/skills/:id/benchmark-result", async (req, res): Promise<void> => {
   res.json(results[0]);
 });
 
-router.get("/benchmark/:benchmarkId", async (req, res): Promise<void> => {
+router.get("/benchmark/:benchmarkId", async (req: Request, res: Response): Promise<void> => {
   try {
-    const result = await getBenchmarkResult(req.params.benchmarkId);
+    const result = await getBenchmarkResult(req.params["benchmarkId"] as string);
     res.json(result);
   } catch (err: any) {
     res.status(503).json({ error: "Benchmark service unavailable", details: err?.message });
