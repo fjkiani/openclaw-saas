@@ -321,6 +321,15 @@ async function runMigrations(): Promise<void> {
       )
     `);
 
+    // Idempotent column additions for skills (Archon factory fields added after initial deploy)
+    await client.query(`
+      ALTER TABLE "skills"
+        ADD COLUMN IF NOT EXISTS "source" text NOT NULL DEFAULT 'manual',
+        ADD COLUMN IF NOT EXISTS "current_version" integer NOT NULL DEFAULT 1,
+        ADD COLUMN IF NOT EXISTS "archon_run_id" text,
+        ADD COLUMN IF NOT EXISTS "implementation" text
+    `);
+
     await client.query(`
       CREATE TABLE IF NOT EXISTS "skill_benchmarks" (
         "id" serial PRIMARY KEY NOT NULL,
