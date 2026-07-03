@@ -648,6 +648,12 @@ importers:
         specifier: ^5.3.3
         version: 5.9.3
 
+  packages/video-intelligence:
+    devDependencies:
+      typescript:
+        specifier: ^5.4.0
+        version: 5.9.3
+
   scripts:
     dependencies:
       '@workspace/db':
