@@ -347,7 +347,9 @@ async function runMigrations(): Promise<void> {
         ADD COLUMN IF NOT EXISTS "test_suite" text NOT NULL DEFAULT 'standard',
         ADD COLUMN IF NOT EXISTS "ran_at" timestamp with time zone NOT NULL DEFAULT now(),
         ADD COLUMN IF NOT EXISTS "duration_ms" integer,
-        ADD COLUMN IF NOT EXISTS "error" text
+        ADD COLUMN IF NOT EXISTS "error" text,
+        ADD COLUMN IF NOT EXISTS "status" text NOT NULL DEFAULT 'completed',
+        ADD COLUMN IF NOT EXISTS "result_json" jsonb
     `);
 
     // tenant_skills: tenant_id integer (matches Drizzle schema)
