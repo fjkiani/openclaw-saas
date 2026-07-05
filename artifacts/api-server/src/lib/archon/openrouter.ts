@@ -5,54 +5,76 @@ interface OpenRouterMessage {
   content: string;
 }
 
-const MAX_RETRIES = 4;
-const BASE_DELAY_MS = 3000; // 3s base — matches OpenRouter's retry_after_seconds hint
+const MAX_RETRIES_PER_MODEL = 2;
+const BASE_DELAY_MS = 4000; // 4s base
 
+/**
+ * callOpenRouter — calls OpenRouter with retry + model fallback.
+ *
+ * If the primary model returns 429/503, retries up to MAX_RETRIES_PER_MODEL
+ * times with exponential backoff, then falls through to the next model in
+ * `fallbacks`. Throws only if all models are exhausted.
+ */
 export async function callOpenRouter(
   model: string,
   messages: OpenRouterMessage[],
-  temperature = 0.2
+  temperature = 0.2,
+  fallbacks: string[] = []
 ): Promise<string> {
-  let lastError: Error | null = null;
+  const modelsToTry = [model, ...fallbacks];
 
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    if (attempt > 0) {
-      // Exponential backoff: 3s, 6s, 12s, 24s
-      const delay = BASE_DELAY_MS * Math.pow(2, attempt - 1);
-      await new Promise((r) => setTimeout(r, delay));
+  for (const currentModel of modelsToTry) {
+    let lastError: Error | null = null;
+
+    for (let attempt = 0; attempt <= MAX_RETRIES_PER_MODEL; attempt++) {
+      if (attempt > 0) {
+        const delay = BASE_DELAY_MS * Math.pow(2, attempt - 1);
+        await new Promise((r) => setTimeout(r, delay));
+      }
+
+      const res = await fetch(config.openrouterBaseUrl, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${config.openrouterApiKey}`,
+          "Content-Type": "application/json",
+          "HTTP-Referer": "https://openclaw.ai",
+          "X-Title": "OpenClaw Archon Factory",
+        },
+        body: JSON.stringify({ model: currentModel, messages, temperature, max_tokens: 4096 }),
+      });
+
+      if (res.ok) {
+        const data = (await res.json()) as {
+          choices: Array<{ message: { content: string } }>;
+        };
+        return data.choices[0]?.message?.content ?? "";
+      }
+
+      const errText = await res.text();
+
+      // Retry on 429/503 within this model
+      if ((res.status === 429 || res.status === 503) && attempt < MAX_RETRIES_PER_MODEL) {
+        lastError = new Error(`OpenRouter ${res.status} [${currentModel}]: ${errText}`);
+        continue;
+      }
+
+      // Non-retryable error for this model — try next fallback
+      lastError = new Error(`OpenRouter ${res.status} [${currentModel}]: ${errText}`);
+      break;
     }
 
-    const res = await fetch(config.openrouterBaseUrl, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${config.openrouterApiKey}`,
-        "Content-Type": "application/json",
-        "HTTP-Referer": "https://openclaw.ai",
-        "X-Title": "OpenClaw Archon Factory",
-      },
-      body: JSON.stringify({ model, messages, temperature, max_tokens: 4096 }),
-    });
-
-    if (res.ok) {
-      const data = (await res.json()) as {
-        choices: Array<{ message: { content: string } }>;
-      };
-      return data.choices[0]?.message?.content ?? "";
+    // If we get here, this model failed — try next
+    if (lastError) {
+      const isRateLimit = lastError.message.includes("429") || lastError.message.includes("503");
+      if (!isRateLimit) {
+        // Hard error (400, 401, etc.) — don't try fallbacks
+        throw lastError;
+      }
+      // Rate limit — continue to next model
     }
-
-    const errText = await res.text();
-
-    // Retry on 429 (rate limit) and 503 (upstream unavailable)
-    if ((res.status === 429 || res.status === 503) && attempt < MAX_RETRIES) {
-      lastError = new Error(`OpenRouter ${res.status}: ${errText}`);
-      continue;
-    }
-
-    // Non-retryable error
-    throw new Error(`OpenRouter ${res.status}: ${errText}`);
   }
 
-  throw lastError ?? new Error("OpenRouter: max retries exceeded");
+  throw new Error(`OpenRouter: all models exhausted (tried: ${modelsToTry.join(", ")})`);
 }
 
 export function extractJson(text: string): unknown {

@@ -55,7 +55,8 @@ Rate this implementation 0-100. Return JSON only.`;
     const raw = await callOpenRouter(
       config.reasoningModel,
       [{ role: "system", content: L1_JUDGE_PROMPT }, { role: "user", content: userContent }],
-      0.1
+      0.1,
+      config.reasoningModelFallbacks,
     );
     const parsed = extractJson(raw) as { score?: number; reasoning?: string };
     const score = typeof parsed.score === "number" ? Math.max(0, Math.min(100, parsed.score)) : 50;

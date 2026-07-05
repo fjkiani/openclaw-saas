@@ -40,10 +40,15 @@ export interface GeneratedSkill {
 }
 
 export async function generateSkill(prompt: string): Promise<GeneratedSkill> {
-  const raw = await callOpenRouter(config.codeModel, [
-    { role: "system", content: SKILL_SYSTEM_PROMPT },
-    { role: "user", content: `Build a skill that: ${prompt}` },
-  ]);
+  const raw = await callOpenRouter(
+    config.codeModel,
+    [
+      { role: "system", content: SKILL_SYSTEM_PROMPT },
+      { role: "user", content: `Build a skill that: ${prompt}` },
+    ],
+    0.2,
+    config.codeModelFallbacks,
+  );
 
   const parsed = extractJson(raw) as GeneratedSkill;
   const required = ["name", "description", "category", "inputSchema", "outputSchema", "implementation"];
@@ -65,9 +70,14 @@ ${JSON.stringify(originalSkill, null, 2)}
 
 Return ONLY the corrected JSON object. Same schema as before. Fix the TypeScript in the "implementation" field.`;
 
-  const raw = await callOpenRouter(config.codeModel, [
-    { role: "system", content: SKILL_SYSTEM_PROMPT },
-    { role: "user", content: FIX_PROMPT },
-  ]);
+  const raw = await callOpenRouter(
+    config.codeModel,
+    [
+      { role: "system", content: SKILL_SYSTEM_PROMPT },
+      { role: "user", content: FIX_PROMPT },
+    ],
+    0.2,
+    config.codeModelFallbacks,
+  );
   return extractJson(raw) as GeneratedSkill;
 }
