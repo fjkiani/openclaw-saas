@@ -34,7 +34,16 @@ const router = Router();
 // Auth helper (matches pattern in tenants.ts / intelligence.ts)
 // ─────────────────────────────────────────────────────────────────────────────
 
+function isServiceTokenRequest(req: Request): boolean {
+  const envToken = process.env.OPENCLAW_SERVICE_TOKEN;
+  if (!envToken) return false;
+  const authHeader = req.headers.authorization ?? "";
+  const bearer = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+  return bearer.length > 0 && bearer === envToken;
+}
+
 function requireAuth(req: Request, res: Response, next: () => void): void {
+  if (isServiceTokenRequest(req)) { next(); return; }
   const auth = getAuth(req);
   if (!auth?.userId) {
     res.status(401).json({ error: "Unauthorized" });
@@ -44,6 +53,10 @@ function requireAuth(req: Request, res: Response, next: () => void): void {
 }
 
 function getUserId(req: Request): string {
+  // Service token requests use DEMO_USER_ID as the tenant
+  if (isServiceTokenRequest(req)) {
+    return process.env.DEMO_USER_ID ?? "user_3DhVktxcTmcEqDWgYpMihDOy00t";
+  }
   return getAuth(req)?.userId ?? "unknown";
 }
 
