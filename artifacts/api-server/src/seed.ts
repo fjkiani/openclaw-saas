@@ -895,6 +895,56 @@ export async function runSeed(): Promise<void> {
       logger.warn({ err: wfErr }, "AACR workflow definition seed skipped (table may not exist yet)");
     }
 
+    // ── 11. ZOA demo workflow definition seed ────────────────────────────────────
+    // Seeds a 3-step "Employee Onboarding" workflow using ZOA skill handlers.
+    // Idempotent — skips if a definition with this name already exists.
+    try {
+      const existingZoaWf = await client.query(
+        `SELECT id FROM workflow_definitions WHERE tenant_id = $1 AND name = $2 LIMIT 1`,
+        [DEMO_USER_ID, "ZOA Employee Onboarding Pipeline"]
+      );
+      if (existingZoaWf.rows.length === 0) {
+        await client.query(
+          `INSERT INTO workflow_definitions
+             (tenant_id, workspace_id, name, description, trigger, steps, created_by)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          [
+            DEMO_USER_ID,
+            workspaceId,
+            "ZOA Employee Onboarding Pipeline",
+            "Onboard a new employee: HR setup → scheduling orientation → payroll enrollment",
+            "manual",
+            JSON.stringify([
+              {
+                skill_id: "zoa-hr",
+                description: "Create employee accounts and request equipment",
+                input_mapping: {},
+                output_key: "hr_result",
+              },
+              {
+                skill_id: "zoa-scheduling",
+                description: "Schedule orientation meeting",
+                input_mapping: { attendees: "hr_result.employee_id" },
+                output_key: "schedule_result",
+              },
+              {
+                skill_id: "zoa-payroll",
+                description: "Enroll employee in payroll",
+                input_mapping: { employee_ids: "hr_result.employee_id" },
+                output_key: "payroll_result",
+              },
+            ]),
+            DEMO_USER_ID,
+          ]
+        );
+        logger.info("ZOA workflow definition seeded: Employee Onboarding Pipeline");
+      } else {
+        logger.info("ZOA workflow definition already exists — skipping");
+      }
+    } catch (zoaWfErr: unknown) {
+      logger.warn({ err: zoaWfErr }, "ZOA workflow definition seed skipped (table may not exist yet)");
+    }
+
     logger.info(
       {
         userId: DEMO_USER_ID,
