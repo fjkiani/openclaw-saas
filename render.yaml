@@ -30,6 +30,14 @@ services:
         value: "true"
       - key: KAIROS_SERVICE_URL
         value: https://openclaw-benchmark.onrender.com
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: OPENROUTER_API_KEY_2
+        sync: false
+      - key: DRY_RUN
+        value: "true"
+      - key: OPENCLAW_SERVICE_TOKEN
+        sync: false
       # CORS: set to the exact URL of the openclaw-saas static site on Render
       - key: FRONTEND_URL
         value: https://openclaw-lfky.onrender.com
