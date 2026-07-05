@@ -597,21 +597,22 @@ router.post(
 
     const goal = `Execute ${job.mode} training workflow for workspace '${workspace.name}' (domain: '${workspace.domain}'). Dataset: '${dataset?.name ?? "unknown"}' v${version?.version ?? 1}, ${version?.document_count ?? 0} documents. Base model: '${job.base_model}'. Hyperparams: ${JSON.stringify(job.hyperparams)}. Tenant: ${tenantId}.`;
 
-    // Soft-fail: if KAIROS_SERVICE_URL is unset or Kairos is unreachable,
+    // Soft-fail: if KAIROS_SERVICE_URL is unset, localhost, or unreachable,
     // queue the job with a stub run_id so the UI doesn't hard-fail.
     const kairosUrl = process.env.KAIROS_SERVICE_URL;
-    const useStub = !kairosUrl || kairosUrl.includes("localhost");
+    const kairosConfiguredLocally = !kairosUrl || kairosUrl.includes("localhost");
 
-    try {
-      let runId: string;
+    let runId: string;
+    let usedStub = false;
 
-      if (useStub) {
-        // In-process stub: generate a synthetic run_id and mark job as running.
-        // jobMonitor will not be started — job stays in 'running' until manually
-        // transitioned or until kairosInProcess is wired up (W4).
-        runId = `stub-${jobId}-${Date.now()}`;
-        logger.warn({ jobId, runId }, "[forge] KAIROS_SERVICE_URL not set — using stub run_id");
-      } else {
+    if (kairosConfiguredLocally) {
+      // No real Kairos — use stub immediately
+      runId = `stub-${jobId}-${Date.now()}`;
+      usedStub = true;
+      logger.warn({ jobId, runId }, "[forge] KAIROS_SERVICE_URL not set — using stub run_id");
+    } else {
+      // Try real Kairos; fall back to stub on any network/service error
+      try {
         const run = await kairosClient.runWorkflow({
           skill_id: `forge-job-${job.id}`,
           goal,
@@ -621,8 +622,15 @@ router.post(
         runId = run.run_id;
         // Start job monitor only for real Kairos runs
         jobMonitor.start(jobId, runId, tenantId, workspace.id);
+      } catch (kairosErr: any) {
+        // Kairos unreachable or returned error — soft-fail to stub
+        runId = `stub-${jobId}-${Date.now()}`;
+        usedStub = true;
+        logger.warn({ jobId, runId, kairosErr: kairosErr.message }, "[forge] Kairos unreachable — falling back to stub run_id");
       }
+    }
 
+    try {
       // Update job status to running
       await pool.query(
         `UPDATE training_jobs SET status='running', kairos_run_id=$1, updated_at=now() WHERE id=$2`,
@@ -636,14 +644,14 @@ router.post(
       );
 
       const updatedRes = await pool.query(`SELECT * FROM training_jobs WHERE id = $1`, [jobId]);
-      res.json({ ...updatedRes.rows[0], kairosRunId: runId, stub: useStub });
+      res.json({ ...updatedRes.rows[0], kairosRunId: runId, stub: usedStub });
     } catch (err: any) {
-      // Hard failure (Kairos reachable but returned error) — mark job failed
+      // DB error — mark job failed
       await pool.query(
         `UPDATE training_jobs SET status='failed', error=$1, updated_at=now() WHERE id=$2`,
         [err.message, jobId],
       );
-      res.status(503).json({ error: "Kairos service unavailable", details: err.message });
+      res.status(500).json({ error: "Failed to update job status", details: err.message });
     }
   },
 );
