@@ -3,6 +3,7 @@ import { pool } from "@workspace/db";
 import { logger } from "../lib/logger";
 import { requireWorkspaceMember } from "../middleware/requireWorkspaceMember";
 import { kairosClient } from "../lib/kairosClient";
+import { kairosInProcess } from "../lib/kairosInProcess";
 import { jobMonitor } from "../lib/jobMonitor";
 
 const router: IRouter = Router();
@@ -606,12 +607,20 @@ router.post(
     let usedStub = false;
 
     if (kairosConfiguredLocally) {
-      // No real Kairos — use stub immediately
-      runId = `stub-${jobId}-${Date.now()}`;
+      // No real Kairos — use in-process engine
+      const inProcRun = await kairosInProcess.runWorkflow({
+        skill_id: `forge-job-${job.id}`,
+        goal,
+        tenant_id: tenantId,
+        max_turns: 10,
+      });
+      runId = inProcRun.run_id;
       usedStub = true;
-      logger.warn({ jobId, runId }, "[forge] KAIROS_SERVICE_URL not set — using stub run_id");
+      logger.warn({ jobId, runId }, "[forge] KAIROS_SERVICE_URL not set — using kairosInProcess");
+      // Start job monitor against in-process engine
+      jobMonitor.start(jobId, runId, tenantId, workspace.id);
     } else {
-      // Try real Kairos; fall back to stub on any network/service error
+      // Try real Kairos; fall back to in-process engine on any network/service error
       try {
         const run = await kairosClient.runWorkflow({
           skill_id: `forge-job-${job.id}`,
@@ -623,10 +632,17 @@ router.post(
         // Start job monitor only for real Kairos runs
         jobMonitor.start(jobId, runId, tenantId, workspace.id);
       } catch (kairosErr: any) {
-        // Kairos unreachable or returned error — soft-fail to stub
-        runId = `stub-${jobId}-${Date.now()}`;
+        // Kairos unreachable — fall back to in-process engine
+        const inProcRun = await kairosInProcess.runWorkflow({
+          skill_id: `forge-job-${job.id}`,
+          goal,
+          tenant_id: tenantId,
+          max_turns: 10,
+        });
+        runId = inProcRun.run_id;
         usedStub = true;
-        logger.warn({ jobId, runId, kairosErr: kairosErr.message }, "[forge] Kairos unreachable — falling back to stub run_id");
+        logger.warn({ jobId, runId, kairosErr: kairosErr.message }, "[forge] Kairos unreachable — falling back to kairosInProcess");
+        jobMonitor.start(jobId, runId, tenantId, workspace.id);
       }
     }
 
@@ -683,6 +699,35 @@ router.get(
       return;
     }
 
+    // In-process SSE: poll kairosInProcess every 2s until done/failed
+    if (job.kairos_run_id?.startsWith("inproc-")) {
+      let closed = false;
+      req.on("close", () => { closed = true; });
+
+      const POLL_MS = 2000;
+      const MAX_POLLS = 150; // 5 minutes max
+
+      for (let i = 0; i < MAX_POLLS && !closed; i++) {
+        try {
+          const status = await kairosInProcess.getRunStatus(job.kairos_run_id);
+          res.write(`data: ${JSON.stringify(status)}\n\n`);
+
+          if (status.status === "done" || status.status === "failed") {
+            res.write(`data: ${JSON.stringify({ event: "complete", status: status.status })}\n\n`);
+            break;
+          }
+        } catch (err: any) {
+          res.write(`data: ${JSON.stringify({ error: err.message })}\n\n`);
+          break;
+        }
+        await new Promise((r) => setTimeout(r, POLL_MS));
+      }
+
+      res.end();
+      return;
+    }
+
+    // Real Kairos SSE proxy
     const streamUrl = kairosClient.getRunStreamUrl(job.kairos_run_id);
 
     res.setHeader("Content-Type", "text/event-stream");

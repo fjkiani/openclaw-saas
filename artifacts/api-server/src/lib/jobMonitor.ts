@@ -71,7 +71,12 @@ async function pollOnce(
 ): Promise<void> {
   let kairosStatus: KairosRunStatus;
   try {
-    kairosStatus = await kairosClient.getRunStatus(kairosRunId);
+    // Route to in-process engine for inproc- run IDs, real Kairos otherwise
+    if (kairosRunId.startsWith("inproc-")) {
+      kairosStatus = await kairosInProcess.getRunStatus(kairosRunId);
+    } else {
+      kairosStatus = await kairosClient.getRunStatus(kairosRunId);
+    }
   } catch (err) {
     logger.warn({ jobId, kairosRunId, err }, "[jobMonitor] Failed to poll Kairos run status");
     return;
