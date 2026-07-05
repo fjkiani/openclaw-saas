@@ -5,31 +5,54 @@ interface OpenRouterMessage {
   content: string;
 }
 
+const MAX_RETRIES = 4;
+const BASE_DELAY_MS = 3000; // 3s base — matches OpenRouter's retry_after_seconds hint
+
 export async function callOpenRouter(
   model: string,
   messages: OpenRouterMessage[],
   temperature = 0.2
 ): Promise<string> {
-  const res = await fetch(config.openrouterBaseUrl, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${config.openrouterApiKey}`,
-      "Content-Type": "application/json",
-      "HTTP-Referer": "https://openclaw.ai",
-      "X-Title": "OpenClaw Archon Factory",
-    },
-    body: JSON.stringify({ model, messages, temperature, max_tokens: 4096 }),
-  });
+  let lastError: Error | null = null;
 
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`OpenRouter ${res.status}: ${err}`);
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    if (attempt > 0) {
+      // Exponential backoff: 3s, 6s, 12s, 24s
+      const delay = BASE_DELAY_MS * Math.pow(2, attempt - 1);
+      await new Promise((r) => setTimeout(r, delay));
+    }
+
+    const res = await fetch(config.openrouterBaseUrl, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${config.openrouterApiKey}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://openclaw.ai",
+        "X-Title": "OpenClaw Archon Factory",
+      },
+      body: JSON.stringify({ model, messages, temperature, max_tokens: 4096 }),
+    });
+
+    if (res.ok) {
+      const data = (await res.json()) as {
+        choices: Array<{ message: { content: string } }>;
+      };
+      return data.choices[0]?.message?.content ?? "";
+    }
+
+    const errText = await res.text();
+
+    // Retry on 429 (rate limit) and 503 (upstream unavailable)
+    if ((res.status === 429 || res.status === 503) && attempt < MAX_RETRIES) {
+      lastError = new Error(`OpenRouter ${res.status}: ${errText}`);
+      continue;
+    }
+
+    // Non-retryable error
+    throw new Error(`OpenRouter ${res.status}: ${errText}`);
   }
 
-  const data = (await res.json()) as {
-    choices: Array<{ message: { content: string } }>;
-  };
-  return data.choices[0]?.message?.content ?? "";
+  throw lastError ?? new Error("OpenRouter: max retries exceeded");
 }
 
 export function extractJson(text: string): unknown {
