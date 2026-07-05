@@ -863,6 +863,22 @@ app.listen(port, (err) => {
       workflowEngine.init(pool);
       registerAACRSkills();
       logger.info({ skills: workflowEngine.listSkills() }, "workflowEngine initialized with AACR skills");
+
+      // Recover inproc- jobs stuck in 'running' from a previous server instance.
+      // kairosInProcess runs are in-memory only — they cannot survive a restart.
+      // Mark them failed so they don't stay stuck forever.
+      pool.query(
+        `UPDATE training_jobs
+         SET status='failed', error='Server restarted — in-process run lost', updated_at=now()
+         WHERE status='running' AND kairos_run_id LIKE 'inproc-%'`
+      ).then((r: { rowCount: number | null }) => {
+        if ((r.rowCount ?? 0) > 0) {
+          logger.warn({ count: r.rowCount }, "[startup] Marked stuck inproc- jobs as failed after restart");
+        }
+      }).catch((err: unknown) => {
+        logger.warn({ err }, "[startup] Failed to recover stuck inproc- jobs — continuing");
+      });
+
       return startForgeScheduler();
     })
     .then(() => {
