@@ -367,7 +367,7 @@ async function runMigrations(): Promise<void> {
     await client.query(`
       CREATE TABLE IF NOT EXISTS "tenant_skills" (
         "id" serial PRIMARY KEY NOT NULL,
-        "tenant_id" integer NOT NULL REFERENCES "tenants"("id") ON DELETE CASCADE,
+        "tenant_id" text NOT NULL,
         "skill_id" integer NOT NULL REFERENCES "skills"("id") ON DELETE CASCADE,
         "installed_at" timestamp with time zone NOT NULL DEFAULT now()
       )
@@ -377,7 +377,7 @@ async function runMigrations(): Promise<void> {
     await client.query(`
       CREATE TABLE IF NOT EXISTS "activity_entries" (
         "id" serial PRIMARY KEY NOT NULL,
-        "tenant_id" integer NOT NULL REFERENCES "tenants"("id") ON DELETE CASCADE,
+        "tenant_id" text NOT NULL,
         "type" text NOT NULL,
         "message" text NOT NULL,
         "created_at" timestamp with time zone NOT NULL DEFAULT now()
@@ -394,7 +394,7 @@ async function runMigrations(): Promise<void> {
     await client.query(`
       CREATE TABLE IF NOT EXISTS "chat_messages" (
         "id" serial PRIMARY KEY NOT NULL,
-        "tenant_id" integer NOT NULL REFERENCES "tenants"("id") ON DELETE CASCADE,
+        "tenant_id" text NOT NULL,
         "role" text NOT NULL,
         "content" text NOT NULL,
         "created_at" timestamp with time zone NOT NULL DEFAULT now()
@@ -415,7 +415,7 @@ async function runMigrations(): Promise<void> {
     await client.query(`
       CREATE TABLE IF NOT EXISTS "tenant_connectors" (
         "id" serial PRIMARY KEY NOT NULL,
-        "tenant_id" integer NOT NULL REFERENCES "tenants"("id") ON DELETE CASCADE,
+        "tenant_id" text NOT NULL,
         "connector_id" integer NOT NULL REFERENCES "connectors"("id") ON DELETE CASCADE,
         "encrypted_credential" text,
         "verified" boolean NOT NULL DEFAULT false,
@@ -426,7 +426,7 @@ async function runMigrations(): Promise<void> {
     await client.query(`
       CREATE TABLE IF NOT EXISTS "knowledge_graphs" (
         "id" serial PRIMARY KEY NOT NULL,
-        "tenant_id" integer NOT NULL REFERENCES "tenants"("id") ON DELETE CASCADE,
+        "tenant_id" text NOT NULL,
         "name" text NOT NULL,
         "description" text,
         "created_at" timestamp with time zone NOT NULL DEFAULT now()
