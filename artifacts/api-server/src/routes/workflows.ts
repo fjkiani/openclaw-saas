@@ -80,8 +80,7 @@ router.get(
       const result = await pool.query(
         `SELECT wd.*
          FROM workflow_definitions wd
-         JOIN tenants t ON t.user_id = $1
-         WHERE wd.tenant_id = t.user_id
+         WHERE wd.tenant_id = $1
            AND wd.is_active = true
          ORDER BY wd.created_at DESC
          LIMIT $2 OFFSET $3`,

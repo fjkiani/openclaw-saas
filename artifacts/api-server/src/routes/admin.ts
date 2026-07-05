@@ -8,6 +8,9 @@
 
 import { Router, Request, Response } from "express";
 import pino from "pino";
+import { workflowEngine } from "../lib/workflowEngine.js";
+import { registerAACRSkills } from "../lib/skills/aacr/index.js";
+import { registerZOASkills } from "../lib/skills/zoa/index.js";
 
 const logger = pino({ level: process.env.LOG_LEVEL ?? "info" });
 
@@ -78,6 +81,29 @@ export function createAdminRouter(pool: any, runMigrations: () => Promise<void>)
     } catch (err: unknown) {
       logger.error({ err }, "[admin] GET /tables failed");
       res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  /**
+   * POST /api/admin/reinit
+   * Re-initialize workflowEngine and re-register all skills.
+   * Use when the server started before migrations completed (async startup race).
+   */
+  router.post("/reinit", requireServiceToken as any, async (_req: Request, res: Response) => {
+    logger.info("[admin] Manual workflowEngine reinit triggered");
+    try {
+      workflowEngine.init(pool);
+      registerAACRSkills();
+      registerZOASkills();
+      const skills = workflowEngine.listSkills();
+      logger.info({ skills }, "[admin] workflowEngine reinitialized");
+      res.json({ ok: true, skills, count: skills.length });
+    } catch (err: unknown) {
+      logger.error({ err }, "[admin] reinit failed");
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   });
 
