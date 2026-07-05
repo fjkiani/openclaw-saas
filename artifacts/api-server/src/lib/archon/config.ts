@@ -6,6 +6,6 @@
 export const archonConfig = {
   openrouterApiKey: process.env.OPENROUTER_API_KEY ?? process.env.OPENROUTER_API_KEY_2 ?? "",
   openrouterBaseUrl: "https://openrouter.ai/api/v1/chat/completions",
-  codeModel: "qwen/qwen3-coder-480b-a35b:free",
+  codeModel: "qwen/qwen3-coder:free",
   reasoningModel: "nousresearch/hermes-3-llama-3.1-405b:free",
 };
