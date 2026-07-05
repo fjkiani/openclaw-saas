@@ -7,6 +7,7 @@ import { workflowEngine } from "./lib/workflowEngine.js";
 import { registerAACRSkills } from "./lib/skills/aacr/index.js";
 import { registerZOASkills } from "./lib/skills/zoa/index.js";
 import { migrateLegalCorpus } from "./lib/legalCorpus/migrate.js";
+import { createAdminRouter } from "./routes/admin.js";
 import { backfillLegalCorpusEmbeddings } from "./lib/legalCorpus/backfillEmbeddings.js";
 
 const rawPort = process.env["PORT"];
@@ -834,6 +835,9 @@ async function runMigrations(): Promise<void> {
     client.release();
   }
 }
+
+// Register admin router (needs pool + runMigrations — can't go in app.ts)
+app.use("/api/admin", createAdminRouter(pool, runMigrations));
 
 // Start server immediately, run migrations + seed in background (soft-fail).
 // This ensures the server starts and serves /healthz even if the DB is temporarily

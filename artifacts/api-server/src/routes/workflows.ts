@@ -89,6 +89,13 @@ router.get(
       );
       res.json({ definitions: result.rows, count: result.rows.length });
     } catch (err: unknown) {
+      // 42P01 = "undefined_table" — migrations haven't run yet (async startup race).
+      // Return empty array instead of 500 so the client can handle gracefully.
+      const pgCode = (err as { code?: string }).code;
+      if (pgCode === "42P01") {
+        logger.warn("workflow_definitions table not yet created — returning empty list");
+        res.json({ definitions: [], count: 0, migrating: true }); return;
+      }
       logger.error({ err }, "GET /workflows/definitions failed");
       res.status(500).json({ error: "Failed to fetch workflow definitions" });
     }
