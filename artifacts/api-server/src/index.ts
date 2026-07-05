@@ -5,6 +5,7 @@ import { runSeed } from "./seed";
 import { startForgeScheduler, stopForgeScheduler } from "./lib/forgeScheduler";
 import { workflowEngine } from "./lib/workflowEngine.js";
 import { registerAACRSkills } from "./lib/skills/aacr/index.js";
+import { registerZOASkills } from "./lib/skills/zoa/index.js";
 import { migrateLegalCorpus } from "./lib/legalCorpus/migrate.js";
 import { backfillLegalCorpusEmbeddings } from "./lib/legalCorpus/backfillEmbeddings.js";
 
@@ -862,7 +863,8 @@ app.listen(port, (err) => {
       // Initialize workflow engine with the shared pool
       workflowEngine.init(pool);
       registerAACRSkills();
-      logger.info({ skills: workflowEngine.listSkills() }, "workflowEngine initialized with AACR skills");
+      registerZOASkills();
+      logger.info({ skills: workflowEngine.listSkills() }, "workflowEngine initialized with AACR + ZOA skills");
 
       // Recover inproc- jobs stuck in 'running' from a previous server instance.
       // kairosInProcess runs are in-memory only — they cannot survive a restart.
