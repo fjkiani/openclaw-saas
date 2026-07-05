@@ -3,7 +3,7 @@
 // before production deployment.
 
 import { pool } from "@workspace/db";
-import { kairosClient } from "./kairosClient";
+import { kairosClient, type KairosRunStatus } from "./kairosClient";
 import { logger } from "./logger";
 
 // jobId → interval handle
@@ -11,13 +11,65 @@ const activePolls = new Map<number, NodeJS.Timeout>();
 
 const POLL_INTERVAL_MS = 30_000;
 
+/**
+ * evaluateKairosRun — compute a real benchmark score from Kairos run telemetry.
+ *
+ * Scoring rubric (archon-v1):
+ *   - Base score: 0.80 (training completed)
+ *   - Degraded penalty: -0.15 (agent entered degraded mode)
+ *   - Per-violation penalty: -0.05 each (capped at -0.25 total)
+ *   - Efficiency bonus: +0.05 if turn_count ≤ 5 (clean run)
+ *   - Tool call bonus: +0.05 if tool_calls_made ≥ 3 (agent was active)
+ *
+ * Returns { overall_score, passed, details }
+ */
+function evaluateKairosRun(status: KairosRunStatus): {
+  overall_score: number;
+  passed: boolean;
+  details: string;
+} {
+  const THRESHOLD = 0.70;
+  let score = 0.80;
+  const notes: string[] = [];
+
+  if (status.degraded) {
+    score -= 0.15;
+    notes.push("degraded mode");
+  }
+
+  const violationPenalty = Math.min(0.25, (status.violations?.length ?? 0) * 0.05);
+  if (violationPenalty > 0) {
+    score -= violationPenalty;
+    notes.push(`${status.violations.length} violation(s)`);
+  }
+
+  if ((status.turn_count ?? 0) <= 5) {
+    score += 0.05;
+    notes.push("efficient run");
+  }
+
+  if ((status.tool_calls_made ?? 0) >= 3) {
+    score += 0.05;
+    notes.push("active tool use");
+  }
+
+  // Clamp to [0, 1]
+  score = Math.max(0, Math.min(1, Math.round(score * 100) / 100));
+
+  return {
+    overall_score: score,
+    passed: score >= THRESHOLD,
+    details: notes.length > 0 ? notes.join(", ") : "clean run",
+  };
+}
+
 async function pollOnce(
   jobId: number,
   kairosRunId: string,
   tenantId: string,
   workspaceId: number,
 ): Promise<void> {
-  let kairosStatus;
+  let kairosStatus: KairosRunStatus;
   try {
     kairosStatus = await kairosClient.getRunStatus(kairosRunId);
   } catch (err) {
@@ -48,66 +100,97 @@ async function pollOnce(
         [jobId],
       );
 
-      // 2. Create evaluation run
+      // 2. Compute real benchmark score from Kairos telemetry
+      const evaluation = evaluateKairosRun(kairosStatus);
+      const evalStatus = evaluation.passed ? "passed" : "failed";
+
+      logger.info(
+        { jobId, overall_score: evaluation.overall_score, passed: evaluation.passed, details: evaluation.details },
+        "[jobMonitor] Benchmark evaluation complete",
+      );
+
+      // 3. Create evaluation run
       const evalRunRes = await client.query(
         `INSERT INTO evaluation_runs (tenant_id, job_id, rubric_id, status)
-         VALUES ($1, $2, 'stub-v1', 'running')
+         VALUES ($1, $2, 'archon-v1', 'running')
          RETURNING id`,
         [tenantId, jobId],
       );
       const evalRunId: number = evalRunRes.rows[0].id;
 
-      // 3. Insert stub metric
+      // 4. Insert real metrics
+      const THRESHOLD = 0.70;
       await client.query(
         `INSERT INTO evaluation_metrics (tenant_id, eval_run_id, metric_name, value, threshold, passed)
-         VALUES ($1, $2, 'overall_score', 0.85, 0.70, true)`,
-        [tenantId, evalRunId],
+         VALUES ($1, $2, 'overall_score', $3, $4, $5)`,
+        [tenantId, evalRunId, evaluation.overall_score, THRESHOLD, evaluation.passed],
       );
 
-      // 4. Mark eval run passed
+      // 5. Insert sub-metrics from Kairos telemetry
       await client.query(
-        `UPDATE evaluation_runs SET status='passed', completed_at=now() WHERE id=$1`,
-        [evalRunId],
+        `INSERT INTO evaluation_metrics (tenant_id, eval_run_id, metric_name, value, threshold, passed)
+         VALUES ($1, $2, 'violation_count', $3, 3, $4)`,
+        [tenantId, evalRunId, kairosStatus.violations?.length ?? 0, (kairosStatus.violations?.length ?? 0) < 3],
       );
 
-      // 5. Transition job → completed
       await client.query(
-        `UPDATE training_jobs SET status='completed', updated_at=now() WHERE id=$1`,
-        [jobId],
+        `INSERT INTO evaluation_metrics (tenant_id, eval_run_id, metric_name, value, threshold, passed)
+         VALUES ($1, $2, 'degraded', $3, 0, $4)`,
+        [tenantId, evalRunId, kairosStatus.degraded ? 1 : 0, !kairosStatus.degraded],
       );
 
-      // 6. Fetch job row for name
-      const jobRes = await client.query(
-        `SELECT name FROM training_jobs WHERE id=$1`,
-        [jobId],
-      );
-      const jobName: string = jobRes.rows[0]?.name ?? `forge-job-${jobId}`;
-
-      // 7. Register model
-      const regRes = await client.query(
-        `INSERT INTO model_registrations (tenant_id, workspace_id, job_id, name)
-         VALUES ($1, $2, $3, $4)
-         RETURNING id`,
-        [tenantId, workspaceId, jobId, jobName],
-      );
-      const regId: number = regRes.rows[0].id;
-
-      // 8. Create initial model version
+      // 6. Mark eval run
       await client.query(
-        `INSERT INTO model_versions (tenant_id, registration_id, version, status)
-         VALUES ($1, $2, 1, 'candidate')`,
-        [tenantId, regId],
+        `UPDATE evaluation_runs SET status=$1, completed_at=now() WHERE id=$2`,
+        [evalStatus, evalRunId],
       );
+
+      // 7. Transition job → completed or failed based on eval
+      const finalJobStatus = evaluation.passed ? "completed" : "failed";
+      const failReason = evaluation.passed
+        ? null
+        : `Benchmark score ${evaluation.overall_score} below threshold 0.70 (${evaluation.details})`;
+
+      await client.query(
+        `UPDATE training_jobs SET status=$1, error=$2, updated_at=now() WHERE id=$3`,
+        [finalJobStatus, failReason, jobId],
+      );
+
+      // 8. Only register model if evaluation passed
+      if (evaluation.passed) {
+        const jobRes = await client.query(
+          `SELECT name FROM training_jobs WHERE id=$1`,
+          [jobId],
+        );
+        const jobName: string = jobRes.rows[0]?.name ?? `forge-job-${jobId}`;
+
+        const regRes = await client.query(
+          `INSERT INTO model_registrations (tenant_id, workspace_id, job_id, name)
+           VALUES ($1, $2, $3, $4)
+           RETURNING id`,
+          [tenantId, workspaceId, jobId, jobName],
+        );
+        const regId: number = regRes.rows[0].id;
+
+        await client.query(
+          `INSERT INTO model_versions (tenant_id, registration_id, version, status)
+           VALUES ($1, $2, 1, 'candidate')`,
+          [tenantId, regId],
+        );
+
+        logger.info({ jobId, evalRunId, regId }, "[jobMonitor] Training completed — model registered");
+      } else {
+        logger.warn({ jobId, evalRunId, score: evaluation.overall_score }, "[jobMonitor] Training completed but benchmark failed — model NOT registered");
+      }
 
       // 9. Emit usage event
       await client.query(
         `INSERT INTO model_usage_events (tenant_id, job_id, event_type)
-         VALUES ($1, $2, 'training_completed')`,
-        [tenantId, jobId],
+         VALUES ($1, $2, $3)`,
+        [tenantId, jobId, evaluation.passed ? "training_completed" : "training_benchmark_failed"],
       );
 
       await client.query("COMMIT");
-      logger.info({ jobId, evalRunId, regId }, "[jobMonitor] Training completed — model registered");
     } catch (err) {
       await client.query("ROLLBACK").catch(() => undefined);
       logger.error({ jobId, err }, "[jobMonitor] DB error handling done status");
