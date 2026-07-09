@@ -41,23 +41,36 @@ ${msg.content}` : msg.content;
   }
 
   const url = `${config.geminiBaseUrl}/${config.geminiModel}:generateContent?key=${apiKey}`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents,
-      generationConfig: { temperature, maxOutputTokens: 4096 },
-    }),
-  });
 
-  const data = (await res.json()) as GeminiResponse;
+  // Retry up to 3 times for transient 503 "high demand" errors
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) {
+      await new Promise((r) => setTimeout(r, 5000 * attempt)); // 5s, 10s backoff
+    }
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents,
+        generationConfig: { temperature, maxOutputTokens: 8192 },
+      }),
+    });
 
-  if (!res.ok || data.error) {
-    const msg = data.error?.message ?? `HTTP ${res.status}`;
-    throw new Error(`Gemini error: ${msg}`);
+    const data = (await res.json()) as GeminiResponse;
+
+    // Retry on 503 / "high demand" transient errors
+    if (res.status === 503 || (data.error?.message ?? "").toLowerCase().includes("high demand")) {
+      if (attempt < 2) continue; // retry
+    }
+
+    if (!res.ok || data.error) {
+      const msg = data.error?.message ?? `HTTP ${res.status}`;
+      throw new Error(`Gemini error: ${msg}`);
+    }
+
+    return data.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
   }
-
-  return data.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+  throw new Error("Gemini error: max retries exceeded (503 high demand)");
 }
 
 interface OpenRouterMessage {
