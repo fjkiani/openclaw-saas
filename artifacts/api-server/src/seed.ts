@@ -945,6 +945,61 @@ export async function runSeed(): Promise<void> {
       logger.warn({ err: zoaWfErr }, "ZOA workflow definition seed skipped (table may not exist yet)");
     }
 
+    // ── 12. ZOA Legal Ops Automation Pipeline ────────────────────────────────
+    // billing → scheduling → compliance — all ZOA stubs, no external deps
+    try {
+      const existingLegalOps = await client.query(
+        `SELECT id FROM workflow_definitions WHERE tenant_id = $1 AND name = $2 LIMIT 1`,
+        [DEMO_USER_ID, "ZOA: Legal Ops Automation Pipeline"]
+      );
+      if (existingLegalOps.rows.length === 0) {
+        await client.query(
+          `INSERT INTO workflow_definitions
+             (tenant_id, workspace_id, name, description, trigger, steps, created_by)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          [
+            DEMO_USER_ID,
+            workspaceId,
+            "ZOA: Legal Ops Automation Pipeline",
+            "3-step pipeline: billing reconciliation → scheduling → compliance check",
+            "manual",
+            JSON.stringify([
+              {
+                id: "step-1",
+                skill_id: "zoa-billing",
+                name: "Invoice Reconciliation",
+                description: "Process and reconcile invoices",
+                input_mapping: { invoice_ids: "$.input.invoice_ids" },
+                output_key: "billing_result",
+              },
+              {
+                id: "step-2",
+                skill_id: "zoa-scheduling",
+                name: "Schedule Review Meeting",
+                description: "Schedule follow-up review meeting",
+                input_mapping: { attendees: "$.input.attendees", duration_minutes: "$.input.duration_minutes" },
+                output_key: "scheduling_result",
+              },
+              {
+                id: "step-3",
+                skill_id: "zoa-compliance",
+                name: "Compliance Check",
+                description: "Run compliance check on processed invoices",
+                input_mapping: { entity_ids: "$.input.invoice_ids" },
+                output_key: "compliance_result",
+              },
+            ]),
+            DEMO_USER_ID,
+          ]
+        );
+        logger.info("ZOA workflow definition seeded: Legal Ops Automation Pipeline");
+      } else {
+        logger.info("ZOA Legal Ops workflow definition already exists — skipping");
+      }
+    } catch (legalOpsWfErr: unknown) {
+      logger.warn({ err: legalOpsWfErr }, "ZOA Legal Ops workflow definition seed skipped");
+    }
+
     logger.info(
       {
         userId: DEMO_USER_ID,
