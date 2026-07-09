@@ -487,18 +487,43 @@ async function runMigrations(): Promise<void> {
     `);
 
     // Deduplicate model_workspaces before adding unique index (keep lowest id per tenant+name)
-    await client.query(`
-      DELETE FROM "model_workspaces" mw
-      WHERE mw.id NOT IN (
-        SELECT MIN(id) FROM "model_workspaces" GROUP BY tenant_id, name
-      )
-    `);
-
-    // Idempotent unique constraint for workspace deduplication
-    await client.query(`
-      CREATE UNIQUE INDEX IF NOT EXISTS "model_workspaces_tenant_name_uidx"
-        ON "model_workspaces" ("tenant_id", "name")
-    `);
+    // Must reassign FK references from duplicate rows to the canonical (min id) row first
+    try {
+      // Reassign model_datasets FK references from duplicate workspace rows to canonical rows
+      await client.query(`
+        UPDATE "model_datasets" md
+        SET workspace_id = canonical.min_id
+        FROM (
+          SELECT tenant_id, name, MIN(id) AS min_id FROM "model_workspaces" GROUP BY tenant_id, name
+        ) canonical
+        JOIN "model_workspaces" dup ON dup.tenant_id = canonical.tenant_id AND dup.name = canonical.name
+        WHERE md.workspace_id = dup.id AND dup.id != canonical.min_id
+      `);
+      // Reassign model_registrations FK references
+      await client.query(`
+        UPDATE "model_registrations" mr
+        SET workspace_id = canonical.min_id
+        FROM (
+          SELECT tenant_id, name, MIN(id) AS min_id FROM "model_workspaces" GROUP BY tenant_id, name
+        ) canonical
+        JOIN "model_workspaces" dup ON dup.tenant_id = canonical.tenant_id AND dup.name = canonical.name
+        WHERE mr.workspace_id = dup.id AND dup.id != canonical.min_id
+      `);
+      // Now safe to delete duplicates
+      await client.query(`
+        DELETE FROM "model_workspaces"
+        WHERE id NOT IN (
+          SELECT MIN(id) FROM "model_workspaces" GROUP BY tenant_id, name
+        )
+      `);
+      // Idempotent unique constraint for workspace deduplication
+      await client.query(`
+        CREATE UNIQUE INDEX IF NOT EXISTS "model_workspaces_tenant_name_uidx"
+          ON "model_workspaces" ("tenant_id", "name")
+      `);
+    } catch (dedupErr) {
+      logger.warn({ dedupErr }, "model_workspaces dedup/unique-index skipped — continuing");
+    }
 
     await client.query(`
       CREATE TABLE IF NOT EXISTS "model_datasets" (
