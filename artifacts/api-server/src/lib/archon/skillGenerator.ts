@@ -53,44 +53,70 @@ export interface GeneratedSkill {
 
 /**
  * Parse the two-part response format: METADATA_JSON ... IMPLEMENTATION_CODE ... END_SKILL
+ * Falls back to JSON format if delimiters are missing.
  */
 function parseTwoPartResponse(raw: string): GeneratedSkill {
-  const metaStart = raw.indexOf("METADATA_JSON");
-  const implStart = raw.indexOf("IMPLEMENTATION_CODE");
-  const endMarker = raw.indexOf("END_SKILL");
+  // Strip markdown code fences
+  let cleaned = raw.trim();
+  if (cleaned.startsWith("```")) {
+    cleaned = cleaned.split("\n").filter((l) => !l.startsWith("```")).join("\n").trim();
+  }
 
-  if (metaStart === -1 || implStart === -1) {
-    // Fallback: try to parse as plain JSON with implementation field
-    const jsonStart = raw.indexOf("{");
-    const jsonEnd = raw.lastIndexOf("}") + 1;
-    if (jsonStart !== -1 && jsonEnd > jsonStart) {
-      const parsed = JSON.parse(raw.slice(jsonStart, jsonEnd)) as GeneratedSkill;
-      if (parsed.implementation) return parsed;
+  const metaStart = cleaned.indexOf("METADATA_JSON");
+  const implStart = cleaned.indexOf("IMPLEMENTATION_CODE");
+  const endMarker = cleaned.indexOf("END_SKILL");
+
+  if (metaStart !== -1 && implStart !== -1) {
+    // Two-part format
+    const metaText = cleaned.slice(metaStart + "METADATA_JSON".length, implStart).trim();
+    const metaJsonStart = metaText.indexOf("{");
+    const metaJsonEnd = metaText.lastIndexOf("}") + 1;
+    if (metaJsonStart === -1 || metaJsonEnd <= metaJsonStart) {
+      throw new Error("No JSON object found in METADATA_JSON section");
     }
-    throw new Error("Response missing METADATA_JSON or IMPLEMENTATION_CODE delimiters");
+    const meta = JSON.parse(metaText.slice(metaJsonStart, metaJsonEnd)) as Omit<GeneratedSkill, "implementation">;
+    const implEnd = endMarker !== -1 ? endMarker : cleaned.length;
+    const implementation = cleaned.slice(implStart + "IMPLEMENTATION_CODE".length, implEnd).trim();
+    return {
+      name: meta.name,
+      description: meta.description,
+      category: meta.category,
+      inputSchema: meta.inputSchema ?? {},
+      outputSchema: meta.outputSchema ?? {},
+      implementation,
+    };
   }
 
-  // Extract metadata JSON
-  const metaText = raw.slice(metaStart + "METADATA_JSON".length, implStart).trim();
-  const metaJsonStart = metaText.indexOf("{");
-  const metaJsonEnd = metaText.lastIndexOf("}") + 1;
-  if (metaJsonStart === -1 || metaJsonEnd <= metaJsonStart) {
-    throw new Error("No JSON object found in METADATA_JSON section");
+  // Fallback: model returned JSON format — extract implementation field surgically
+  // Strategy: find "implementation": " then extract everything until the closing quote
+  // that is followed by } or ,
+  const jsonStart = cleaned.indexOf("{");
+  if (jsonStart === -1) throw new Error("No JSON or two-part format found in LLM response");
+
+  // Try to extract implementation field using a regex that handles multiline strings
+  // The implementation field value starts after "implementation": " and ends before the last "
+  const implFieldMatch = cleaned.match(/"implementation"\s*:\s*"([\s\S]*?)"\s*[,}]/);
+  if (implFieldMatch) {
+    // Found implementation field — extract it and rebuild the JSON without it
+    const implementation = implFieldMatch[1]
+      .replace(/\\n/g, "\n")
+      .replace(/\\t/g, "\t")
+      .replace(/\\"/g, '"')
+      .replace(/\\\\/g, "\\");
+
+    // Parse the rest of the JSON (without implementation)
+    const withoutImpl = cleaned.replace(/"implementation"\s*:\s*"[\s\S]*?"\s*,?\s*/, "");
+    const metaStart2 = withoutImpl.indexOf("{");
+    const metaEnd2 = withoutImpl.lastIndexOf("}") + 1;
+    const meta = JSON.parse(withoutImpl.slice(metaStart2, metaEnd2)) as Omit<GeneratedSkill, "implementation">;
+    return { ...meta, implementation };
   }
-  const meta = JSON.parse(metaText.slice(metaJsonStart, metaJsonEnd)) as Omit<GeneratedSkill, "implementation">;
 
-  // Extract implementation code
-  const implEnd = endMarker !== -1 ? endMarker : raw.length;
-  const implementation = raw.slice(implStart + "IMPLEMENTATION_CODE".length, implEnd).trim();
-
-  return {
-    name: meta.name,
-    description: meta.description,
-    category: meta.category,
-    inputSchema: meta.inputSchema ?? {},
-    outputSchema: meta.outputSchema ?? {},
-    implementation,
-  };
+  // Last resort: try direct JSON parse (may fail for malformed responses)
+  const jsonEnd = cleaned.lastIndexOf("}") + 1;
+  const parsed = JSON.parse(cleaned.slice(jsonStart, jsonEnd)) as GeneratedSkill;
+  if (parsed.implementation) return parsed;
+  throw new Error("Response missing implementation field");
 }
 
 export async function generateSkill(prompt: string): Promise<GeneratedSkill> {
