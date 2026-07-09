@@ -28,7 +28,11 @@ Return ONLY a valid JSON object with these exact keys:
   "implementation": "FULL TypeScript source code as a single string — must be valid TS"
 }
 
-Do NOT wrap in markdown. Return raw JSON only.`;
+CRITICAL JSON rules:
+- The "implementation" field must be a valid JSON string — escape ALL newlines as \\n, ALL tabs as \\t, ALL backslashes as \\\\, ALL double quotes inside the code as \\"
+- Do NOT use template literals or backticks in the implementation string
+- Do NOT wrap in markdown code fences
+- Return raw JSON only — no text before or after the JSON object`;
 
 export interface GeneratedSkill {
   name: string;

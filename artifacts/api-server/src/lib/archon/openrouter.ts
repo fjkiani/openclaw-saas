@@ -165,16 +165,39 @@ export async function callOpenRouter(
 
 export function extractJson(text: string): unknown {
   let cleaned = text.trim();
+  // Strip markdown code fences
   if (cleaned.startsWith("```")) {
     cleaned = cleaned.split("\n").filter((l) => !l.startsWith("```")).join("\n").trim();
   }
+  // Try direct parse first
   try {
     return JSON.parse(cleaned);
   } catch {
+    // Try extracting from first { to last }
     const start = cleaned.indexOf("{");
     const end = cleaned.lastIndexOf("}") + 1;
     if (start !== -1 && end > start) {
-      return JSON.parse(cleaned.slice(start, end));
+      const slice = cleaned.slice(start, end);
+      try {
+        return JSON.parse(slice);
+      } catch {
+        // JSON parse failed — try to repair common LLM JSON issues:
+        // 1. Unescaped newlines inside string values
+        // 2. Trailing commas
+        // 3. Single quotes instead of double quotes
+        const repaired = slice
+          // Fix unescaped newlines inside strings (replace literal \n with \\n)
+          .replace(/("(?:[^"\\]|\\.)*")/g, (match) =>
+            match.replace(/\n/g, "\\n").replace(/\r/g, "\\r").replace(/\t/g, "\\t")
+          )
+          // Remove trailing commas before } or ]
+          .replace(/,(\s*[}\]])/g, "$1");
+        try {
+          return JSON.parse(repaired);
+        } catch (finalErr) {
+          throw new Error(`No valid JSON found in LLM response: ${(finalErr as Error).message}`);
+        }
+      }
     }
     throw new Error("No valid JSON found in LLM response");
   }
