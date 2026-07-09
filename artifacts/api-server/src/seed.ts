@@ -138,8 +138,8 @@ export async function runSeed(): Promise<void> {
 
     for (const s of ZOA_SKILLS) {
       await client.query(`
-        INSERT INTO tenant_skills (tenant_id, skill_id, enabled)
-        VALUES ($1,$2,true) ON CONFLICT DO NOTHING
+        INSERT INTO tenant_skills (tenant_id, skill_id)
+        VALUES ($1,$2) ON CONFLICT DO NOTHING
       `, [tenantId, skillIds[s.slug]]);
     }
 
