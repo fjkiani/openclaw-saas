@@ -860,19 +860,18 @@ app.listen(port, (err) => {
       logger.error({ err }, "runZieMigration failed — ZIE tables may be missing");
     }),
   ])
-    .then(() => runSeed())
     .then(() => {
-      logger.info("DB migrations and seed complete.");
-      // Start the pg-boss forge scheduler after DB is confirmed live
-      // Initialize workflow engine with the shared pool
+      // ── Initialize workflowEngine IMMEDIATELY after migrations ──────────────
+      // This MUST happen before runSeed() so that:
+      //   1. Skills are always registered even if seed throws
+      //   2. /api/status shows correct skill count after every restart
+      //   3. POST /api/workflows/runs works without needing /api/admin/reinit
       workflowEngine.init(pool);
       registerAACRSkills();
       registerZOASkills();
       logger.info({ skills: workflowEngine.listSkills() }, "workflowEngine initialized with AACR + ZOA skills");
 
       // Recover inproc- jobs stuck in 'running' from a previous server instance.
-      // kairosInProcess runs are in-memory only — they cannot survive a restart.
-      // Mark them failed so they don't stay stuck forever.
       pool.query(
         `UPDATE training_jobs
          SET status='failed', error='Server restarted — in-process run lost', updated_at=now()
@@ -885,6 +884,11 @@ app.listen(port, (err) => {
         logger.warn({ err }, "[startup] Failed to recover stuck inproc- jobs — continuing");
       });
 
+      // Seed runs after engine init — seed failure does NOT block skill registration
+      return runSeed();
+    })
+    .then(() => {
+      logger.info("DB migrations, engine init, and seed complete.");
       return startForgeScheduler();
     })
     .then(() => {

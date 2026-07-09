@@ -9,6 +9,7 @@
 import { Router, Request, Response } from "express";
 import pino from "pino";
 import { workflowEngine } from "../lib/workflowEngine.js";
+import { runSeed } from "../seed.js";
 import { registerAACRSkills } from "../lib/skills/aacr/index.js";
 import { registerZOASkills } from "../lib/skills/zoa/index.js";
 
@@ -100,6 +101,25 @@ export function createAdminRouter(pool: any, runMigrations: () => Promise<void>)
       res.json({ ok: true, skills, count: skills.length });
     } catch (err: unknown) {
       logger.error({ err }, "[admin] reinit failed");
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  /**
+   * POST /api/admin/seed
+   * Re-run the DB seed (idempotent). Useful after manual migration trigger.
+   */
+  router.post("/seed", requireServiceToken as any, async (_req: Request, res: Response) => {
+    logger.info("[admin] Manual seed triggered");
+    try {
+      await runSeed();
+      logger.info("[admin] Manual seed complete");
+      res.json({ ok: true, message: "Seed complete" });
+    } catch (err: unknown) {
+      logger.error({ err }, "[admin] Manual seed failed");
       res.status(500).json({
         ok: false,
         error: err instanceof Error ? err.message : String(err),

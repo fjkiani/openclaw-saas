@@ -7,7 +7,16 @@ import {
   ListFeaturedSkillsResponse,
   ListSkillCategoriesResponse,
 } from "@workspace/api-zod";
-import { runBenchmark, getBenchmarkResult } from "../lib/benchmarkClient";
+import { benchmarkSkill } from "../lib/archon/benchmarkRunner";
+import {
+  createBenchmarkRun,
+  updateBenchmarkRun,
+  getBenchmarkRun,
+  pruneBenchmarkStore,
+} from "../lib/archon/benchmarkStore";
+import pino from "pino";
+
+const benchmarkLogger = pino({ level: process.env.LOG_LEVEL ?? "info" });
 
 const SKILLS_SOURCE =
   "https://raw.githubusercontent.com/VoltAgent/awesome-openclaw-skills/main/README.md";
@@ -280,18 +289,69 @@ router.post("/skills/:id/benchmark", async (req: Request, res: Response): Promis
     res.status(404).json({ error: "Skill not found" });
     return;
   }
-  try {
-    const run = await runBenchmark({
-      skill_id: skill.id,
-      skill_name: skill.name,
-      skill_description: skill.description,
-      skill_category: skill.category,
-      test_suite: (["standard","adversarial","quick"].includes(req.query.suite as string) ? req.query.suite as "standard"|"adversarial"|"quick" : "standard"),
+
+  // Create in-process benchmark run (replaces dead openclaw-benchmark.onrender.com)
+  pruneBenchmarkStore();
+  const run = createBenchmarkRun(skillId, skill.name);
+  res.json({ benchmark_id: run.benchmark_id, status: run.status, skill_id: skillId });
+
+  // Run benchmark async — client polls GET /api/benchmark/:benchmarkId
+  const startedAt = Date.now();
+  const syntheticSkill = {
+    name: skill.name,
+    description: skill.description,
+    category: skill.category ?? "General",
+    inputSchema: {},
+    outputSchema: {},
+    // Use real implementation if available, otherwise synthesize a minimal one for static analysis
+    implementation: skill.implementation ?? `
+      export async function run(input: Record<string, unknown>) {
+        if (!input) throw new Error("input required");
+        try {
+          return { result: null, skill: "${skill.name}", status: "ok" };
+        } catch (err) {
+          return { error: err instanceof Error ? err.message : String(err) };
+        }
+      }
+    `,
+  };
+
+  benchmarkSkill(syntheticSkill)
+    .then(async (result) => {
+      const durationMs = Date.now() - startedAt;
+      updateBenchmarkRun(run.benchmark_id, {
+        status: "completed",
+        grade: result.grade,
+        overall_score: result.overall_score,
+        level_scores: result.level_scores as Record<string, unknown>,
+        completed_at: new Date().toISOString(),
+        duration_ms: durationMs,
+      });
+
+      // Persist to DB
+      try {
+        await db.insert(skillBenchmarksTable).values({
+          skillId,
+          benchmarkId: run.benchmark_id,
+          overallScore: result.overall_score != null ? Math.round(result.overall_score * 10) : 0,
+          levelScores: result.level_scores as Record<string, unknown>,
+          grade: result.grade,
+          llmResults: result as unknown as Record<string, unknown>,
+          durationMs: durationMs,
+        }).onConflictDoNothing();
+      } catch (dbErr) {
+        benchmarkLogger.warn({ dbErr }, "Failed to persist benchmark result to DB");
+      }
+    })
+    .catch((err) => {
+      updateBenchmarkRun(run.benchmark_id, {
+        status: "failed",
+        error: err instanceof Error ? err.message : String(err),
+        completed_at: new Date().toISOString(),
+        duration_ms: Date.now() - startedAt,
+      });
+      benchmarkLogger.error({ err, benchmarkId: run.benchmark_id }, "In-process benchmark failed");
     });
-    res.json({ benchmark_id: run.benchmark_id, status: run.status, skill_id: skillId });
-  } catch (err: any) {
-    res.status(503).json({ error: "Benchmark service unavailable", details: err?.message });
-  }
 });
 
 router.get("/skills/:id/benchmark-result", async (req: Request, res: Response): Promise<void> => {
@@ -315,13 +375,13 @@ router.get("/skills/:id/benchmark-result", async (req: Request, res: Response): 
   res.json(results[0]);
 });
 
-router.get("/benchmark/:benchmarkId", async (req: Request, res: Response): Promise<void> => {
-  try {
-    const result = await getBenchmarkResult(req.params["benchmarkId"] as string);
-    res.json(result);
-  } catch (err: any) {
-    res.status(503).json({ error: "Benchmark service unavailable", details: err?.message });
+router.get("/benchmark/:benchmarkId", (req: Request, res: Response): void => {
+  const run = getBenchmarkRun(req.params["benchmarkId"] as string);
+  if (!run) {
+    res.status(404).json({ error: "Benchmark run not found" });
+    return;
   }
+  res.json(run);
 });
 
 export default router;

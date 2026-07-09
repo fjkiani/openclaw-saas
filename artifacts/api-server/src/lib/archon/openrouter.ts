@@ -1,5 +1,65 @@
 import { archonConfig as config } from "./config";
 
+// ── Gemini API (Google AI Studio) ─────────────────────────────────────────────
+// Used as final fallback when all OpenRouter free models are rate-limited.
+// Gemini 2.5 Flash: 1M context, fast, free tier with AI Studio key.
+
+interface GeminiPart { text: string }
+interface GeminiContent { parts: GeminiPart[] }
+interface GeminiResponse {
+  candidates?: Array<{ content: { parts: GeminiPart[] } }>;
+  error?: { message: string; code: number };
+}
+
+/**
+ * callGemini — calls Google Gemini API directly (not via OpenRouter).
+ * Converts OpenRouter-style messages to Gemini's content format.
+ * System message is prepended as a user turn (Gemini doesn't have a system role in basic API).
+ */
+async function callGemini(
+  messages: OpenRouterMessage[],
+  temperature = 0.2
+): Promise<string> {
+  const apiKey = config.geminiApiKey;
+  if (!apiKey) throw new Error("GOOGLE_AI_API_KEY not set — Gemini unavailable");
+
+  // Convert messages: system → prepend to first user message; assistant → model role
+  const contents: Array<{ role: string; parts: GeminiPart[] }> = [];
+  let systemText = "";
+  for (const msg of messages) {
+    if (msg.role === "system") {
+      systemText = msg.content;
+    } else if (msg.role === "user") {
+      const text = systemText ? `${systemText}
+
+${msg.content}` : msg.content;
+      contents.push({ role: "user", parts: [{ text }] });
+      systemText = ""; // only prepend to first user message
+    } else if (msg.role === "assistant") {
+      contents.push({ role: "model", parts: [{ text: msg.content }] });
+    }
+  }
+
+  const url = `${config.geminiBaseUrl}/${config.geminiModel}:generateContent?key=${apiKey}`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contents,
+      generationConfig: { temperature, maxOutputTokens: 4096 },
+    }),
+  });
+
+  const data = (await res.json()) as GeminiResponse;
+
+  if (!res.ok || data.error) {
+    const msg = data.error?.message ?? `HTTP ${res.status}`;
+    throw new Error(`Gemini error: ${msg}`);
+  }
+
+  return data.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+}
+
 interface OpenRouterMessage {
   role: "system" | "user" | "assistant";
   content: string;
@@ -71,6 +131,19 @@ export async function callOpenRouter(
         throw lastError;
       }
       // Rate limit — continue to next model
+    }
+  }
+
+  // All OpenRouter models exhausted — try Gemini as final fallback
+  if (config.geminiApiKey) {
+    try {
+      const geminiResult = await callGemini(messages, temperature);
+      if (geminiResult) return geminiResult;
+    } catch (geminiErr) {
+      throw new Error(
+        `All models exhausted. OpenRouter tried: ${modelsToTry.join(", ")}. ` +
+        `Gemini error: ${geminiErr instanceof Error ? geminiErr.message : String(geminiErr)}`
+      );
     }
   }
 
