@@ -149,7 +149,7 @@ export async function runSeed(): Promise<void> {
       `INSERT INTO model_workspaces (tenant_id, name, domain, description)
        VALUES ($1, 'Legal Intelligence Lab', 'legal-intelligence-lab',
                'Fine-tuning workspace for contract analysis and legal NLU models.')
-       ON CONFLICT DO NOTHING RETURNING id`,
+       ON CONFLICT (tenant_id, name) DO NOTHING RETURNING id`,
       [tenantId],
       `SELECT id FROM model_workspaces WHERE tenant_id=$1 AND name='Legal Intelligence Lab' LIMIT 1`,
       [tenantId],
@@ -161,7 +161,7 @@ export async function runSeed(): Promise<void> {
       `INSERT INTO model_workspaces (tenant_id, name, domain, description)
        VALUES ($1, 'Legal AI Operating Layer', 'legal-ai-operating-layer',
                'Intake router + specialist agents for legal matter classification and analysis.')
-       ON CONFLICT DO NOTHING RETURNING id`,
+       ON CONFLICT (tenant_id, name) DO NOTHING RETURNING id`,
       [tenantId],
       `SELECT id FROM model_workspaces WHERE tenant_id=$1 AND name='Legal AI Operating Layer' LIMIT 1`,
       [tenantId],

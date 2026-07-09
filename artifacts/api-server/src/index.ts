@@ -193,6 +193,7 @@ async function runZieMigration(): Promise<void> {
   try {
     await client.query(`ALTER TABLE "evaluation_runs" ADD COLUMN IF NOT EXISTS "domain" text`);
     await client.query(`ALTER TABLE "evaluation_runs" ADD COLUMN IF NOT EXISTS "task_type" text`);
+    await client.query(`ALTER TABLE "evaluation_runs" ADD COLUMN IF NOT EXISTS "rubric_id" text`);
     await client.query(`ALTER TABLE "evaluation_runs" ALTER COLUMN "job_id" DROP NOT NULL`);
     await client.query(`ALTER TABLE "evaluation_metrics" ADD COLUMN IF NOT EXISTS "metric_value" real`);
     await client.query(`ALTER TABLE "evaluation_metrics" ADD COLUMN IF NOT EXISTS "metadata" jsonb DEFAULT '{}'::jsonb`);
@@ -483,6 +484,20 @@ async function runMigrations(): Promise<void> {
     await client.query(`
       ALTER TABLE "model_workspaces"
         ALTER COLUMN "domain" SET DEFAULT ''
+    `);
+
+    // Deduplicate model_workspaces before adding unique index (keep lowest id per tenant+name)
+    await client.query(`
+      DELETE FROM "model_workspaces" mw
+      WHERE mw.id NOT IN (
+        SELECT MIN(id) FROM "model_workspaces" GROUP BY tenant_id, name
+      )
+    `);
+
+    // Idempotent unique constraint for workspace deduplication
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS "model_workspaces_tenant_name_uidx"
+        ON "model_workspaces" ("tenant_id", "name")
     `);
 
     await client.query(`
