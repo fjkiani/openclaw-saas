@@ -121,7 +121,7 @@ export async function runSeed(): Promise<void> {
       `, [
         skillIds[s.slug],
         `demo-${s.slug}`,
-        s.l4,
+        Math.round(s.l4 * 10),   // store as integer (91 = 9.1/10 scale)
         JSON.stringify({ l1: s.l1, l2: s.l2, l3: s.l3, l4: s.l4 }),
         s.grade,
         JSON.stringify({ grade: s.grade, levelScores: { l1: s.l1, l2: s.l2, l3: s.l3, l4: s.l4 } }),
