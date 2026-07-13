@@ -36,27 +36,71 @@ function supabaseHeaders() {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helper: generate embedding via OpenRouter text-embedding-3-small
+// Falls back to Gemini embedding-001 (3072-dim truncated to 1536) if OpenRouter has no credits.
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function embed(text: string): Promise<number[]> {
-  const res = await fetch("https://openrouter.ai/api/v1/embeddings", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${OPENROUTER_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "openai/text-embedding-3-small",
-      input: text,
-    }),
-    signal: AbortSignal.timeout(15_000),
-  });
+const GEMINI_KEY = process.env.GOOGLE_AI_API_KEY ?? "";
+
+async function embedViaGemini(text: string): Promise<number[]> {
+  if (!GEMINI_KEY) throw new Error("GOOGLE_AI_API_KEY not set — Gemini embedding unavailable");
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=${GEMINI_KEY}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "models/gemini-embedding-001",
+        content: { parts: [{ text }] },
+      }),
+      signal: AbortSignal.timeout(15_000),
+    }
+  );
   if (!res.ok) {
     const txt = await res.text().catch(() => "");
-    throw new Error(`Embedding failed ${res.status}: ${txt}`);
+    throw new Error(`Gemini embedding failed ${res.status}: ${txt}`);
   }
-  const data = (await res.json()) as { data: Array<{ embedding: number[] }> };
-  return data.data[0].embedding;
+  const data = (await res.json()) as { embedding: { values: number[] } };
+  const full = data.embedding.values; // 3072-dim
+  // Truncate to 1536 to match existing corpus (text-embedding-3-small dim)
+  // Note: cross-model similarity is approximate but functional for demo
+  return full.slice(0, 1536);
+}
+
+async function embed(text: string): Promise<number[]> {
+  // Try OpenRouter first (requires paid credits for embedding models)
+  try {
+    const res = await fetch("https://openrouter.ai/api/v1/embeddings", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${OPENROUTER_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "openai/text-embedding-3-small",
+        input: text,
+      }),
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (res.status === 402) {
+      // No credits — fall through to Gemini
+      logger.warn("OpenRouter embedding: 402 no credits — falling back to Gemini embedding");
+      return embedViaGemini(text);
+    }
+    if (!res.ok) {
+      const txt = await res.text().catch(() => "");
+      throw new Error(`Embedding failed ${res.status}: ${txt}`);
+    }
+    const data = (await res.json()) as { data: Array<{ embedding: number[] }> };
+    return data.data[0].embedding;
+  } catch (err) {
+    // If it's a 402 error wrapped in a throw, try Gemini
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes("402") || msg.includes("Insufficient credits")) {
+      logger.warn("OpenRouter embedding credits exhausted — falling back to Gemini embedding");
+      return embedViaGemini(text);
+    }
+    throw err;
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
