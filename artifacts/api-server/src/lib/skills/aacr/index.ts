@@ -109,84 +109,166 @@ async function embed(text: string): Promise<number[]> {
 // Output: { speakers: AACRSpeaker[], talk_ids: string[] }
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Keyword fallback: search aacr_speakers directly using ilike on key fields.
+// Used when vector search returns low-quality results (cross-model embedding mismatch)
+// or when OpenRouter embedding credits are exhausted.
+// ─────────────────────────────────────────────────────────────────────────────
+async function keywordSearchSpeakers(
+  query: string,
+  matchCount: number
+): Promise<{ speakers: unknown[]; talk_ids: string[]; match_scores: unknown[] }> {
+  // Extract meaningful keywords (skip stop words, keep 2+ char tokens)
+  const stopWords = new Set(["in", "of", "the", "and", "or", "a", "an", "to", "for", "with", "on", "at", "by", "from", "is", "are", "was", "were"]);
+  const keywords = query
+    .replace(/[^a-zA-Z0-9\s-]/g, " ")
+    .split(/\s+/)
+    .filter((w) => w.length >= 3 && !stopWords.has(w.toLowerCase()))
+    .slice(0, 4); // top 4 keywords
+
+  if (!keywords.length) {
+    return { speakers: [], talk_ids: [], match_scores: [] };
+  }
+
+  // Build OR filter across key text fields for the primary keyword
+  const primaryKw = keywords[0];
+  const fields = ["moa_summary", "key_findings", "talk_title", "targets", "topic_categories"];
+  const orFilter = fields.map((f) => `${f}.ilike.*${primaryKw}*`).join(",");
+
+  const url = `${SUPABASE_URL}/rest/v1/aacr_speakers?or=(${encodeURIComponent(orFilter)})&limit=${matchCount * 3}&select=id,talk_id,speaker_name,affiliation,talk_title,moa_summary,key_findings,targets,tumor_types,topic_categories,clinical_stage,resistance_notes,open_questions,biomarkers,combination_strategies`;
+
+  const res = await fetch(url, { headers: supabaseHeaders(), signal: AbortSignal.timeout(10_000) });
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    throw new Error(`aacr_speakers keyword search failed ${res.status}: ${txt}`);
+  }
+
+  const rows = (await res.json()) as Array<Record<string, unknown>>;
+
+  // Score each row by how many keywords appear in its text fields
+  const scored = rows.map((row) => {
+    const text = [row.moa_summary, row.key_findings, row.talk_title, row.targets, row.topic_categories]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+    const score = keywords.reduce((acc, kw) => acc + (text.includes(kw.toLowerCase()) ? 1 : 0), 0);
+    return { row, score };
+  });
+
+  const topRows = scored
+    .sort((a, b) => b.score - a.score)
+    .slice(0, matchCount)
+    .map(({ row, score }) => ({ row, score }));
+
+  const speakers = topRows.map(({ row }) => row);
+  const talkIds = [...new Set(speakers.map((s) => String(s.talk_id ?? "")).filter(Boolean))];
+  const matchScores = topRows.map(({ row, score }) => ({
+    talk_id: row.talk_id,
+    similarity: score / keywords.length, // normalize 0-1
+    field: "keyword",
+  }));
+
+  return { speakers, talk_ids: talkIds, match_scores: matchScores };
+}
+
 const acrSemanticSearch: SkillHandler = async (input) => {
   const query = String(input.query ?? "");
   const matchCount = Number(input.match_count ?? 10);
   const matchThreshold = Number(input.match_threshold ?? 0.65);
+  const MIN_VECTOR_SIMILARITY = 0.25; // below this, fall back to keyword search
 
   if (!query) throw new Error("aacr-semantic-search: query is required");
   if (!SUPABASE_URL || !SUPABASE_KEY) {
     throw new Error("aacr-semantic-search: SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY not set");
   }
 
-  logger.debug({ query, matchCount }, "aacr-semantic-search: generating embedding");
-  const embedding = await embed(query);
+  // ── Attempt 1: vector search ──────────────────────────────────────────────
+  let useKeywordFallback = false;
+  let speakers: unknown[] = [];
+  let talkIds: string[] = [];
+  let matchScores: unknown[] = [];
 
-  // Call match_embeddings RPC
-  const rpcRes = await fetch(`${SUPABASE_URL}/rest/v1/rpc/match_embeddings`, {
-    method: "POST",
-    headers: supabaseHeaders(),
-    body: JSON.stringify({
-      query_embedding: embedding,
-      match_count: matchCount,
-      match_threshold: matchThreshold,
-    }),
-    signal: AbortSignal.timeout(20_000),
-  });
+  try {
+    logger.debug({ query, matchCount }, "aacr-semantic-search: generating embedding");
+    const embedding = await embed(query);
 
-  if (!rpcRes.ok) {
-    const txt = await rpcRes.text().catch(() => "");
-    throw new Error(`match_embeddings RPC failed ${rpcRes.status}: ${txt}`);
+    const rpcRes = await fetch(`${SUPABASE_URL}/rest/v1/rpc/match_embeddings`, {
+      method: "POST",
+      headers: supabaseHeaders(),
+      body: JSON.stringify({
+        query_embedding: embedding,
+        match_count: matchCount * 3,
+        match_threshold: 0.0, // always fetch, filter by quality below
+      }),
+      signal: AbortSignal.timeout(20_000),
+    });
+
+    if (!rpcRes.ok) {
+      const txt = await rpcRes.text().catch(() => "");
+      throw new Error(`match_embeddings RPC failed ${rpcRes.status}: ${txt}`);
+    }
+
+    const matches = (await rpcRes.json()) as Array<{
+      id: string; talk_id: string; field: string; similarity: number;
+    }>;
+
+    // Check if vector results are meaningful
+    const maxSim = matches.length ? Math.max(...matches.map((m) => m.similarity)) : 0;
+    if (maxSim < MIN_VECTOR_SIMILARITY) {
+      logger.warn(
+        { maxSim, query },
+        "aacr-semantic-search: vector similarity too low (cross-model mismatch) — using keyword fallback"
+      );
+      useKeywordFallback = true;
+    } else {
+      // Good vector results — deduplicate and fetch speakers
+      const talkIdSet = new Set<string>();
+      const topMatches = matches
+        .filter((m) => m.similarity >= matchThreshold)
+        .sort((a, b) => b.similarity - a.similarity)
+        .filter((m) => { if (talkIdSet.has(m.talk_id)) return false; talkIdSet.add(m.talk_id); return true; })
+        .slice(0, matchCount);
+
+      talkIds = topMatches.map((m) => m.talk_id);
+      matchScores = topMatches.map((m) => ({ talk_id: m.talk_id, similarity: m.similarity, field: m.field }));
+
+      if (talkIds.length) {
+        const speakerRes = await fetch(
+          `${SUPABASE_URL}/rest/v1/aacr_speakers?talk_id=in.(${talkIds.map(encodeURIComponent).join(",")})&limit=50`,
+          { headers: supabaseHeaders(), signal: AbortSignal.timeout(10_000) }
+        );
+        if (!speakerRes.ok) {
+          const txt = await speakerRes.text().catch(() => "");
+          throw new Error(`aacr_speakers fetch failed ${speakerRes.status}: ${txt}`);
+        }
+        speakers = await speakerRes.json();
+      }
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes("402") || msg.includes("Insufficient credits") || msg.includes("cross-model")) {
+      logger.warn({ err: msg }, "aacr-semantic-search: embedding unavailable — using keyword fallback");
+      useKeywordFallback = true;
+    } else {
+      throw err;
+    }
   }
 
-  const matches = (await rpcRes.json()) as Array<{
-    id: string;
-    talk_id: string;
-    field: string;
-    similarity: number;
-  }>;
-
-  if (!matches.length) {
-    logger.info({ query }, "aacr-semantic-search: no matches above threshold");
-    return { speakers: [], talk_ids: [] };
+  // ── Attempt 2: keyword fallback ───────────────────────────────────────────
+  if (useKeywordFallback || (!speakers.length && !talkIds.length)) {
+    logger.info({ query }, "aacr-semantic-search: running keyword search fallback");
+    const kwResult = await keywordSearchSpeakers(query, matchCount);
+    speakers = kwResult.speakers;
+    talkIds = kwResult.talk_ids;
+    matchScores = kwResult.match_scores;
   }
-
-  // Deduplicate talk_ids, keep top matches
-  const talkIdSet = new Set<string>();
-  const topMatches = matches
-    .sort((a, b) => b.similarity - a.similarity)
-    .filter((m) => {
-      if (talkIdSet.has(m.talk_id)) return false;
-      talkIdSet.add(m.talk_id);
-      return true;
-    })
-    .slice(0, matchCount);
-
-  const talkIds = topMatches.map((m) => m.talk_id);
-
-  // Fetch speaker records for matched talk_ids
-  const speakerRes = await fetch(
-    `${SUPABASE_URL}/rest/v1/aacr_speakers?talk_id=in.(${talkIds.map(encodeURIComponent).join(",")})&limit=50`,
-    { headers: supabaseHeaders(), signal: AbortSignal.timeout(10_000) }
-  );
-
-  if (!speakerRes.ok) {
-    const txt = await speakerRes.text().catch(() => "");
-    throw new Error(`aacr_speakers fetch failed ${speakerRes.status}: ${txt}`);
-  }
-
-  const speakers = await speakerRes.json();
 
   logger.info(
-    { query, matchCount: topMatches.length, speakerCount: speakers.length },
+    { query, speakerCount: speakers.length, talkIdCount: talkIds.length, useKeywordFallback },
     "aacr-semantic-search: complete"
   );
 
-  return {
-    speakers,
-    talk_ids: talkIds,
-    match_scores: topMatches.map((m) => ({ talk_id: m.talk_id, similarity: m.similarity, field: m.field })),
-  };
+  return { speakers, talk_ids: talkIds, match_scores: matchScores };
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
