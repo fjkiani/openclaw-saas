@@ -130,10 +130,17 @@ async function keywordSearchSpeakers(
     return { speakers: [], talk_ids: [], match_scores: [] };
   }
 
-  // Build OR filter across key text fields for the primary keyword
+  // Build OR filter across plain-text fields only (ilike doesn't work on text[] arrays)
+  // Array fields (key_findings, tumor_types, topic_categories, targets) use cs.{kw} (contains)
   const primaryKw = keywords[0];
-  const fields = ["moa_summary", "key_findings", "talk_title", "targets", "topic_categories"];
-  const orFilter = fields.map((f) => `${f}.ilike.*${primaryKw}*`).join(",");
+  const textFields = ["moa_summary", "talk_title", "speaker_name", "affiliation", "session_title", "novelty_flag", "clinical_stage"];
+  const orParts = textFields.map((f) => `${f}.ilike.*${primaryKw}*`);
+  // Also search array fields with contains syntax for each keyword
+  const arrayFields = ["tumor_types", "topic_categories"];
+  for (const f of arrayFields) {
+    orParts.push(`${f}.cs.{${primaryKw}}`);
+  }
+  const orFilter = orParts.join(",");
 
   const url = `${SUPABASE_URL}/rest/v1/aacr_speakers?or=(${encodeURIComponent(orFilter)})&limit=${matchCount * 3}&select=id,talk_id,speaker_name,affiliation,talk_title,moa_summary,key_findings,targets,tumor_types,topic_categories,clinical_stage,resistance_notes,open_questions,biomarkers,combination_strategies`;
 
@@ -146,8 +153,17 @@ async function keywordSearchSpeakers(
   const rows = (await res.json()) as Array<Record<string, unknown>>;
 
   // Score each row by how many keywords appear in its text fields
+  // Note: key_findings, tumor_types, topic_categories are arrays — join them
   const scored = rows.map((row) => {
-    const text = [row.moa_summary, row.key_findings, row.talk_title, row.targets, row.topic_categories]
+    const arrayToStr = (v: unknown) => Array.isArray(v) ? v.join(" ") : (v ?? "");
+    const text = [
+      row.moa_summary,
+      arrayToStr(row.key_findings),
+      row.talk_title,
+      arrayToStr(row.targets),
+      arrayToStr(row.topic_categories),
+      arrayToStr(row.tumor_types),
+    ]
       .filter(Boolean)
       .join(" ")
       .toLowerCase();
