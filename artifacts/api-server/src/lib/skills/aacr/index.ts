@@ -293,11 +293,27 @@ const acrSemanticSearch: SkillHandler = async (input) => {
 // Output: { crispro_opps: CrisPROOpportunity[], scored_count: number }
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Helper: unwrap step output — the workflow engine passes the full step-N output
+// object as input.speakers (because output_key='speakers', input_mapping={'speakers':'speakers'}).
+// So input.speakers may be { speakers: [...], talk_ids: [...] } instead of an array.
+function unwrapStepOutput(raw: unknown): { speakers: Array<{ talk_id?: string; session_slug?: string }>; talkIds: string[] } {
+  if (Array.isArray(raw)) {
+    return { speakers: raw as Array<{ talk_id?: string; session_slug?: string }>, talkIds: [] };
+  }
+  if (raw && typeof raw === "object") {
+    const obj = raw as Record<string, unknown>;
+    const speakers = Array.isArray(obj.speakers) ? obj.speakers as Array<{ talk_id?: string; session_slug?: string }> : [];
+    const talkIds = Array.isArray(obj.talk_ids) ? obj.talk_ids as string[] : [];
+    return { speakers, talkIds };
+  }
+  return { speakers: [], talkIds: [] };
+}
+
 const crisPROScorer: SkillHandler = async (input) => {
   // aacr_crispro_opps is keyed by session_slug (not talk_id).
   // Extract session_slugs from speakers array; fall back to parsing talk_ids.
-  const speakers = (input.speakers ?? []) as Array<{ talk_id?: string; session_slug?: string }>;
-  const talkIds = (input.talk_ids ?? []) as string[];
+  const { speakers, talkIds: unwrappedTalkIds } = unwrapStepOutput(input.speakers);
+  const talkIds = [...unwrappedTalkIds, ...((input.talk_ids as string[]) ?? [])];
 
   // Collect session_slugs from speakers
   const slugSet = new Set<string>();
@@ -371,9 +387,9 @@ const crisPROScorer: SkillHandler = async (input) => {
 
 const cdHitExtractor: SkillHandler = async (input) => {
   // aacr_cd_hits is keyed by session_slug (not talk_id).
-  // Extract session_slugs from speakers or parse from talk_ids.
-  const speakers = (input.speakers ?? []) as Array<{ talk_id?: string; session_slug?: string }>;
-  const talkIds = (input.talk_ids ?? []) as string[];
+  // Unwrap step output object if needed (same pattern as crisPROScorer).
+  const { speakers, talkIds: unwrappedTalkIds } = unwrapStepOutput(input.speakers);
+  const talkIds = [...unwrappedTalkIds, ...((input.talk_ids as string[]) ?? [])];
 
   const slugSet = new Set<string>();
   for (const s of speakers) {
