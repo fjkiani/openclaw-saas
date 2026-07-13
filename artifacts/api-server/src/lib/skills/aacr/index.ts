@@ -294,52 +294,72 @@ const acrSemanticSearch: SkillHandler = async (input) => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const crisPROScorer: SkillHandler = async (input) => {
-  // Accept talk_ids directly or extract from speakers array
-  let talkIds: string[] = [];
-  if (Array.isArray(input.talk_ids) && input.talk_ids.length > 0) {
-    talkIds = input.talk_ids as string[];
-  } else if (Array.isArray(input.speakers)) {
-    talkIds = (input.speakers as Array<{ talk_id?: string }>)
-      .map((s) => s.talk_id ?? "")
-      .filter(Boolean);
+  // aacr_crispro_opps is keyed by session_slug (not talk_id).
+  // Extract session_slugs from speakers array; fall back to parsing talk_ids.
+  const speakers = (input.speakers ?? []) as Array<{ talk_id?: string; session_slug?: string }>;
+  const talkIds = (input.talk_ids ?? []) as string[];
+
+  // Collect session_slugs from speakers
+  const slugSet = new Set<string>();
+  for (const s of speakers) {
+    if (s.session_slug) slugSet.add(s.session_slug);
+    // talk_id format: "session-slug::speaker::N" — extract slug from prefix
+    else if (s.talk_id) {
+      const slug = s.talk_id.split("::")[0];
+      if (slug) slugSet.add(slug);
+    }
+  }
+  // Also parse slugs from raw talk_ids input
+  for (const tid of talkIds) {
+    const slug = tid.split("::")[0];
+    if (slug) slugSet.add(slug);
   }
 
-  if (!talkIds.length) {
-    logger.info("crispro-scorer: no talk_ids — returning empty");
+  if (!slugSet.size) {
+    logger.info("crispro-scorer: no session_slugs — returning empty");
     return { crispro_opps: [], scored_count: 0 };
   }
 
-  // Query aacr_crispro_opps view (created in Supabase)
-  const encoded = talkIds.map(encodeURIComponent).join(",");
+  // Query aacr_crispro_opps by session_slug
+  const encodedSlugs = [...slugSet].map(encodeURIComponent).join(",");
   const res = await fetch(
-    `${SUPABASE_URL}/rest/v1/aacr_crispro_opps?talk_id=in.(${encoded})&limit=100`,
+    `${SUPABASE_URL}/rest/v1/aacr_crispro_opps?session_slug=in.(${encodedSlugs})&limit=100`,
     { headers: supabaseHeaders(), signal: AbortSignal.timeout(10_000) }
   );
 
   if (!res.ok) {
-    // Fall back to aacr_competitive_intel table if view doesn't exist
-    const fallbackRes = await fetch(
-      `${SUPABASE_URL}/rest/v1/aacr_competitive_intel?talk_id=in.(${encoded})&crispro_opportunity=not.is.null&limit=100`,
-      { headers: supabaseHeaders(), signal: AbortSignal.timeout(10_000) }
-    );
-    if (!fallbackRes.ok) {
-      const txt = await fallbackRes.text().catch(() => "");
-      throw new Error(`crispro fetch failed ${fallbackRes.status}: ${txt}`);
+    const txt = await res.text().catch(() => "");
+    // Fall back to aacr_competitive_intel (has talk_id + crispro_opportunity)
+    if (talkIds.length || speakers.length) {
+      const allTalkIds = [
+        ...talkIds,
+        ...speakers.map((s) => s.talk_id ?? "").filter(Boolean),
+      ];
+      const encodedTids = [...new Set(allTalkIds)].map(encodeURIComponent).join(",");
+      const fallbackRes = await fetch(
+        `${SUPABASE_URL}/rest/v1/aacr_competitive_intel?talk_id=in.(${encodedTids})&crispro_opportunity=not.is.null&limit=100`,
+        { headers: supabaseHeaders(), signal: AbortSignal.timeout(10_000) }
+      );
+      if (!fallbackRes.ok) {
+        const ftxt = await fallbackRes.text().catch(() => "");
+        throw new Error(`crispro fetch failed ${fallbackRes.status}: ${ftxt}`);
+      }
+      const rows = await fallbackRes.json() as Array<Record<string, unknown>>;
+      const opps = rows
+        .filter((r) => r.crispro_opportunity)
+        .map((r) => ({
+          session_slug: r.session_slug ?? r.talk_id,
+          speaker_name: r.speaker_name,
+          opportunity: r.crispro_opportunity,
+          priority: r.crispro_priority ?? "medium",
+        }));
+      return { crispro_opps: opps, scored_count: opps.length };
     }
-    const rows = await fallbackRes.json() as Array<Record<string, unknown>>;
-    const opps = rows
-      .filter((r) => r.crispro_opportunity)
-      .map((r) => ({
-        talk_id: r.talk_id,
-        opportunity: r.crispro_opportunity,
-        priority: r.crispro_priority ?? "medium",
-        evidence_quality: r.data_maturity_assessment ?? null,
-      }));
-    return { crispro_opps: opps, scored_count: opps.length };
+    throw new Error(`crispro fetch failed ${res.status}: ${txt}`);
   }
 
-  const opps = await res.json();
-  logger.info({ talkIdCount: talkIds.length, oppCount: opps.length }, "crispro-scorer: complete");
+  const opps = await res.json() as Array<Record<string, unknown>>;
+  logger.info({ slugCount: slugSet.size, oppCount: opps.length }, "crispro-scorer: complete");
   return { crispro_opps: opps, scored_count: opps.length };
 };
 
@@ -350,32 +370,40 @@ const crisPROScorer: SkillHandler = async (input) => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const cdHitExtractor: SkillHandler = async (input) => {
-  let talkIds: string[] = [];
-  if (Array.isArray(input.talk_ids) && input.talk_ids.length > 0) {
-    talkIds = input.talk_ids as string[];
-  } else if (Array.isArray(input.speakers)) {
-    talkIds = (input.speakers as Array<{ talk_id?: string }>)
-      .map((s) => s.talk_id ?? "")
-      .filter(Boolean);
+  // aacr_cd_hits is keyed by session_slug (not talk_id).
+  // Extract session_slugs from speakers or parse from talk_ids.
+  const speakers = (input.speakers ?? []) as Array<{ talk_id?: string; session_slug?: string }>;
+  const talkIds = (input.talk_ids ?? []) as string[];
+
+  const slugSet = new Set<string>();
+  for (const s of speakers) {
+    if (s.session_slug) slugSet.add(s.session_slug);
+    else if (s.talk_id) { const slug = s.talk_id.split("::")[0]; if (slug) slugSet.add(slug); }
+  }
+  for (const tid of talkIds) {
+    const slug = tid.split("::")[0];
+    if (slug) slugSet.add(slug);
   }
 
-  if (!talkIds.length) {
-    logger.info("cd-hit-extractor: no talk_ids — returning empty");
+  if (!slugSet.size) {
+    logger.info("cd-hit-extractor: no session_slugs — returning empty");
     return { cd_hits: [], hit_count: 0 };
   }
 
-  const encoded = talkIds.map(encodeURIComponent).join(",");
+  const encodedSlugs = [...slugSet].map(encodeURIComponent).join(",");
 
-  // Query aacr_cd_hits view
+  // Query aacr_cd_hits by session_slug
   const res = await fetch(
-    `${SUPABASE_URL}/rest/v1/aacr_cd_hits?talk_id=in.(${encoded})&limit=100`,
+    `${SUPABASE_URL}/rest/v1/aacr_cd_hits?session_slug=in.(${encodedSlugs})&limit=100`,
     { headers: supabaseHeaders(), signal: AbortSignal.timeout(10_000) }
   );
 
   if (!res.ok) {
     // Fall back to aacr_competitive_intel with cognitive_dissonance filter
+    const allTalkIds = [...talkIds, ...speakers.map((s) => s.talk_id ?? "").filter(Boolean)];
+    const encodedTids = [...new Set(allTalkIds)].map(encodeURIComponent).join(",");
     const fallbackRes = await fetch(
-      `${SUPABASE_URL}/rest/v1/aacr_competitive_intel?talk_id=in.(${encoded})&cognitive_dissonance=not.is.null&limit=100`,
+      `${SUPABASE_URL}/rest/v1/aacr_competitive_intel?talk_id=in.(${encodedTids})&cognitive_dissonance=not.is.null&limit=100`,
       { headers: supabaseHeaders(), signal: AbortSignal.timeout(10_000) }
     );
     if (!fallbackRes.ok) {
@@ -386,7 +414,8 @@ const cdHitExtractor: SkillHandler = async (input) => {
     const hits = rows
       .filter((r) => r.cognitive_dissonance)
       .map((r) => ({
-        talk_id: r.talk_id,
+        session_slug: r.session_slug ?? r.talk_id,
+        speaker_name: r.speaker_name,
         cognitive_dissonance: r.cognitive_dissonance,
         vulnerability_identified: r.vulnerability_identified ?? null,
       }));
@@ -394,7 +423,7 @@ const cdHitExtractor: SkillHandler = async (input) => {
   }
 
   const hits = await res.json();
-  logger.info({ talkIdCount: talkIds.length, hitCount: hits.length }, "cd-hit-extractor: complete");
+  logger.info({ slugCount: slugSet.size, hitCount: hits.length }, "cd-hit-extractor: complete");
   return { cd_hits: hits, hit_count: hits.length };
 };
 
