@@ -46,7 +46,7 @@ async function runL1Judge(skill: GeneratedSkill): Promise<{ score: number; reaso
 
 Implementation:
 \`\`\`typescript
-${skill.implementation.slice(0, 3000)}
+${skill.implementation.slice(0, 8000)}
 \`\`\`
 
 Rate this implementation 0-100. Return JSON only.`;
