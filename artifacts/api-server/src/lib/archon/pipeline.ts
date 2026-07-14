@@ -82,6 +82,7 @@ export async function runSkillForgePipeline(runId: string, description: string):
       grade: result.grade,
       overall_score: result.overall_score,
       level_scores: result.level_scores as Record<string, unknown>,
+      l1_reasoning: result.l1_reasoning,
     };
     updateRun(runId, {
       benchmarkResult,
