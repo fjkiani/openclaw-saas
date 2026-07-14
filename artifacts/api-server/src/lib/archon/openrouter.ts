@@ -138,12 +138,15 @@ export async function callOpenRouter(
 
     // If we get here, this model failed — try next
     if (lastError) {
-      const isRateLimit = lastError.message.includes("429") || lastError.message.includes("503");
-      if (!isRateLimit) {
+      const msg = lastError.message;
+      const isRateLimit = msg.includes("429") || msg.includes("503");
+      // 404 = model unavailable (e.g. free tier removed) — also try fallbacks
+      const isModelUnavailable = msg.includes("404");
+      if (!isRateLimit && !isModelUnavailable) {
         // Hard error (400, 401, etc.) — don't try fallbacks
         throw lastError;
       }
-      // Rate limit — continue to next model
+      // Rate limit or model unavailable — continue to next model
     }
   }
 
