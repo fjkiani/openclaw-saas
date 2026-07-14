@@ -84,10 +84,18 @@ function runL3SchemaCoverage(skill: GeneratedSkill): number {
     (skill.outputSchema as { properties?: Record<string, unknown> })?.properties ?? {}
   );
   if (outputProps.length === 0) return 50;
-  const runFnMatch = impl.match(/(?:async\s+)?function\s+run[\s\S]*?(?=\nexport|\nconst|\nfunction|$)/);
-  const runBody = runFnMatch ? runFnMatch[0] : impl;
+  // Use full implementation for coverage check — the run() body regex can miss
+  // return statements that appear after nested blocks or at the end of the file.
+  const searchBody = impl;
   const covered = outputProps.filter((prop) =>
-    runBody.includes(`"${prop}"`) || runBody.includes(`'${prop}'`) || runBody.includes(prop + ":")
+    // Quoted key: "prop" or 'prop'
+    searchBody.includes(`"${prop}"`) ||
+    searchBody.includes(`'${prop}'`) ||
+    // Explicit key: prop: value
+    searchBody.includes(prop + ":") ||
+    // Shorthand property in return object: { prop, ... } or { prop }
+    // Match word boundary to avoid partial matches (e.g. "count" matching "discount")
+    new RegExp(`[{,\\s]${prop}[,}\\s]`).test(searchBody)
   ).length;
   return Math.round((covered / outputProps.length) * 100);
 }
