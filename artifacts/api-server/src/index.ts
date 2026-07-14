@@ -364,6 +364,25 @@ async function runMigrations(): Promise<void> {
         ADD COLUMN IF NOT EXISTS "result_json" jsonb
     `);
 
+    // archon_runs: DB-backed store for Archon skill forge runs (survives Render restarts)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS "archon_runs" (
+        "run_id"           text PRIMARY KEY NOT NULL,
+        "description"      text NOT NULL,
+        "status"           text NOT NULL DEFAULT 'pending',
+        "stage"            text,
+        "skill"            jsonb,
+        "l0_result"        jsonb,
+        "benchmark_result" jsonb,
+        "cataloged"        boolean,
+        "skill_id"         integer REFERENCES "skills"("id") ON DELETE SET NULL,
+        "retry_count"      integer NOT NULL DEFAULT 0,
+        "error"            text,
+        "created_at"       timestamptz NOT NULL DEFAULT now(),
+        "completed_at"     timestamptz
+      )
+    `);
+
     // tenant_skills: tenant_id integer (matches Drizzle schema)
     await client.query(`
       CREATE TABLE IF NOT EXISTS "tenant_skills" (
