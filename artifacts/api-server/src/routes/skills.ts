@@ -299,16 +299,28 @@ router.post("/skills/:id/benchmark", async (req: Request, res: Response): Promis
   const startedAt = Date.now();
 
   // Extract outputSchema from implementation source (it's exported as a const).
-  // This gives L3 real data to work with instead of an empty object.
+  // Uses brace-counting to handle nested objects correctly.
   function extractSchemaFromImpl(impl: string, exportName: string): Record<string, unknown> {
     try {
-      const match = impl.match(new RegExp(`export\\s+const\\s+${exportName}\\s*=\\s*(\\{[\\s\\S]*?\\});?\\s*\\n`));
-      if (!match) return {};
-      // Use JSON5-style parse: replace unquoted keys with quoted keys
-      const raw = match[1]
-        .replace(/\/\/[^\n]*/g, "") // strip line comments
-        .replace(/,\s*([}\]])/g, "$1") // trailing commas
-        .replace(/([{,]\s*)([a-zA-Z_$][a-zA-Z0-9_$]*)\s*:/g, '$1"$2":'); // quote keys
+      const declPattern = new RegExp(`export\\s+const\\s+${exportName}\\s*=\\s*`);
+      const declMatch = declPattern.exec(impl);
+      if (!declMatch) return {};
+      const start = declMatch.index + declMatch[0].length;
+      if (impl[start] !== "{") return {};
+      // Walk forward counting braces to find the matching closing brace
+      let depth = 0;
+      let end = start;
+      for (let i = start; i < impl.length; i++) {
+        if (impl[i] === "{") depth++;
+        else if (impl[i] === "}") {
+          depth--;
+          if (depth === 0) { end = i + 1; break; }
+        }
+      }
+      const raw = impl.slice(start, end)
+        .replace(/\/\/[^\n]*/g, "")       // strip line comments
+        .replace(/,\s*([}\]])/g, "$1")    // trailing commas
+        .replace(/([{,]\s*)([a-zA-Z_$][a-zA-Z0-9_$]*)\s*:/g, '$1"$2":'); // quote unquoted keys
       return JSON.parse(raw) as Record<string, unknown>;
     } catch {
       return {};
