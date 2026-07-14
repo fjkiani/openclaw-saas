@@ -4,11 +4,15 @@
  * OPENROUTER_API_KEY is shared with the legal counsel route.
  *
  * Model priority order — first available (non-429/404) is used:
- *   1. qwen/qwen3-coder:free     — 1M ctx, purpose-built for code generation
- *   2. nvidia/nemotron-3-super-120b-a12b:free — 1M ctx, strong reasoning
- *   3. meta-llama/llama-3.3-70b-instruct:free — 131k ctx, reliable fallback
+ *   Code:      1. qwen/qwen3-coder:free     — 1M ctx, purpose-built for code generation
+ *              2. nvidia/nemotron-3-super-120b-a12b:free — 1M ctx, strong reasoning
+ *              3. meta-llama/llama-3.3-70b-instruct:free — 131k ctx, reliable fallback
+ *   L1 Judge:  1. nvidia/nemotron-3-ultra-550b-a55b:free — 550B, strongest free reasoning
+ *              2. qwen/qwen3-coder:free — 1M ctx, reliable JSON output
+ *              3. nvidia/nemotron-3-super-120b-a12b:free — 1M ctx fallback
  *
  * Note: openai/gpt-oss-120b:free was removed — no longer available on free tier (404).
+ * Note: nousresearch/hermes-3-llama-3.1-405b:free consistently returns L1=20 (too strict).
  */
 export const archonConfig = {
   openrouterApiKey: process.env.OPENROUTER_API_KEY ?? process.env.OPENROUTER_API_KEY_2 ?? "",
@@ -20,10 +24,11 @@ export const archonConfig = {
     "nvidia/nemotron-3-super-120b-a12b:free",
     "meta-llama/llama-3.3-70b-instruct:free",
   ],
-  // L1 judge model
-  reasoningModel: "nousresearch/hermes-3-llama-3.1-405b:free",
+  // L1 judge model — switched from hermes-3-405b (returns L1=20 consistently)
+  // to nemotron-3-ultra-550b (strongest free reasoning model available)
+  reasoningModel: "nvidia/nemotron-3-ultra-550b-a55b:free",
   reasoningModelFallbacks: [
-    "meta-llama/llama-3.3-70b-instruct:free",
+    "qwen/qwen3-coder:free",
     "nvidia/nemotron-3-super-120b-a12b:free",
   ],
   // Google Gemini — final fallback when all OpenRouter free models are rate-limited
