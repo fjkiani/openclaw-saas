@@ -297,14 +297,36 @@ router.post("/skills/:id/benchmark", async (req: Request, res: Response): Promis
 
   // Run benchmark async — client polls GET /api/benchmark/:benchmarkId
   const startedAt = Date.now();
+
+  // Extract outputSchema from implementation source (it's exported as a const).
+  // This gives L3 real data to work with instead of an empty object.
+  function extractSchemaFromImpl(impl: string, exportName: string): Record<string, unknown> {
+    try {
+      const match = impl.match(new RegExp(`export\\s+const\\s+${exportName}\\s*=\\s*(\\{[\\s\\S]*?\\});?\\s*\\n`));
+      if (!match) return {};
+      // Use JSON5-style parse: replace unquoted keys with quoted keys
+      const raw = match[1]
+        .replace(/\/\/[^\n]*/g, "") // strip line comments
+        .replace(/,\s*([}\]])/g, "$1") // trailing commas
+        .replace(/([{,]\s*)([a-zA-Z_$][a-zA-Z0-9_$]*)\s*:/g, '$1"$2":'); // quote keys
+      return JSON.parse(raw) as Record<string, unknown>;
+    } catch {
+      return {};
+    }
+  }
+
+  const impl = skill.implementation ?? "";
+  const parsedOutputSchema = impl ? extractSchemaFromImpl(impl, "outputSchema") : {};
+  const parsedInputSchema = impl ? extractSchemaFromImpl(impl, "inputSchema") : {};
+
   const syntheticSkill = {
     name: skill.name,
     description: skill.description,
     category: skill.category ?? "General",
-    inputSchema: {},
-    outputSchema: {},
+    inputSchema: parsedInputSchema,
+    outputSchema: parsedOutputSchema,
     // Use real implementation if available, otherwise synthesize a minimal one for static analysis
-    implementation: skill.implementation ?? `
+    implementation: impl || `
       export async function run(input: Record<string, unknown>) {
         if (!input) throw new Error("input required");
         try {
