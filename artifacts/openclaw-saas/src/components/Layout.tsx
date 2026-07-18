@@ -21,6 +21,7 @@ import {
   Sun,
   Moon,
   Scale,
+  Microscope,
 } from "lucide-react";
 
 const navItems = [
@@ -29,6 +30,7 @@ const navItems = [
   { href: "/skills", icon: Zap, label: "Skills" },
   { href: "/zoa", icon: Zap, label: "ZOA" },
   { href: "/forge", icon: FlaskConical, label: "Model Forge" },
+  { href: "/evidence", icon: Microscope, label: "AACR Evidence" },
   { href: "/startup-counsel", icon: Scale, label: "Counsel" },
   { href: "/billing", icon: CreditCard, label: "Billing" },
 ];

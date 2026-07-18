@@ -1,0 +1,21 @@
+import { FormEvent, useState } from "react";
+import { Link } from "wouter";
+import { Layout, PageHeader } from "@/components/Layout";
+import { BoundaryBanner, EmptyEvidence } from "@/components/evidence/EvidencePrimitives";
+import { evidenceApi } from "@/lib/evidenceApi";
+import { Search, Dna, FlaskConical, FileText, Building2 } from "lucide-react";
+
+const types=["all","target","gene","disease","drug","sponsor","trial","abstract"];
+export default function EvidenceExplorerPage(){
+  const [q,setQ]=useState(""); const [type,setType]=useState("all"); const [data,setData]=useState<any>(); const [loading,setLoading]=useState(false); const [error,setError]=useState("");
+  async function submit(e:FormEvent){e.preventDefault();if(q.trim().length<2)return;setLoading(true);setError("");try{setData(await evidenceApi.search(q.trim(),type));}catch(x){setError(x instanceof Error?x.message:String(x));}finally{setLoading(false)}}
+  const href=(x:any)=>x.entity_type==="target"?`/evidence/targets/${encodeURIComponent(x.entity_id)}`:x.entity_type==="trial"?`/evidence/trials/${encodeURIComponent(x.entity_id)}`:`/evidence/abstracts/${encodeURIComponent(x.entity_id)}`;
+  return <Layout><PageHeader title="AACR Evidence Explorer" subtitle="Claim-level provenance across registry facts, source abstracts, and review state"/>
+    <div className="max-w-6xl mx-auto p-6 space-y-6"><BoundaryBanner/>
+      <form onSubmit={submit} className="border border-border rounded bg-card p-4 space-y-3"><div className="flex gap-2"><div className="relative flex-1"><Search className="absolute left-3 top-3 w-4 h-4 text-muted-foreground"/><input data-testid="evidence-search" value={q} onChange={e=>setQ(e.target.value)} placeholder="Target, gene, disease, drug, sponsor, NCT ID, DOI, or abstract" className="w-full bg-background border border-border rounded py-2.5 pl-10 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary"/></div><button data-testid="evidence-search-submit" className="bg-primary text-primary-foreground px-5 rounded font-mono text-sm disabled:opacity-50" disabled={loading}>{loading?"Searching":"Search"}</button></div>
+        <div className="flex flex-wrap gap-2">{types.map(x=><button type="button" key={x} onClick={()=>setType(x)} className={`px-2 py-1 rounded border text-[10px] font-mono uppercase ${type===x?"border-primary bg-primary/10 text-primary":"border-border text-muted-foreground"}`}>{x}</button>)}</div></form>
+      <div className="grid md:grid-cols-2 gap-3"><Link href="/evidence/targets/WRN" className="border border-border rounded bg-card p-4 hover:border-primary/50"><Dna className="w-4 h-4 text-primary mb-2"/><b className="font-mono">WRN fixture</b><p className="text-xs text-muted-foreground mt-1">Registry facts with target association explicitly unverified.</p></Link><Link href="/evidence/targets/PKMYT1" className="border border-border rounded bg-card p-4 hover:border-primary/50"><FlaskConical className="w-4 h-4 text-primary mb-2"/><b className="font-mono">PKMYT1 fixture</b><p className="text-xs text-muted-foreground mt-1">Inspect registry receipts separately from AACR linkage.</p></Link></div>
+      {error&&<div data-testid="evidence-error" className="border border-red-500/30 bg-red-500/5 text-red-300 p-3 rounded text-xs font-mono">{error}</div>}
+      {data&&<section><h2 className="font-mono font-bold mb-3">Search results</h2>{data.results?.length?<div className="space-y-2">{data.results.map((r:any)=><Link data-testid="evidence-result" key={`${r.entity_type}:${r.entity_id}`} href={href(r)} className="block border border-border rounded bg-card p-4 hover:border-primary/50"><div className="flex justify-between"><div><p className="text-[10px] uppercase text-primary font-mono">{r.entity_type}</p><h3 className="font-medium">{r.label||r.entity_id}</h3><p className="text-xs text-muted-foreground font-mono mt-1">{r.entity_id}</p></div>{r.entity_type==="abstract"?<FileText className="w-4 h-4"/>:r.entity_type==="target"?<Dna className="w-4 h-4"/>:<Building2 className="w-4 h-4"/>}</div><p className="text-[10px] text-muted-foreground mt-2">{r.claims?.length??0} source receipts</p></Link>)}</div>:<EmptyEvidence text="No governed evidence matched this query."/>}</section>}
+    </div></Layout>;
+}

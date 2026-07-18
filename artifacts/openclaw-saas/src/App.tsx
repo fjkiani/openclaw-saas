@@ -21,6 +21,13 @@ import ForgeWorkspacePage from "@/pages/forge/workspace";
 import VerticalPickerPage from "@/pages/onboarding/vertical-picker";
 import SetupPage from "@/pages/onboarding/setup";
 import StartupCounselPage from "@/pages/startup-counsel";
+import EvidenceExplorerPage from "@/pages/evidence/index";
+import EvidenceTargetPage from "@/pages/evidence/target";
+import EvidenceTrialPage from "@/pages/evidence/trial";
+import EvidenceAbstractPage from "@/pages/evidence/abstract";
+import EvidenceTracePage from "@/pages/evidence/trace";
+import EvidenceReviewPage from "@/pages/evidence/review";
+import EvidenceValidationPage from "@/pages/evidence/validation";
 
 const queryClient = new QueryClient();
 
@@ -235,6 +242,13 @@ function AppRoutes() {
         <Route path="/onboarding"><ProtectedRoute component={VerticalPickerPage} /></Route>
         <Route path="/onboarding/setup"><ProtectedRoute component={SetupPage} /></Route>
         <Route path="/startup-counsel"><ProtectedRoute component={StartupCounselPage} /></Route>
+        <Route path="/evidence"><ProtectedRoute component={EvidenceExplorerPage} /></Route>
+        <Route path="/evidence/targets/:target"><ProtectedRoute component={EvidenceTargetPage} /></Route>
+        <Route path="/evidence/trials/:nctId"><ProtectedRoute component={EvidenceTrialPage} /></Route>
+        <Route path="/evidence/abstracts/:recordId"><ProtectedRoute component={EvidenceAbstractPage} /></Route>
+        <Route path="/evidence/traces/:receiptId"><ProtectedRoute component={EvidenceTracePage} /></Route>
+        <Route path="/evidence/review"><ProtectedRoute component={EvidenceReviewPage} /></Route>
+        <Route path="/evidence/validation"><ProtectedRoute component={EvidenceValidationPage} /></Route>
         <Route component={NotFound} />
       </Switch>
     </QueryClientProvider>
