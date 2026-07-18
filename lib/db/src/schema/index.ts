@@ -41,3 +41,6 @@ export * from "./manuscriptSubmissions";
 export * from "./manuscriptReviewRuns";
 export * from "./manuscriptReviewAttempts";
 export * from "./manuscriptAnalyses";
+
+// AACR Evidence Explorer (migration 0008)
+export * from "./aacrEvidence";

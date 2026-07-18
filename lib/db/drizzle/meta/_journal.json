@@ -10,6 +10,7 @@
     { "idx": 5, "version": "7", "when": 1748908805000, "tag": "0004b_zie_router_policies", "breakpoints": true },
     { "idx": 6, "version": "7", "when": 1748908806000, "tag": "0005_zie_domain_columns", "breakpoints": true },
     { "idx": 7, "version": "7", "when": 1748908807000, "tag": "0006_zie_evaluation_bridge", "breakpoints": true },
-    { "idx": 8, "version": "7", "when": 1748908808000, "tag": "0007_judge_evaluation_bridge", "breakpoints": true }
+    { "idx": 8, "version": "7", "when": 1748908808000, "tag": "0007_judge_evaluation_bridge", "breakpoints": true },
+    { "idx": 9, "version": "7", "when": 1784410000000, "tag": "0008_aacr_evidence_explorer", "breakpoints": true }
   ]
 }
