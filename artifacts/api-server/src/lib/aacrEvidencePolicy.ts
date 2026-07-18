@@ -18,8 +18,9 @@ function secureEqual(a: string, b: string): boolean {
 }
 
 export async function requireEvidenceIdentity(req: Request, res: Response, next: NextFunction): Promise<void> {
-  const clerkUser = getAuth(req)?.userId;
-  let userId: string | undefined = clerkUser ?? undefined;
+  let clerkUser: string | undefined;
+  try { clerkUser = getAuth(req)?.userId ?? undefined; } catch { clerkUser = undefined; }
+  let userId: string | undefined = clerkUser;
   let authType: EvidenceIdentity["authType"] = "CLERK_JWT";
   if (!userId) {
     const expected = process.env.EVIDENCE_SERVICE_TOKEN ?? "";

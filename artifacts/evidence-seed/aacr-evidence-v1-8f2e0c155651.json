@@ -1,0 +1,16 @@
+{
+  "bundle_manifest_sha256": "8f2e0c155651269ea5be7399ebd290729a5c8232ab6223adbdb36e1c0e2a59f6",
+  "archive_sha256": "788c2624460360f2dbf5d8e2232be020cec488b674260e9ff7afca0db4949230",
+  "archive": "aacr-evidence-v1-8f2e0c155651.tar.gz",
+  "created_at_utc": "2026-07-18T20:08:48Z",
+  "rule_version": "aacr-linkage-v1.0.0",
+  "counts": {
+    "abstracts": 7485,
+    "candidate_registry_responses": 218,
+    "candidate_registry_studies_found": 217,
+    "trial_linkages": 232,
+    "conflicts": 89,
+    "target_protocol_fixtures": 46,
+    "review_items_after_union": 382
+  }
+}

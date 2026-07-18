@@ -23,6 +23,7 @@ import workflowsRouter from "./workflows.js";
 import archonRouter from "./archon.js";
 import statusRouter from "./status.js";
 import evidenceRouter from "./evidence.js";
+import evidenceReviewRouter from "./evidenceReview.js";
 
 const router: IRouter = Router();
 
@@ -50,5 +51,6 @@ router.use(workflowsRouter);
 router.use(archonRouter);
 router.use(statusRouter);
 router.use(evidenceRouter);
+router.use(evidenceReviewRouter);
 
 export default router;

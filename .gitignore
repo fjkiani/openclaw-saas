@@ -40,6 +40,8 @@ testem.log
 # System Files
 .DS_Store
 Thumbs.db
+__pycache__/
+*.pyc
 
 .cursor/rules/nx-rules.mdc
 .github/instructions/nx.instructions.md

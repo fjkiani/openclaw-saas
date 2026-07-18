@@ -5,7 +5,7 @@ services:
     region: oregon
     plan: starter
     buildCommand: pnpm install --frozen-lockfile && pnpm run typecheck:libs && pnpm --filter @workspace/api-server run build
-    startCommand: node artifacts/api-server/dist/index.mjs
+    startCommand: bash scripts/start-api-with-evidence.sh
     healthCheckPath: /api/healthz
     envVars:
       - key: NODE_ENV
@@ -39,6 +39,8 @@ services:
       - key: DRY_RUN
         value: "true"
       - key: OPENCLAW_SERVICE_TOKEN
+        sync: false
+      - key: EVIDENCE_SERVICE_TOKEN
         sync: false
       # CORS: set to the exact URL of the openclaw-saas static site on Render
       - key: FRONTEND_URL

@@ -3,8 +3,10 @@
 import fs from "node:fs";
 import readline from "node:readline";
 import crypto from "node:crypto";
-import pg from "pg";
-const { Pool } = pg;
+import path from "node:path";
+import { createRequire } from "node:module";
+const requireFromDbPackage = createRequire(new URL("../lib/db/package.json", import.meta.url));
+const { Pool } = requireFromDbPackage("pg");
 const bundle = process.argv[2];
 if (!bundle || !process.env.DATABASE_URL) {
   console.error("Usage: DATABASE_URL=... node scripts/import-aacr-evidence.mjs <bundle-dir>"); process.exit(2);
@@ -42,6 +44,16 @@ try {
     }
     abstracts++;
   }
+  let versions=0;
+  for await (const row of jsonl("registry_response_index_v2.jsonl")) {
+    const rawFile = path.join(bundle,"registry_raw","clinicaltrials-gov-v2",path.basename(row.raw_path));
+    const rawText = fs.readFileSync(rawFile,"utf8");
+    let rawResponse; try { rawResponse=JSON.parse(rawText); } catch { rawResponse=rawText; }
+    await c.query(`INSERT INTO aacr_registry_response_versions(nct_id,request_url,http_status,fetched_at,response_sha256,raw_response)
+      VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(nct_id,response_sha256) DO NOTHING`,
+      [row.nct_id,row.url,row.http_status,row.fetched_at_utc,row.response_sha256,JSON.stringify(rawResponse)]);
+    versions++;
+  }
   let studies=0;
   for await (const row of jsonl("registry_studies.jsonl")) {
     const s=row.registry, meta=row.receipt, raw=row.raw_response;
@@ -65,10 +77,24 @@ try {
         [recordId,nct,ev.decision,ev.rule_version,JSON.stringify(ev),ev.receipt_id,ev.permitted_use,ev.human_qc_status]); linkages++;
     }
   }
+  let targetProtocols=0;
   for await (const row of jsonl("target_search_results.jsonl")) {
+    const facts=row.registry_facts; const sourceHash=hash(JSON.stringify(row));
+    await c.query(`INSERT INTO aacr_registry_studies(nct_id,brief_title,official_title,conditions,interventions,lead_sponsor,collaborators,phases,overall_status,start_date,primary_completion_date,current_response_sha256,verified_at)
+      VALUES($1,$2,NULL,$3,$4,$5,'[]',$6,$7,NULL,NULL,$8,$9)
+      ON CONFLICT(nct_id) DO NOTHING`,
+      [facts.nct_id,facts.title,JSON.stringify(facts.conditions??[]),JSON.stringify(facts.interventions??[]),facts.sponsor,JSON.stringify(facts.phase??[]),facts.status,sourceHash,row.search_timestamp_utc]);
+    await c.query(`INSERT INTO aacr_claim_receipts(receipt_id,entity_type,entity_id,field_name,value_json,source_state,evidence_tier,lifecycle_status,source_excerpt,source_hash,permitted_use,claim_eligible)
+      VALUES($1,'registry_study',$2,'registry_fact_bundle',$3,'CLINICALTRIALS_GOV_TARGET_SEARCH','REGISTRY_PRIMARY','REGISTRY_VERIFIED',NULL,$4,$5,true)
+      ON CONFLICT(receipt_id) DO UPDATE SET value_json=excluded.value_json,source_hash=excluded.source_hash`,
+      [row.registry_fact_receipt_id,facts.nct_id,JSON.stringify(facts),sourceHash,row.permitted_use]);
+    for (const [field,value] of [["nct_id",facts.nct_id],["brief_title",facts.title],["conditions",facts.conditions],["interventions",facts.interventions],["lead_sponsor",facts.sponsor],["phases",facts.phase],["overall_status",facts.status]]) {
+      if (value != null && !(Array.isArray(value)&&value.length===0)) await insertClaim(c,"registry_study",facts.nct_id,field,value,"CLINICALTRIALS_GOV_TARGET_SEARCH","REGISTRY_PRIMARY","REGISTRY_VERIFIED",null,sourceHash,row.permitted_use,true);
+    }
     await c.query(`INSERT INTO aacr_target_search_results(target_query,nct_id,registry_fact_receipt_id,registry_fact_state,target_association_state,aacr_abstract_linkage_state,query_protocol,search_timestamp,permitted_use)
       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(target_query,nct_id,query_protocol) DO UPDATE SET registry_fact_state=excluded.registry_fact_state,target_association_state=excluded.target_association_state,aacr_abstract_linkage_state=excluded.aacr_abstract_linkage_state`,
-      [row.target_query,row.registry_facts.nct_id,row.registry_fact_receipt_id,row.registry_fact_state,row.target_association_state,row.aacr_abstract_linkage_state,row.query_protocol,row.search_timestamp_utc,row.permitted_use]);
+      [row.target_query,facts.nct_id,row.registry_fact_receipt_id,row.registry_fact_state,row.target_association_state,row.aacr_abstract_linkage_state,row.query_protocol,row.search_timestamp_utc,row.permitted_use]);
+    targetProtocols++;
   }
   for await (const row of jsonl("conflicts.jsonl")) {
     const values={cancer_type:row.cancer_type_values,fit_score:row.fit_score_values,crispro_axes:row.crispro_axes_values,trial_id:row.trial_id_values};
@@ -87,5 +113,5 @@ try {
       ON CONFLICT(record_id,test_only) DO UPDATE SET source_set_tags=excluded.source_set_tags,priority=excluded.priority`,[recordId,JSON.stringify([...tags]),tags.has("multi_model_conflict")?10:0]);
   }
   await c.query("COMMIT");
-  console.log(JSON.stringify({abstracts,studies,linkages,review_items:seedTags.size},null,2));
+  console.log(JSON.stringify({abstracts,studies,registry_versions:versions,target_protocols:targetProtocols,linkages,review_items:seedTags.size},null,2));
 } catch(e) { await c.query("ROLLBACK"); throw e; } finally { c.release(); await pool.end(); }

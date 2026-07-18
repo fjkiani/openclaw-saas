@@ -68,9 +68,11 @@ router.get(`${BASE}/search`, async (req: Request, res: Response) => {
 router.get(`${BASE}/targets/:target`, async (req: Request, res: Response) => {
   const target = String(req.params.target).toUpperCase();
   const result = await pool.query(`
-    SELECT t.*, s.brief_title, s.conditions, s.interventions, s.lead_sponsor, s.phases, s.overall_status
+    SELECT t.*, s.brief_title, s.conditions, s.interventions, s.lead_sponsor, s.phases, s.overall_status,
+           c.source_hash AS registry_source_hash
     FROM aacr_target_search_results t
     JOIN aacr_registry_studies s ON s.nct_id=t.nct_id
+    JOIN aacr_claim_receipts c ON c.receipt_id=t.registry_fact_receipt_id
     WHERE upper(t.target_query)=upper($1) ORDER BY s.nct_id`, [target]);
   const byTrial = await claims("registry_study", result.rows.map((r) => r.nct_id));
   res.json({
@@ -81,7 +83,7 @@ router.get(`${BASE}/targets/:target`, async (req: Request, res: Response) => {
       nct_id: r.nct_id,
       status_chip: "LINKAGE_UNVERIFIED",
       registry_facts: suppressIneligible(byTrial.get(r.nct_id) ?? []),
-      target_association: { value: target, source_state: r.target_association_state, evidence_tier: "SEARCH_PROTOCOL_RETRIEVAL", lifecycle_status: "PENDING_REVIEW", receipt_id: r.registry_fact_receipt_id, source_excerpt: null, source_hash: r.registry_fact_receipt_id, permitted_use: r.permitted_use, claim_eligible: false },
+      target_association: { value: target, source_state: r.target_association_state, evidence_tier: "SEARCH_PROTOCOL_RETRIEVAL", lifecycle_status: "PENDING_REVIEW", receipt_id: null, registry_fact_receipt_id: r.registry_fact_receipt_id, retrieval_protocol: r.query_protocol, source_excerpt: null, source_hash: r.registry_source_hash, permitted_use: r.permitted_use, claim_eligible: false },
       aacr_abstract_linkage_state: r.aacr_abstract_linkage_state,
     })),
     interpretation_boundary: "Registry facts are verified independently. Retrieval by a target query does not itself verify molecular target association or AACR abstract linkage.",
@@ -104,7 +106,7 @@ router.get(`${BASE}/trials/:nctId`, async (req: Request, res: Response) => {
   const linkages = await pool.query(`SELECT source_record_id,linkage_state,receipt_id,evidence_json,permitted_use,human_qc_status FROM aacr_trial_linkages WHERE nct_id=$1 ORDER BY source_record_id`, [nctId]);
   res.json({
     nct_id:nctId, status_chip:"VERIFIED_REGISTRY_FACT", registry_facts:suppressIneligible(receiptRows.rows),
-    abstract_linkages:linkages.rows.map((x) => ({...x,status_chip:x.linkage_state.startsWith("CONFIRMED")?"VERIFIED_REGISTRY_FACT":"LINKAGE_UNVERIFIED"})),
+    abstract_linkages:linkages.rows.map((x) => ({...x,status_chip:x.human_qc_status==="VERIFIED"?"HUMAN_QC_VERIFIED":"LINKAGE_UNVERIFIED"})),
     boundary:"Registry fact verification and abstract linkage are separate states.",
   });
 });
@@ -144,19 +146,26 @@ router.get(`${BASE}/claims/:receiptId`, async (req:Request,res:Response)=>{
 });
 
 router.get(`${BASE}/validation-board`, async (_req:Request,res:Response)=>{
-  const [abstracts, dispositions, linkages, registry, conflicts, reviews, labels] = await Promise.all([
+  const [abstracts, dispositions, linkages, registry, registryVersions, targetProtocols, conflicts, reviews, labels] = await Promise.all([
     pool.query(`SELECT count(*)::int n FROM aacr_abstracts`),
     pool.query(`SELECT disposition,count(*)::int n FROM aacr_abstracts GROUP BY disposition ORDER BY disposition`),
     pool.query(`SELECT linkage_state,count(*)::int n FROM aacr_trial_linkages GROUP BY linkage_state ORDER BY linkage_state`),
     pool.query(`SELECT count(*)::int n FROM aacr_registry_studies`),
+    pool.query(`SELECT count(*)::int n,count(*) FILTER (WHERE http_status=200)::int found,count(*) FILTER (WHERE http_status=404)::int not_found FROM aacr_registry_response_versions`),
+    pool.query(`SELECT count(DISTINCT nct_id)::int n FROM aacr_target_search_results`),
     pool.query(`SELECT status,count(*)::int n FROM aacr_conflicts GROUP BY status ORDER BY status`),
     pool.query(`SELECT state,count(*)::int n,min(created_at) oldest FROM aacr_review_items GROUP BY state ORDER BY state`),
-    pool.query(`SELECT count(*)::int n FROM aacr_review_labels`),
+    pool.query(`SELECT count(*) FILTER (WHERE i.test_only=false)::int n,count(*) FILTER (WHERE i.test_only=true)::int test_n FROM aacr_review_labels l JOIN aacr_review_items i USING(review_item_id)`),
   ]);
   res.json({
     corpus_denominator:abstracts.rows[0]?.n??0, dispositions:dispositions.rows, linkage_states:linkages.rows,
-    registry_studies:registry.rows[0]?.n??0, conflict_backlog:conflicts.rows, review_backlog:reviews.rows,
-    human_labels:labels.rows[0]?.n??0,
+    registry_studies:registry.rows[0]?.n??0,
+    candidate_registry_responses:registryVersions.rows[0]?.n??0,
+    candidate_registry_studies_found:registryVersions.rows[0]?.found??0,
+    candidate_registry_not_found:registryVersions.rows[0]?.not_found??0,
+    target_protocol_fixtures:targetProtocols.rows[0]?.n??0,
+    conflict_backlog:conflicts.rows, review_backlog:reviews.rows,
+    human_labels:labels.rows[0]?.n??0, test_only_labels:labels.rows[0]?.test_n??0,
     model_field_performance: labels.rows[0]?.n ? "PENDING_COMPUTATION" : "NOT_AVAILABLE_UNTIL_GOLD_LABELS",
     calibration_metrics: labels.rows[0]?.n ? "PENDING_COMPUTATION" : "NOT_AVAILABLE_UNTIL_GOLD_LABELS",
     external_status:"EXTERNAL_NOT_AUTHORIZED", prohibited_claim_enforcement:"ENABLED",
