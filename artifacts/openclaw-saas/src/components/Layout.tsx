@@ -18,6 +18,7 @@ import {
   ChevronRight,
   Activity,
   FlaskConical,
+  Puzzle,
   Sun,
   Moon,
   Scale,
@@ -30,6 +31,7 @@ const navItems = [
   { href: "/zoa", icon: Zap, label: "ZOA" },
   { href: "/forge", icon: FlaskConical, label: "Model Forge" },
   { href: "/agent-robustness", icon: Activity, label: "Robustness" },
+  { href: "/mcps", icon: Puzzle, label: "MCP Registry" },
   { href: "/startup-counsel", icon: Scale, label: "Counsel" },
   { href: "/billing", icon: CreditCard, label: "Billing" },
 ];

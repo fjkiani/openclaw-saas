@@ -1,0 +1,146 @@
+[
+  {
+    "name": "Filesystem MCP",
+    "slug": "anthropic-filesystem",
+    "description": "Read/write access to a scoped filesystem root. Standard reference server from the Anthropic MCP registry.",
+    "category": "dev-tools",
+    "vendor": "anthropic",
+    "transport": "stdio",
+    "entrypoint": "@modelcontextprotocol/server-filesystem",
+    "entrypointType": "npm",
+    "declaredTools": [
+      { "name": "read_file", "description": "Read a UTF-8 file by absolute path within the scoped root.", "input_schema": {"path": "string"} },
+      { "name": "write_file", "description": "Write UTF-8 content to a path within the scoped root.", "input_schema": {"path": "string", "content": "string"} },
+      { "name": "list_directory", "description": "List entries in a directory (non-recursive).", "input_schema": {"path": "string"} }
+    ],
+    "declaredPrivileges": { "fs": ["/workspace"], "net": [], "env": [] },
+    "currentVersion": 1,
+    "gateStatus": "passed",
+    "gateReport": null,
+    "createdAt": "2026-07-19T00:00:00Z",
+    "updatedAt": "2026-07-19T00:00:00Z"
+  },
+  {
+    "name": "Postgres MCP",
+    "slug": "anthropic-postgres",
+    "description": "Read-only SQL query surface over a scoped Postgres database. Includes schema introspection and safe LIMIT enforcement.",
+    "category": "data",
+    "vendor": "anthropic",
+    "transport": "stdio",
+    "entrypoint": "@modelcontextprotocol/server-postgres",
+    "entrypointType": "npm",
+    "declaredTools": [
+      { "name": "query", "description": "Execute a read-only SELECT query with a safe LIMIT applied.", "input_schema": {"sql": "string", "limit": "integer?"} },
+      { "name": "describe_schema", "description": "Return the schema of the connected database.", "input_schema": {} }
+    ],
+    "declaredPrivileges": { "net": ["postgres://scoped-connection"], "fs": [], "env": ["DATABASE_URL"] },
+    "currentVersion": 1,
+    "gateStatus": "passed",
+    "gateReport": null,
+    "createdAt": "2026-07-19T00:00:00Z",
+    "updatedAt": "2026-07-19T00:00:00Z"
+  },
+  {
+    "name": "Git MCP",
+    "slug": "anthropic-git",
+    "description": "Read git history and diffs for a scoped local repository. No push capability by default.",
+    "category": "dev-tools",
+    "vendor": "anthropic",
+    "transport": "stdio",
+    "entrypoint": "@modelcontextprotocol/server-git",
+    "entrypointType": "npm",
+    "declaredTools": [
+      { "name": "git_log", "description": "Show commit log for a scoped repo.", "input_schema": {"path": "string", "limit": "integer?"} },
+      { "name": "git_diff", "description": "Show diff between two commits.", "input_schema": {"path": "string", "from": "string", "to": "string"} },
+      { "name": "git_show", "description": "Show a commit's contents.", "input_schema": {"path": "string", "commit": "string"} }
+    ],
+    "declaredPrivileges": { "fs": ["/workspace/repos"], "net": [], "env": [] },
+    "currentVersion": 1,
+    "gateStatus": "passed",
+    "gateReport": null,
+    "createdAt": "2026-07-19T00:00:00Z",
+    "updatedAt": "2026-07-19T00:00:00Z"
+  },
+  {
+    "name": "GitHub MCP",
+    "slug": "anthropic-github",
+    "description": "Read-only GitHub API surface (issues, PRs, repos) scoped by a GitHub PAT.",
+    "category": "dev-tools",
+    "vendor": "anthropic",
+    "transport": "stdio",
+    "entrypoint": "@modelcontextprotocol/server-github",
+    "entrypointType": "npm",
+    "declaredTools": [
+      { "name": "search_issues", "description": "Search issues across a repo or org.", "input_schema": {"query": "string"} },
+      { "name": "get_pr", "description": "Get a pull request by number.", "input_schema": {"repo": "string", "pr": "integer"} }
+    ],
+    "declaredPrivileges": { "net": ["https://api.github.com"], "fs": [], "env": ["GITHUB_TOKEN"] },
+    "currentVersion": 1,
+    "gateStatus": "conditional",
+    "gateReport": null,
+    "createdAt": "2026-07-19T00:00:00Z",
+    "updatedAt": "2026-07-19T00:00:00Z"
+  },
+  {
+    "name": "Slack MCP",
+    "slug": "anthropic-slack",
+    "description": "Post messages and read channel history from Slack. Requires OAuth token scoped per workspace.",
+    "category": "agent-ops",
+    "vendor": "anthropic",
+    "transport": "stdio",
+    "entrypoint": "@modelcontextprotocol/server-slack",
+    "entrypointType": "npm",
+    "declaredTools": [
+      { "name": "post_message", "description": "Post a message to a Slack channel.", "input_schema": {"channel": "string", "text": "string"} },
+      { "name": "read_channel", "description": "Read message history from a Slack channel.", "input_schema": {"channel": "string", "limit": "integer?"} }
+    ],
+    "declaredPrivileges": { "net": ["https://slack.com"], "fs": [], "env": ["SLACK_BOT_TOKEN"] },
+    "currentVersion": 1,
+    "gateStatus": "conditional",
+    "gateReport": null,
+    "createdAt": "2026-07-19T00:00:00Z",
+    "updatedAt": "2026-07-19T00:00:00Z"
+  },
+  {
+    "name": "OpenClaw Legal MCP",
+    "slug": "openclaw-legal",
+    "description": "First-party MCP exposing OpenClaw's legal clause draft + counsel + KB retrieval over the MCP protocol.",
+    "category": "vertical",
+    "vendor": "verified",
+    "transport": "http",
+    "entrypoint": "https://openclaw-api-k30t.onrender.com/mcp/legal",
+    "entrypointType": "http",
+    "declaredTools": [
+      { "name": "clause_draft", "description": "Draft a legal clause from intake fields; returns vault-written pair_id.", "input_schema": {"clause_type": "string", "context": "object", "instructions": "string"} },
+      { "name": "counsel_answer", "description": "Route a legal question through OpenClaw's counsel pipeline.", "input_schema": {"question": "string", "matter_type": "string?"} },
+      { "name": "kb_search", "description": "Semantic search over legal KB (CUAD + curated corpus).", "input_schema": {"query": "string", "top_k": "integer?"} }
+    ],
+    "declaredPrivileges": { "net": ["https://openclaw-api-k30t.onrender.com"], "fs": [], "env": ["OPENCLAW_SERVICE_TOKEN"] },
+    "currentVersion": 1,
+    "gateStatus": "passed",
+    "gateReport": null,
+    "createdAt": "2026-07-19T00:00:00Z",
+    "updatedAt": "2026-07-19T00:00:00Z"
+  },
+  {
+    "name": "OpenClaw Robustness MCP",
+    "slug": "openclaw-robustness",
+    "description": "Query the OpenClaw agent-robustness benchmark corpus over MCP — models, categories, per-run drill-down, leaderboard.",
+    "category": "agent-ops",
+    "vendor": "verified",
+    "transport": "http",
+    "entrypoint": "https://openclaw-api-k30t.onrender.com/mcp/robustness",
+    "entrypointType": "http",
+    "declaredTools": [
+      { "name": "leaderboard", "description": "Top-N models by pass_rate on a category filter.", "input_schema": {"category": "string?", "limit": "integer?"} },
+      { "name": "runs", "description": "Filtered stress runs (model, category, domain, perturbation_id).", "input_schema": {"model": "string?", "category": "string?", "domain": "string?", "limit": "integer?"} },
+      { "name": "summary", "description": "Corpus aggregate roll-up + provenance.", "input_schema": {} }
+    ],
+    "declaredPrivileges": { "net": ["https://openclaw-api-k30t.onrender.com"], "fs": [], "env": [] },
+    "currentVersion": 1,
+    "gateStatus": "passed",
+    "gateReport": null,
+    "createdAt": "2026-07-19T00:00:00Z",
+    "updatedAt": "2026-07-19T00:00:00Z"
+  }
+]

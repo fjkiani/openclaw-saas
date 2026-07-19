@@ -1,0 +1,96 @@
+---
+description: MCP Registry domain — governance-gated catalog of MCP (Model Context Protocol) servers
+globs: ["**/lib/mcps/**", "**/routes/mcps.ts", "**/pages/mcps/**", "**/corpus/mcps/**", "**/schema/mcps.ts", "**/schema/mcpVersions.ts", "**/schema/mcpBenchmarks.ts", "**/schema/tenantMcps.ts"]
+alwaysApply: false
+---
+
+# OpenClaw — MCP Registry Domain
+
+## Purpose
+
+Second-party validator + registry for MCP (Model Context Protocol) servers. Every
+MCP submitted to the registry runs through an L0-L4 governance gate before it can
+be surfaced for install by a tenant. Certified entries are safe-installable;
+conditional entries surface reviewer notes; failed entries are blocked from install.
+
+The reason this domain exists: **Anthropic authored the MCP spec but does not run a
+third-party validator for MCP servers.** OpenClaw is the neutral trust surface. See
+`/mnt/results/openclaw-moat-v2/02-moat-and-pitch.md` §2.3.
+
+## What this domain IS
+
+- Manifest ingestion + L0-L4 gate scoring (in-process, inspection-only)
+- Registry storage — one row per MCP, versioned per submission
+- Tenant install join via `tenant_mcps` (workspace-scoped)
+- Human reviewer L4 sign-off endpoint
+
+## What this domain is NOT
+
+- NOT a live MCP runtime. Live invocation happens in the per-tenant runtime with the pinned version. See `MDC_architecture.md` for runtime topology.
+- NOT a package manager. The registry stores the manifest, not the code. Entrypoints resolve at install time.
+- NOT an Anthropic-owned surface. OpenClaw is deliberately neutral so both first- and third-party MCPs can be catalogued.
+
+## Backend
+
+```
+artifacts/api-server/
+├── src/lib/mcps/
+│   ├── validator.ts    # L0-L4 gate scoring
+│   └── registry.ts     # in-memory + seed-file backed, DB-ready
+├── src/routes/mcps.ts  # 6 endpoints, mounted at /api/mcps/*
+└── corpus/mcps/
+    └── seed.json       # 7 reference MCPs (5 Anthropic + 2 OpenClaw first-party)
+
+lib/db/src/schema/
+├── mcps.ts             # registry table
+├── mcpVersions.ts      # per-submission versioning
+├── mcpBenchmarks.ts    # gate reports over time
+└── tenantMcps.ts       # tenant install join
+```
+
+## HTTP contract
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| GET | `/api/mcps/health` | public | Registry health + seed path |
+| GET | `/api/mcps` | public | List (filter: `category`, `gateStatus`) |
+| GET | `/api/mcps/:slug` | public | Single MCP w/ gate report |
+| POST | `/api/mcps/register` | public | Submit manifest, get gate report |
+| POST | `/api/mcps/:slug/certify` | reviewer | L4 sign-off (sets grade=CERTIFIED) |
+| POST | `/api/mcps/:slug/install` | tenant | Install into workspace (refused if FAILED) |
+| GET | `/api/mcps/:slug/gate` | public | Latest gate report |
+
+**Auth boundary (this branch):** `/register` is currently public so external
+submitters can propose without an account. `certify` + `install` need to be
+gated by `requireWorkspaceMember` before merge — flagged in
+`docs/audits/2026-07-agent-robustness/06-mcp-domain.md`.
+
+## Gate levels
+
+| Level | What it checks | Auto-pass? | Weight |
+|---|---|---|---|
+| L0 | Manifest sanity (slug, transport, entrypoint, tools declared) | yes | 30 |
+| L1 | Tool schema conformance (name, input_schema present) | yes | 20 |
+| L2 | Privilege honesty (no wildcard net/fs/env) | yes | 20 |
+| L3 | Adversarial (name/description red-flag regex) | yes | 20 |
+| L4 | Human reviewer sign-off | **no** | 10 |
+
+- Overall score 0-100. Grade cutoffs: <40 FAILED, 40-64 CONDITIONAL, 65+ CONDITIONAL (until L4), CERTIFIED once L4 passes.
+- Every submission bumps `currentVersion` on the row. Rollbacks re-point currentVersion at an older `mcp_versions` row.
+
+## What NOT to do
+
+- Do NOT run the MCP server in-process from the validator. Inspection-only.
+- Do NOT accept a `--dangerous` opt-out to skip the gate. The gate is the point.
+- Do NOT extend the validator to run adversarial prompts *against* the MCP — that requires a per-MCP sandbox and belongs in the MCP training loop (`.cursor/rules/13-mcp-training.mdc`).
+- Do NOT store secrets in `declaredPrivileges.env`. Only env *keys* should be listed. Values live in `tenant_connectors.encrypted_credentials`.
+
+## Corpus provenance
+
+Seed file at `corpus/mcps/seed.json`. Contains 7 reference MCPs:
+- 5 Anthropic official (`filesystem`, `postgres`, `git`, `github`, `slack`)
+- 2 OpenClaw first-party (`openclaw-legal`, `openclaw-robustness`)
+
+When the DB schema tables are migrated (via `drizzle migrate`), the seed
+propagates into the `mcps` + `mcp_versions` tables. Until then, the registry
+loads from the seed file only.

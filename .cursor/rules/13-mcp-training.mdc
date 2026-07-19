@@ -1,0 +1,137 @@
+---
+description: MCP training loop — invocation → label → threshold → Modal LoRA → router policy
+globs: ["**/lib/mcps/trainingLoop.ts", "**/routes/mcpTraining.ts", "**/schema/mcp*.ts"]
+alwaysApply: false
+---
+
+# OpenClaw — MCP Training Loop
+
+## Purpose
+
+Turn every governance decision an operator makes over an MCP tool call into
+a **preference pair** that eventually fine-tunes a router policy. The
+router policy selects which MCP to trust for a given task at request time.
+
+This is the ZIE double-dip flywheel pattern (see `04-model-forge.mdc`)
+extended into the MCP surface. The differentiator is that the training corpus
+is *cross-MCP governance labels* — a dataset neither Anthropic nor OpenAI has,
+because it requires a neutral registry that spans multiple MCP providers.
+
+## Loop
+
+```
+                ┌──────────────────────────┐
+Operator ──▶ MCP tool call ──▶ recordInvocation() ──▶ buffer/JSONL
+                │                                          │
+                │                                          ▼
+                │                              Governance / operator labels
+                │                              via /invocations/:id/label
+                │                                          │
+                │                                          ▼
+                │                       verifiedPairCounts() per (mcp, tool)
+                │                                          │
+                │                              threshold hit? (25 verified, 25 safe, 25 unsafe)
+                │                                          │
+                │                                          ▼
+                │                              checkAndDispatch() ─▶ Modal LoRA
+                │                                          │
+                │                                          ▼
+                │                              updatePolicy() writes preferred_mcp_slug
+                │                                          │
+                ▼                                          ▼
+        Next tool call routes ─────────── getPolicy(task_hint)
+```
+
+## Storage
+
+- **In-memory buffer** — `BUFFER: McpPreferencePair[]` in `trainingLoop.ts`
+- **Disk mirror** — appends to `/tmp/mcp-training-records.jsonl` (configurable via `MCP_TRAINING_BUFFER_PATH`)
+- **DB (planned)** — `mcp_training_records` and `mcp_router_policies` tables. Not yet migrated in this branch — see §Schema below.
+
+The in-memory buffer + disk mirror is intentional: the loop must survive a
+DRY_RUN local dev environment with no DB. When the DB is provisioned, add
+a drizzle write path in `recordInvocation()` and `labelPair()` alongside the
+buffer.
+
+## Thresholds
+
+| Signal | Value | Purpose |
+|---|---|---|
+| `VERIFIED_PAIR_THRESHOLD` | 25 per (slug, tool) | Minimum verified pairs before firing training |
+| `MIN_SFT_PAIRS` | 100 (planned) | Minimum SFT rows required by Modal trainer |
+| `MIN_DPO_PAIRS` | 25 | Minimum DPO pairs required by Modal trainer |
+
+## HTTP contract
+
+Mounted at `/api/mcps/training/*`:
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/health` | Buffer size + path |
+| POST | `/invocations` | Record an MCP tool invocation |
+| POST | `/invocations/:id/label` | Label safe/unsafe/defer |
+| GET | `/pairs` | Verified-pair counts per (mcp, tool) |
+| POST | `/check-thresholds` | Trigger threshold check + dispatch |
+| GET | `/policies` | List current router policies |
+| POST | `/policies` | Upsert a router policy |
+| POST | `/eval` | Inspection-only eval before promoting |
+
+## Modal integration
+
+Same DRY_RUN convention as `modalDispatch.ts` — `DRY_RUN=1` returns stub
+functionCallIds without contacting Modal. Live path spawns
+`modal.functions.fromName(MCP_MODAL_FUNCTION, "train_lora").spawn(...)` with
+`(mcp_slug, tool_name, pairs)` payload.
+
+Env vars:
+- `DRY_RUN` — set to `1` for stub dispatch
+- `MCP_MODAL_FUNCTION` — Modal app name (default `mcp-router-trainer`)
+- `MCP_TRAINING_BUFFER_PATH` — override the disk buffer path
+
+## Router policy
+
+`MCPRouterPolicy = { task_hint, preferred_mcp_slug, preferred_tool_name, candidate_mcp_slugs, updated_at, based_on_pairs }`.
+Currently in-memory; replace `POLICIES` Map with a drizzle write against
+`mcp_router_policies` when the DB schema lands.
+
+## Schema (planned)
+
+Not yet migrated in this branch — sketch:
+
+```sql
+CREATE TABLE mcp_training_records (
+  id UUID PRIMARY KEY,
+  mcp_slug TEXT NOT NULL,
+  tool_name TEXT NOT NULL,
+  invocation JSONB NOT NULL,
+  label TEXT NOT NULL DEFAULT 'defer',
+  reason TEXT,
+  labelled_by TEXT,
+  labelled_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  used_for_training BOOLEAN NOT NULL DEFAULT FALSE,
+  invoked_at TIMESTAMPTZ NOT NULL,
+  operator_id TEXT,
+  tenant_id INTEGER
+);
+
+CREATE TABLE mcp_router_policies (
+  id SERIAL PRIMARY KEY,
+  task_hint TEXT NOT NULL UNIQUE,
+  preferred_mcp_slug TEXT NOT NULL,
+  preferred_tool_name TEXT NOT NULL,
+  candidate_mcp_slugs TEXT[] NOT NULL DEFAULT '{}',
+  based_on_pairs INTEGER NOT NULL DEFAULT 0,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+```
+
+## What NOT to do
+
+- Do NOT auto-label pairs. Label is a human/governance signal only.
+- Do NOT include the raw invocation output in fine-tune training data
+  without a redaction pass. Some tool outputs contain PII / secrets that
+  the MCP forwarded from its downstream system.
+- Do NOT flip a router policy without calling `/eval` first — the eval
+  cross-checks the gate grade of the candidate MCP.
+- Do NOT extend this loop to *arbitrary* skill-generation training data —
+  that belongs in the Archon L0-L4 pipeline. This loop is MCP-scoped.

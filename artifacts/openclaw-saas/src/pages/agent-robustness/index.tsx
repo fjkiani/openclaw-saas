@@ -342,6 +342,52 @@ export default function AgentRobustnessPage() {
         </div>
       )}
 
+      {/* Empty-state banner — surfaces when corpus is empty (misconfigured env or reset) */}
+      {health.data && health.data.ok === false && (
+        <div
+          className="rounded-md border border-destructive/40 bg-destructive/5 px-4 py-3 text-sm"
+          data-testid="stress-empty-state"
+        >
+          <div className="font-medium text-destructive flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4" /> Stress corpus not indexed
+          </div>
+          <p className="mt-1 text-muted-foreground">
+            The API server could not locate <code className="text-xs">runs.jsonl</code>.
+            Set <code className="text-xs">STRESS_CORPUS_DIR</code> to the corpus folder
+            or check <code className="text-xs">artifacts/api-server/corpus/stress-benchmarks/</code>.
+          </p>
+        </div>
+      )}
+
+      {/* Repro CLI — critical trust surface for external evaluators */}
+      <details
+        className="rounded-md border border-border bg-muted/20 px-4 py-2 text-sm"
+        data-testid="stress-repro-block"
+      >
+        <summary className="cursor-pointer font-medium">
+          Reproduce this corpus from source
+        </summary>
+        <p className="mt-2 text-xs text-muted-foreground">
+          Every row on this page comes from a versioned harness. Regenerate a
+          subset with these commands — no OpenClaw dependency:
+        </p>
+        <pre className="mt-2 overflow-x-auto rounded bg-background border border-border p-3 font-mono text-xs">
+{`git clone https://github.com/fjkiani/mcp-universe-benchmarks
+cd mcp-universe-benchmarks
+git checkout ${provenance?.commit ?? "sprint-4-stress-suite"}
+uv sync
+# Run a single category (baseline is fastest, ~262 rows):
+uv run python -m stress.run --category baseline --models gemini/gemma-4-31b-it --out /tmp/runs.jsonl
+# Or the full sweep (~909 rows across 11 models · 5 categories):
+uv run python -m stress.run --category all --out /tmp/runs.jsonl`}
+        </pre>
+        <p className="mt-2 text-xs text-muted-foreground">
+          Output <code>runs.jsonl</code> has the same 23-field schema this page
+          reads. Point <code>STRESS_CORPUS_DIR</code> at the containing folder to
+          overlay your own runs.
+        </p>
+      </details>
+
       <Tabs value={tab} onValueChange={(v) => setTab(v as CategoryKey)}>
         <TabsList>
           {CATEGORIES.map((c) => (

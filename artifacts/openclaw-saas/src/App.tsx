@@ -22,6 +22,7 @@ import VerticalPickerPage from "@/pages/onboarding/vertical-picker";
 import SetupPage from "@/pages/onboarding/setup";
 import StartupCounselPage from "@/pages/startup-counsel";
 import AgentRobustnessPage from "@/pages/agent-robustness";
+import McpsPage from "@/pages/mcps";
 
 const queryClient = new QueryClient();
 
@@ -237,6 +238,7 @@ function AppRoutes() {
         <Route path="/onboarding/setup"><ProtectedRoute component={SetupPage} /></Route>
         <Route path="/startup-counsel"><ProtectedRoute component={StartupCounselPage} /></Route>
         <Route path="/agent-robustness"><ProtectedRoute component={AgentRobustnessPage} /></Route>
+        <Route path="/mcps"><ProtectedRoute component={McpsPage} /></Route>
         <Route component={NotFound} />
       </Switch>
     </QueryClientProvider>

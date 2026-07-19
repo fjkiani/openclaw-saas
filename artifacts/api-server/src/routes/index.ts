@@ -22,6 +22,8 @@ import intelligenceRouter from "./intelligence.js";
 import workflowsRouter from "./workflows.js";
 import archonRouter from "./archon.js";
 import stressBenchmarksRouter from "./stressBenchmarks.js";
+import { mcpsRouter } from "./mcps.js";
+import { mcpTrainingRouter } from "./mcpTraining.js";
 import statusRouter from "./status.js";
 
 const router: IRouter = Router();
@@ -49,6 +51,8 @@ router.use(intelligenceRouter);
 router.use(workflowsRouter);
 router.use(archonRouter);
 router.use(stressBenchmarksRouter);
+router.use("/mcps", mcpsRouter);
+router.use("/mcps/training", mcpTrainingRouter);
 router.use(statusRouter);
 
 export default router;
