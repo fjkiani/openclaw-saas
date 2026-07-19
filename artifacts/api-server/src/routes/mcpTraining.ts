@@ -10,6 +10,10 @@
  *   GET  /policies          — current router policies
  *   POST /policies          — upsert a router policy (usually after training)
  *   POST /eval              — run inspection eval on a candidate router policy
+ *   POST /webhooks/modal-complete — Modal calls this at end of a fine-tune job
+ *                                   to promote a router policy and mark pairs
+ *                                   used_for_training. Signed via
+ *                                   MCP_TRAINING_WEBHOOK_SECRET header when set.
  */
 import { Router, type IRouter, type Request, type Response } from "express";
 import { z } from "zod/v4";
@@ -22,6 +26,7 @@ import {
   getPolicy,
   listPolicies,
   health as trainingHealth,
+  markPairsUsedForTraining,
   type MCPPairLabel,
 } from "../lib/mcps/trainingLoop.js";
 import { getMcp } from "../lib/mcps/registry.js";
@@ -175,6 +180,74 @@ router.post("/eval", (req: Request, res: Response) => {
       `Verified pairs: ${verified}`,
       promote_ok ? "Promotion criteria met" : "Waiting on more verified pairs or gate promotion",
     ],
+  });
+});
+
+// ─── Modal-complete webhook ──────────────────────────────────────────────────
+// Modal calls this at the end of a fine-tune job. The payload declares which
+// (mcp_slug, tool_name) bucket to promote, plus optional metrics. We update
+// zie_router_policies (via in-memory POLICIES) and mark the training pairs
+// used_for_training so subsequent threshold checks don't re-fire.
+const WebhookSchema = z.object({
+  mcp_slug: z.string(),
+  tool_name: z.string(),
+  task_hint: z.string().optional(),
+  functionCallId: z.string().optional(),
+  status: z.enum(["succeeded", "failed"]).default("succeeded"),
+  metrics: z
+    .object({
+      accuracy: z.number().optional(),
+      loss: z.number().optional(),
+      steps: z.number().optional(),
+    })
+    .default({}),
+});
+
+router.post("/webhooks/modal-complete", (req: Request, res: Response) => {
+  const secret = process.env.MCP_TRAINING_WEBHOOK_SECRET;
+  const supplied = req.headers["x-openclaw-webhook-secret"];
+  if (secret && supplied !== secret) {
+    res.status(401).json({ error: "invalid webhook secret" });
+    return;
+  }
+  const parsed = WebhookSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "invalid payload", issues: parsed.error.issues });
+    return;
+  }
+  const { mcp_slug, tool_name, status, functionCallId, metrics } = parsed.data;
+  const registered = getMcp(mcp_slug);
+  if (!registered) {
+    res.status(404).json({ error: `MCP '${mcp_slug}' not registered` });
+    return;
+  }
+  if (status === "failed") {
+    logger.warn(
+      { mcp_slug, tool_name, functionCallId, metrics },
+      "[mcp.training.webhook] Modal reported failure — leaving pairs unmarked",
+    );
+    res.status(200).json({ acknowledged: true, promoted: false, reason: "modal reported failure" });
+    return;
+  }
+  const marked = markPairsUsedForTraining(mcp_slug, tool_name);
+  const task_hint = parsed.data.task_hint ?? `${mcp_slug}::${tool_name}`;
+  const policy = updatePolicy(
+    task_hint,
+    mcp_slug,
+    tool_name,
+    [mcp_slug],
+    marked,
+  );
+  logger.info(
+    { mcp_slug, tool_name, marked, functionCallId, metrics },
+    "[mcp.training.webhook] promoted policy",
+  );
+  res.status(200).json({
+    acknowledged: true,
+    promoted: true,
+    marked_pairs: marked,
+    policy,
+    metrics,
   });
 });
 

@@ -28,6 +28,7 @@
 import fs from "fs";
 import path from "path";
 import { logger } from "../logger.js";
+import { ingest as mlopsIngest, type McpInvocationRecord } from "../cloudflare/mlopsClient.js";
 
 // ─── Thresholds ────────────────────────────────────────────────────────────
 
@@ -100,6 +101,19 @@ export function recordInvocation(invocation: McpInvocation): McpPreferencePair {
     used_for_training: false,
   };
   persist(pair);
+  // Fire-and-forget MLOps ingest (dry mirror by default; no throw on failure).
+  const record: McpInvocationRecord = {
+    mcp_slug: invocation.mcp_slug,
+    tool_name: invocation.tool_name,
+    ts: invocation.invoked_at,
+    latency_ms: invocation.latency_ms ?? 0,
+    success: invocation.error === undefined,
+    label: null,
+    tenant_id: invocation.tenant_id ?? null,
+  };
+  void mlopsIngest(record).catch((err) =>
+    logger.warn({ err: String(err) }, "[mcp.training] mlops ingest failed (non-fatal)"),
+  );
   return pair;
 }
 
@@ -115,7 +129,83 @@ export function labelPair(
   found.reason = reason;
   found.labelled_by = labelled_by;
   found.labelled_at = new Date().toISOString();
+  // Refresh MLOps aggregate — write a labelled sibling record so the CF/mirror
+  // aggregate reflects the operator's decision.
+  const record: McpInvocationRecord = {
+    mcp_slug: found.mcp_slug,
+    tool_name: found.tool_name,
+    ts: found.labelled_at,
+    latency_ms: found.invocation.latency_ms ?? 0,
+    success: found.invocation.error === undefined,
+    label,
+    tenant_id: found.invocation.tenant_id ?? null,
+  };
+  void mlopsIngest(record).catch((err) =>
+    logger.warn({ err: String(err) }, "[mcp.training] mlops label-ingest failed (non-fatal)"),
+  );
   return found;
+}
+
+/**
+ * Bulk import a batch of pre-labelled preference pairs into the in-memory
+ * training buffer. Used by the boot-seed loader
+ * (MCP_TRAINING_LOAD_SEED=1) to hydrate the buffer from a synthesised JSONL
+ * corpus so the first Modal LoRA trigger fires without waiting for live
+ * operator labels. Rows must already conform to the `McpPreferencePair`
+ * shape or be a minimal projection thereof (mcp_slug, tool_name, label,
+ * invocation, labelled_at, used_for_training defaults false). Returns the
+ * number of pairs pushed to the buffer.
+ *
+ * This is intentionally additive: it does not clear the buffer, does not
+ * dedupe, and does not touch the mirror JSONL file. The loader is expected
+ * to invoke this exactly once at startup after `_resetForTests()` or on a
+ * fresh process.
+ */
+export function bulkImportPairs(rows: Partial<McpPreferencePair>[]): number {
+  let n = 0;
+  for (const row of rows) {
+    if (!row.mcp_slug || !row.tool_name || !row.label) continue;
+    const pair: McpPreferencePair = {
+      id: row.id ?? cryptoUuid(),
+      mcp_slug: row.mcp_slug,
+      tool_name: row.tool_name,
+      invocation: row.invocation ?? {
+        mcp_slug: row.mcp_slug,
+        tool_name: row.tool_name,
+        input: {},
+        invoked_at: row.labelled_at ?? new Date().toISOString(),
+      },
+      label: row.label as MCPPairLabel,
+      reason: row.reason,
+      labelled_at: row.labelled_at ?? new Date().toISOString(),
+      labelled_by: row.labelled_by ?? "seed-loader",
+      used_for_training: row.used_for_training ?? false,
+    };
+    BUFFER.push(pair);
+    n += 1;
+  }
+  return n;
+}
+
+/**
+ * Mark every (labelled, unused) pair for a (slug, tool) as used_for_training.
+ * Called by the Modal-complete webhook after a fine-tune job promotes a
+ * router policy. Returns the number of pairs marked so the webhook can echo it.
+ */
+export function markPairsUsedForTraining(mcp_slug: string, tool_name: string): number {
+  let n = 0;
+  for (const p of BUFFER) {
+    if (
+      p.mcp_slug === mcp_slug &&
+      p.tool_name === tool_name &&
+      p.label !== "defer" &&
+      !p.used_for_training
+    ) {
+      p.used_for_training = true;
+      n += 1;
+    }
+  }
+  return n;
 }
 
 // ─── Training trigger ──────────────────────────────────────────────────────
@@ -179,7 +269,16 @@ export interface DispatchResult {
  */
 export async function checkAndDispatch(): Promise<DispatchResult[]> {
   const checks = verifiedPairCounts();
-  const dryRun = process.env.DRY_RUN === "1" || process.env.DRY_RUN === "true";
+  // Honor both the domain-agnostic DRY_RUN flag AND the MCP-specific
+  // MODAL_DRY_RUN flag. MODAL_DRY_RUN defaults to on so the training loop
+  // never accidentally spawns a real Modal job in a dev sandbox without
+  // Modal credentials. To go live: MODAL_DRY_RUN=0 + MODAL_TOKEN_ID + secret.
+  const dryRun =
+    process.env.DRY_RUN === "1" ||
+    process.env.DRY_RUN === "true" ||
+    process.env.MODAL_DRY_RUN === undefined ||
+    process.env.MODAL_DRY_RUN === "1" ||
+    process.env.MODAL_DRY_RUN === "true";
   const out: DispatchResult[] = [];
   for (const c of checks) {
     if (!c.fires) {

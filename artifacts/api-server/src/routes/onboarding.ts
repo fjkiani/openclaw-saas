@@ -38,8 +38,8 @@ router.post("/onboarding/provision", async (req, res): Promise<void> => {
     // 1. Upsert tenant
     const tenantId = `tenant-${userId.replace(/[^a-z0-9]/gi, "-").toLowerCase().slice(0, 32)}`;
     await client.query(
-      `INSERT INTO tenants (id, name, user_id, plan)
-       VALUES ($1, $2, $3, 'free')
+      `INSERT INTO tenants (id, name, user_id)
+       VALUES ($1, $2, $3)
        ON CONFLICT (id) DO NOTHING`,
       [tenantId, "My Workspace", userId],
     );

@@ -113,8 +113,8 @@ router.post("/forge/workspaces", async (req, res): Promise<void> => {
   if (tenantRes.rows.length === 0) {
     const newTenantId = `tenant-${userId.replace(/[^a-z0-9]/gi, "-").toLowerCase().slice(0, 32)}`;
     await pool.query(
-      `INSERT INTO tenants (id, name, user_id, plan)
-       VALUES ($1, $2, $3, 'free')
+      `INSERT INTO tenants (id, name, user_id)
+       VALUES ($1, $2, $3)
        ON CONFLICT (id) DO UPDATE SET user_id = EXCLUDED.user_id`,
       [newTenantId, "My Workspace", userId],
     );
@@ -125,7 +125,7 @@ router.post("/forge/workspaces", async (req, res): Promise<void> => {
 
   const wsRes = await pool.query(
     `INSERT INTO model_workspaces (tenant_id, name, domain, description)
-     VALUES ($1, $2, $3, $4)
+     VALUES ($1, $2, $3)
      RETURNING *`,
     [tenantId, name, domain, description ?? null],
   );

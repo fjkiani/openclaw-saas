@@ -23,6 +23,7 @@ import SetupPage from "@/pages/onboarding/setup";
 import StartupCounselPage from "@/pages/startup-counsel";
 import AgentRobustnessPage from "@/pages/agent-robustness";
 import McpsPage from "@/pages/mcps";
+import MlOpsPage from "@/pages/mlops";
 
 const queryClient = new QueryClient();
 
@@ -239,6 +240,7 @@ function AppRoutes() {
         <Route path="/startup-counsel"><ProtectedRoute component={StartupCounselPage} /></Route>
         <Route path="/agent-robustness"><ProtectedRoute component={AgentRobustnessPage} /></Route>
         <Route path="/mcps"><ProtectedRoute component={McpsPage} /></Route>
+        <Route path="/mlops"><ProtectedRoute component={MlOpsPage} /></Route>
         <Route component={NotFound} />
       </Switch>
     </QueryClientProvider>

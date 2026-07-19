@@ -131,8 +131,8 @@ export async function runSeed(): Promise<void> {
     // ── 2. Demo tenant ────────────────────────────────────────────────────────
     const tenantId = "tenant-demo-openclaw";
     await client.query(`
-      INSERT INTO tenants (id, name, user_id, plan)
-      VALUES ($1,'Demo Workspace',$2,'free')
+      INSERT INTO tenants (id, name, user_id)
+      VALUES ($1,'Demo Workspace',$2)
       ON CONFLICT (id) DO UPDATE SET user_id=EXCLUDED.user_id, name=EXCLUDED.name
     `, [tenantId, DEMO_USER_ID]);
 
@@ -675,7 +675,7 @@ export async function runSeed(): Promise<void> {
       const specRegId = await upsertOrLookup(
         client,
         `INSERT INTO model_registrations (tenant_id, workspace_id, job_id, name)
-         VALUES ($1, $2, $3, $4)
+         VALUES ($1, $2, $3)
          ON CONFLICT DO NOTHING RETURNING id`,
         [tenantId, legalOpsWorkspaceId, specJobId, spec.name],
         `SELECT id FROM model_registrations WHERE tenant_id=$1 AND job_id=$2 LIMIT 1`,
@@ -755,7 +755,7 @@ export async function runSeed(): Promise<void> {
     for (const c of connectorRows) {
       await client.query(`
         INSERT INTO connectors (name, slug, description, icon_url)
-        VALUES ($1, $2, $3, $4)
+        VALUES ($1, $2, $3)
         ON CONFLICT (slug) DO UPDATE SET
           name=EXCLUDED.name,
           description=EXCLUDED.description,

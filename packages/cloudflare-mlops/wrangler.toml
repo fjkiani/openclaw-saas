@@ -1,0 +1,45 @@
+# Cloudflare Workers deployment config for OpenClaw MLOps.
+#
+# Free tier ceiling (as of 2026): Workers 100k req/day, D1 5 GB / 5M rows/day,
+# KV 100k reads + 1k writes/day, R2 10 GB/month egress.
+#
+# Bindings:
+#   MCP_METRICS   — D1 database for per-invocation rows (source of truth)
+#   MCP_ARTIFACTS — R2 bucket for training artifacts (LoRA weights, eval JSON)
+#   MCP_CONFIG    — KV namespace for router-policy cache
+#
+# Real deploy requires:
+#   wrangler d1 create openclaw-mcp-metrics
+#   wrangler r2 bucket create openclaw-mcp-artifacts
+#   wrangler kv:namespace create MCP_CONFIG
+# Then paste the returned IDs below and run `wrangler deploy`.
+
+name = "openclaw-mlops"
+main = "src/worker.ts"
+compatibility_date = "2026-07-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Cost gate: Workers Free plan is fine for MLOps aggregate reads.
+workers_dev = true
+
+# ── D1: per-invocation metrics ────────────────────────────────────────────────
+[[d1_databases]]
+binding = "MCP_METRICS"
+database_name = "openclaw-mcp-metrics"
+database_id = "REPLACE_AFTER_wrangler_d1_create"
+
+# ── R2: LoRA / eval artifacts ─────────────────────────────────────────────────
+[[r2_buckets]]
+binding = "MCP_ARTIFACTS"
+bucket_name = "openclaw-mcp-artifacts"
+
+# ── KV: router-policy cache ───────────────────────────────────────────────────
+[[kv_namespaces]]
+binding = "MCP_CONFIG"
+id = "REPLACE_AFTER_wrangler_kv_namespace_create"
+
+# ── Vars ──────────────────────────────────────────────────────────────────────
+# Set INGEST_TOKEN as a Wrangler secret:  wrangler secret put INGEST_TOKEN
+# (Any request to /ingest without a matching x-mlops-token header is rejected.)
+[vars]
+MLOPS_ALLOW_ANONYMOUS_METRICS = "1"  # metrics reads are public (no PII in aggregates)

@@ -958,6 +958,90 @@ app.listen(port, (err) => {
       logger.error({ err }, "DB seed/scheduler failed — server continues.");
     });
 
+  // ── MCP training seed loader (INDEPENDENT of DB migrations) ─────────────
+  // Runs on its own microtask chain so that DB migration / seed failures
+  // (e.g. missing pgvector extension in a local dev sandbox) do not prevent
+  // the MCP training buffer from being hydrated. The MCP training loop is
+  // pure in-memory + JSONL — it does not depend on Postgres.
+  //
+  // Off by default. When MCP_TRAINING_LOAD_SEED is unset OR =1, reads the
+  // synthesised MCP preference-pair corpus and hydrates the in-memory
+  // training buffer so the router-policy trigger can fire without a live
+  // operator loop. This is the deployment lever that turns the training
+  // loop from "wired" to "primed" — the file is the same 2,400-pair JSONL
+  // synthesised by scripts/synthesize-mcp-pairs.ts.
+  if (
+    process.env.MCP_TRAINING_LOAD_SEED === undefined ||
+    process.env.MCP_TRAINING_LOAD_SEED === "1"
+  ) {
+    void (async () => {
+      try {
+        const [{ bulkImportPairs, checkAndDispatch }, fsMod, pathMod] =
+          await Promise.all([
+            import("./lib/mcps/trainingLoop.js"),
+            import("fs"),
+            import("path"),
+          ]);
+        const seedPath =
+          process.env.MCP_TRAINING_SEED_PATH ??
+          pathMod.resolve(
+            process.cwd(),
+            "artifacts/api-server/corpus/mcp-training-seed.jsonl",
+          );
+        const altPath = pathMod.resolve(
+          process.cwd(),
+          "corpus/mcp-training-seed.jsonl",
+        );
+        const resolvedPath = fsMod.existsSync(seedPath)
+          ? seedPath
+          : fsMod.existsSync(altPath)
+            ? altPath
+            : null;
+        if (!resolvedPath) {
+          logger.warn(
+            { seedPath, altPath },
+            "[mcp.training.seed] corpus file not found — skipping",
+          );
+          return;
+        }
+        const raw = fsMod.readFileSync(resolvedPath, "utf-8");
+        const rows: unknown[] = raw
+          .split("\n")
+          .filter((l) => l.trim().length > 0)
+          .map((l) => {
+            try {
+              return JSON.parse(l);
+            } catch {
+              return null;
+            }
+          })
+          .filter((x) => x !== null);
+        const loaded = bulkImportPairs(rows as any[]);
+        logger.info(
+          { path: resolvedPath, loaded, MCP_EVAL_DRY: process.env.MCP_EVAL_DRY ?? "1" },
+          "[mcp.training.seed] hydrated MCP training buffer",
+        );
+        // Trigger a first threshold check so the training tab shows
+        // dispatched pairs immediately after boot.
+        const dispatches = await checkAndDispatch();
+        const fired = dispatches.filter((d) => d.dispatched).length;
+        logger.info(
+          { fired, total: dispatches.length },
+          "[mcp.training.seed] initial threshold check",
+        );
+      } catch (err) {
+        logger.warn(
+          { err: String(err) },
+          "[mcp.training.seed] seed load failed — training loop still functional",
+        );
+      }
+    })();
+  } else {
+    logger.info(
+      "[mcp.training.seed] MCP_TRAINING_LOAD_SEED=0 — skipping corpus hydration",
+    );
+  }
+
   // Graceful shutdown — stop pg-boss before process exits
   const shutdown = async (signal: string) => {
     logger.info({ signal }, "Received shutdown signal — stopping forge scheduler");
