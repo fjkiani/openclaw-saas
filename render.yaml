@@ -24,12 +24,21 @@ services:
         sync: false
       - key: RENDER_OWNER_ID
         sync: false
+      # AUDIT (Sprint A, 2026-07): openclaw-benchmark FastAPI is NOT deployed.
+      # benchmarkClient.ts reachability-probes before calling; keeping these
+      # here so wiring is unambiguous if the service is later restored.
       - key: BENCHMARK_SERVICE_URL
         value: https://openclaw-benchmark.onrender.com
+      # Gate defaults to false while the external FastAPI is offline; flip to
+      # "true" once the service is deployed and probed reachable.
       - key: BENCHMARK_GATE_ENABLED
-        value: "true"
+        value: "false"
       - key: KAIROS_SERVICE_URL
         value: https://openclaw-benchmark.onrender.com
+      # Agent Robustness corpus location (optional override). Default is
+      # <artifacts/api-server>/corpus/stress-benchmarks (baked into the build).
+      # - key: STRESS_CORPUS_DIR
+      #   value: /var/data/stress-benchmarks
       - key: OPENROUTER_API_KEY
         sync: false
       - key: OPENROUTER_API_KEY_2
@@ -57,6 +66,14 @@ services:
       # This tells ClerkProvider to route all FAPI calls through your own backend,
       # which forwards them to Clerk with the correct Clerk-Proxy-Url header.
       # IMPORTANT: replace the hostname below with your actual openclaw-api Render URL.
+      #
+      # AUDIT (Sprint A, 2026-07): HANDOFF_integration_agent.md §1.1 lists
+      # `openclaw-api-k30t.onrender.com` as the canonical API deploy, while
+      # this file still points the frontend at `openclaw-api-b9wb`. These
+      # must be reconciled in the Render dashboard before merging. The
+      # Agent Robustness page will fetch from whichever VITE_API_URL is set
+      # at build time — `/api/stress-benchmarks/*` is served by openclaw-api
+      # only.
       - key: VITE_CLERK_PROXY_URL
         value: https://openclaw-api-b9wb.onrender.com/api/__clerk
       - key: VITE_API_URL
@@ -74,6 +91,13 @@ services:
         source: /*
         destination: /index.html
 
+  # AUDIT (Sprint A, 2026-07): NOT CURRENTLY DEPLOYED. The FastAPI service
+  # under `backend/` was intended to host L1-L4 skill judgment and Kairos
+  # execution, but the deploy is offline. Live L1-L4 lives in-process on
+  # `openclaw-api` (`src/lib/archon/*`); Agent Robustness observability
+  # lives in-process at `/api/stress-benchmarks/*`. This block is retained
+  # so the service can be redeployed later without reconstructing the
+  # config from scratch.
   - type: web
     name: openclaw-benchmark
     runtime: python
@@ -91,6 +115,10 @@ services:
           name: zeta-caid-prod
           property: connectionString
 
+  # AUDIT (Sprint A, 2026-07): LEGACY / NOT REQUIRED AT RUNTIME. Canonical
+  # Archon runs in-process inside `openclaw-api` (`src/lib/archon/*`, routes
+  # mounted at `/api/archon/*`). Retained here for the future split-out
+  # architecture; safe to leave un-deployed today.
   - type: web
     name: archon-factory
     runtime: node

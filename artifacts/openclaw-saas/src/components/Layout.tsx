@@ -29,6 +29,7 @@ const navItems = [
   { href: "/skills", icon: Zap, label: "Skills" },
   { href: "/zoa", icon: Zap, label: "ZOA" },
   { href: "/forge", icon: FlaskConical, label: "Model Forge" },
+  { href: "/agent-robustness", icon: Activity, label: "Robustness" },
   { href: "/startup-counsel", icon: Scale, label: "Counsel" },
   { href: "/billing", icon: CreditCard, label: "Billing" },
 ];

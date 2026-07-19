@@ -45,10 +45,17 @@ alwaysApply: true
 |---|---|---|---|
 | API Server | `openclaw-api` | Node.js | Starter |
 | Frontend | `openclaw-saas` | Static | Free |
-| Benchmark + ZOA + Kairos | `openclaw-benchmark` | Python (FastAPI) | Starter |
-| Archon Factory | `archon-factory` | Node.js | Starter |
+| Benchmark + ZOA + Kairos | ~~`openclaw-benchmark` (FastAPI)~~ **NOT DEPLOYED** — live path is in-process on `openclaw-api` (`src/lib/archon/*`, `src/lib/skills/zoa/*`); observational stress corpus at `src/lib/stress-benchmarks/*`. | (in-process) |
+| Archon Factory | ~~`archon-factory`~~ **LEGACY / not required** — canonical Archon runs in-process; the standalone Node service in `packages/archon-factory/` is retained for future extraction. | (in-process) |
 | Database | `openclaw-db` | PostgreSQL | Free |
 | Per-tenant Gateway | `openclaw-gateway-{tenantId}` | Docker | Starter (dynamic) |
+
+> **Sprint A audit (2026-07):** the external `openclaw-benchmark` and
+> `archon-factory` services referenced in earlier revisions of this table
+> are **not deployed**. `render.yaml` still declares them for historical
+> reasons; canonical live behaviour lives inside `openclaw-api`. See
+> `.cursor/rules/05-execution-engines.mdc` and
+> `.cursor/rules/11-agent-robustness.mdc` for the current wiring.
 
 ## Monorepo Structure
 
@@ -66,8 +73,11 @@ openclaw-saas/
 │   ├── gateway-provisioner/ # Render Deploy API client
 │   └── skill-contract/      # Skill interface + ConnectorDef types
 ├── packages/
-│   ├── archon/              # Archon workflow config + YAML definitions
-│   └── archon-factory/      # Skill generation pipeline (Express service)
+│   ├── archon/              # Archon workflow config + YAML (legacy / vision)
+│   └── archon-factory/      # Skill generation service (LEGACY — not deployed)
+├── artifacts/api-server/src/lib/archon/       # LIVE Archon (in-process)
+├── artifacts/api-server/src/lib/stress-benchmarks/  # Agent Robustness (read-only corpus)
+├── artifacts/api-server/corpus/stress-benchmarks/   # baked JSONL corpus + PROVENANCE.md
 └── scripts/                 # DB migration, seeding utilities
 ```
 

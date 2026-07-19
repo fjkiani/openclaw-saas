@@ -1,9 +1,39 @@
 /**
- * Benchmark client — calls the mcp-universe-benchmarks FastAPI service
- * to run L1-L4 skill benchmarks before allowing installation.
+ * Benchmark client — talks to an external L1-L4 benchmark service.
+ *
+ * NOTE (Sprint A audit, 2026-07): the external `openclaw-benchmark` FastAPI
+ * service referenced by this client is NOT deployed. Live L1-L4 judgment
+ * for skills happens in-process via `lib/archon/benchmarkRunner.ts`.
+ *
+ * This client remains for two reasons:
+ *   1. Optional external judge — if `BENCHMARK_SERVICE_URL` is set to a
+ *      reachable endpoint at runtime, it will be used.
+ *   2. Preflight — the `checkBenchmarkGate` wrapper now runs a 2s HEAD
+ *      probe before the sync call, so an unreachable service fails fast
+ *      instead of stalling installs for 65s.
+ *
+ * The static observational stress-benchmark corpus is a separate concern —
+ * see `lib/stress-benchmarks/` and `.cursor/rules/11-agent-robustness.mdc`.
  */
 
 const BENCHMARK_SERVICE_URL = process.env.BENCHMARK_SERVICE_URL || "http://localhost:8001";
+
+/**
+ * Fast reachability probe for the external benchmark service.
+ * Returns true if the service responds within ~2s.
+ * Never throws.
+ */
+async function serviceReachable(): Promise<boolean> {
+  try {
+    const res = await fetch(`${BENCHMARK_SERVICE_URL}/health`, {
+      method: "GET",
+      signal: AbortSignal.timeout(2_000),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
 
 export interface BenchmarkRunRequest {
   skill_id: number | string;
@@ -99,6 +129,18 @@ export async function checkBenchmarkGate(
   skillDescription: string,
   skillCategory: string,
 ): Promise<{ passes: boolean; result: BenchmarkResult | null; reason: string }> {
+  // Fast preflight — bail before the 65s sync call if the service is dead.
+  if (!(await serviceReachable())) {
+    console.warn(
+      "[BenchmarkClient] External benchmark service unreachable at %s — install allowed (gate-fallback-open).",
+      BENCHMARK_SERVICE_URL,
+    );
+    return {
+      passes: true,
+      result: null,
+      reason: "gate-fallback-open (external benchmark service unreachable)",
+    };
+  }
   try {
     // Run a quick sync benchmark
     const result = await runBenchmarkSync({

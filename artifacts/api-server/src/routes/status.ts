@@ -58,7 +58,21 @@ router.get("/status", async (_req: Request, res: Response) => {
     detail: dryRun ? "DRY_RUN=true (Modal calls stubbed)" : "DRY_RUN=false (live Modal dispatch)",
   };
 
-  // 5. Env var checklist
+  // 5. Agent Robustness (stress-benchmarks) corpus
+  try {
+    const { health: sbHealth } = await import("../lib/stress-benchmarks/runStore.js");
+    const sb = sbHealth();
+    checks.stress_benchmarks = {
+      ok: sb.ok,
+      detail: sb.ok
+        ? `${sb.n_runs} row(s) loaded from ${sb.runs_path}`
+        : `Corpus unavailable: ${sb.error ?? "unknown error"}`,
+    };
+  } catch (err: any) {
+    checks.stress_benchmarks = { ok: false, detail: err?.message ?? String(err) };
+  }
+
+  // 6. Env var checklist
   const requiredVars = [
     "DATABASE_URL",
     "OPENROUTER_API_KEY",

@@ -24,7 +24,8 @@
 | Render API | https://openclaw-api-k30t.onrender.com | **LIVE** — healthz, draft, flywheel, extract-clause, judge |
 | Railway API | https://reliable-abundance-production-aac6.up.railway.app | **LIVE** — ZIE judge, semantic clause, SEO flywheel; **different DB** |
 | Static SPA | https://openclaw-lfky.onrender.com | **LIVE** — bundle may target **b9wb** API per `render.yaml`, not k30t |
-| Benchmark/Kairos | https://openclaw-benchmark.onrender.com | **PARTIAL** — accepts runs; LLM layer failed in probes |
+| Benchmark/Kairos | https://openclaw-benchmark.onrender.com | **NOT DEPLOYED (2026-07 audit)** — hostname does not respond; live L1-L4 judgment now runs in-process on `openclaw-api` (`src/lib/archon/*`). `benchmarkClient.ts` reachability-probes and falls back cleanly. |
+| Agent Robustness corpus | (in-repo, `artifacts/api-server/corpus/stress-benchmarks/`) | **LIVE (Sprint A)** — 909 rows served at `/api/stress-benchmarks/*`; see `.cursor/rules/11-agent-robustness.mdc` |
 
 **Repo HEAD (audit):** `530be25` on `fjkiani/openclaw-saas` main.
 
@@ -110,9 +111,19 @@ GET  /api/v1/seo/flywheel/status        Railway + Render
 
 **CounselUI:** `artifacts/mockup-sandbox/.../CounselUI.tsx` — defaults to k30t; Analyze tab blocked until `/matter` env fixed.
 
-### 1.4 Benchmark Service (Kairos Engine)
+### 1.4 Benchmark Service (Kairos Engine) — REFERENCE ONLY
 
-`openclaw-benchmark` runs the Kairos agentic execution engine. Key routes:
+> **AUDIT NOTE (Sprint A, 2026-07):** the `openclaw-benchmark` FastAPI
+> service is not currently deployed. The routes below describe the
+> intended contract; consumers on `openclaw-api` reach live L1-L4
+> judgment via in-process `src/lib/archon/*` instead. If/when the FastAPI
+> service is spun back up, `src/lib/benchmarkClient.ts` reachability-
+> probes and will start using it automatically.
+> The Agent Robustness page is served independently by
+> `/api/stress-benchmarks/*` from the in-repo JSONL corpus — see
+> `.cursor/rules/11-agent-robustness.mdc`.
+
+`openclaw-benchmark` was intended to run the Kairos agentic execution engine. Key routes (nominal):
 
 ```
 POST /api/v1/zoa/kairos/run          — start a Kairos run, returns run_id

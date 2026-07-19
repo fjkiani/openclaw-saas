@@ -1,0 +1,367 @@
+{
+  "n_runs": 909,
+  "leaderboard": {
+    "gemini/gemma-4-31b-it": {
+      "n_runs": 8,
+      "pass_rate": 0.5,
+      "pass@1_mean": 0.5,
+      "pass@3_mean": 1.0,
+      "pass@5_mean": 1.0,
+      "p50_ms": 122466.0,
+      "p95_ms": 364458.9499999999,
+      "p99_ms": 410626.18999999994
+    },
+    "gemini/gemma-4-26b-a4b-it": {
+      "n_runs": 8,
+      "pass_rate": 0.5,
+      "pass@1_mean": 0.5,
+      "pass@3_mean": 1.0,
+      "pass@5_mean": 1.0,
+      "p50_ms": 125727.0,
+      "p95_ms": 342469.05,
+      "p99_ms": 349748.20999999996
+    },
+    "groq/llama-3.3-70b-versatile": {
+      "n_runs": 103,
+      "pass_rate": 0.0,
+      "pass@1_mean": 0.0,
+      "pass@3_mean": 0.9705882352941176,
+      "pass@5_mean": 0.9705882352941176,
+      "p50_ms": 2409.0,
+      "p95_ms": 8987.8,
+      "p99_ms": 9154.42
+    },
+    "gemini/gemini-2.5-flash": {
+      "n_runs": 82,
+      "pass_rate": 0.07317073170731707,
+      "pass@1_mean": 0.045454545454545456,
+      "pass@3_mean": 0.8181818181818182,
+      "pass@5_mean": 1.0,
+      "p50_ms": 7242.0,
+      "p95_ms": 21888.0,
+      "p99_ms": 29114.0
+    },
+    "groq/openai/gpt-oss-20b": {
+      "n_runs": 41,
+      "pass_rate": 0.024390243902439025,
+      "pass@1_mean": 0.030303030303030304,
+      "pass@3_mean": 1.0,
+      "pass@5_mean": 1.0,
+      "p50_ms": 6565.0,
+      "p95_ms": 11193.0,
+      "p99_ms": 11525.4
+    },
+    "gemini/gemini-2.5-flash-lite": {
+      "n_runs": 82,
+      "pass_rate": 0.04878048780487805,
+      "pass@1_mean": 0.030303030303030304,
+      "pass@3_mean": 0.8181818181818182,
+      "pass@5_mean": 1.0,
+      "p50_ms": 6744.5,
+      "p95_ms": 9733.0,
+      "p99_ms": 11208.0
+    },
+    "openrouter/openai/gpt-oss-20b:free": {
+      "n_runs": 0,
+      "pass_rate": 0.0,
+      "pass@1_mean": 0.0,
+      "pass@3_mean": 0.0,
+      "pass@5_mean": 0.0,
+      "p50_ms": 0.0,
+      "p95_ms": 0.0,
+      "p99_ms": 0.0
+    },
+    "openrouter/nvidia/nemotron-3-nano-30b-a3b:free": {
+      "n_runs": 0,
+      "pass_rate": 0.0,
+      "pass@1_mean": 0.0,
+      "pass@3_mean": 0.0,
+      "pass@5_mean": 0.0,
+      "p50_ms": 0.0,
+      "p95_ms": 0.0,
+      "p99_ms": 0.0
+    },
+    "openrouter/qwen/qwen3-coder:free": {
+      "n_runs": 0,
+      "pass_rate": 0.0,
+      "pass@1_mean": 0.0,
+      "pass@3_mean": 0.0,
+      "pass@5_mean": 0.0,
+      "p50_ms": 0.0,
+      "p95_ms": 0.0,
+      "p99_ms": 0.0
+    },
+    "openrouter/meta-llama/llama-3.3-70b-instruct:free": {
+      "n_runs": 0,
+      "pass_rate": 0.0,
+      "pass@1_mean": 0.0,
+      "pass@3_mean": 0.0,
+      "pass@5_mean": 0.0,
+      "p50_ms": 0.0,
+      "p95_ms": 0.0,
+      "p99_ms": 0.0
+    },
+    "openrouter/nvidia/nemotron-3-super-120b-a12b:free": {
+      "n_runs": 0,
+      "pass_rate": 0.0,
+      "pass@1_mean": 0.0,
+      "pass@3_mean": 0.0,
+      "pass@5_mean": 0.0,
+      "p50_ms": 0.0,
+      "p95_ms": 0.0,
+      "p99_ms": 0.0
+    }
+  },
+  "failures": {
+    "gemini/gemma-4-31b-it": {
+      "none": 4,
+      "wrong_answer": 2,
+      "refusal": 2
+    },
+    "gemini/gemma-4-26b-a4b-it": {
+      "wrong_answer": 2,
+      "none": 4,
+      "refusal": 2
+    },
+    "groq/llama-3.3-70b-versatile": {
+      "wrong_answer": 2,
+      "rate_limit": 39
+    },
+    "gemini/gemini-2.5-flash": {
+      "hallucination": 4,
+      "wrong_answer": 4,
+      "none": 6,
+      "rate_limit": 66,
+      "refusal": 2
+    },
+    "groq/openai/gpt-oss-20b": {
+      "rate_limit": 36,
+      "unknown_error": 2,
+      "hallucination": 2,
+      "none": 1
+    },
+    "gemini/gemini-2.5-flash-lite": {
+      "hallucination": 4,
+      "wrong_answer": 2,
+      "rate_limit": 72,
+      "none": 4
+    }
+  },
+  "robustness_delta": {
+    "openrouter/openai/gpt-oss-20b:free": {
+      "prompt_injection": {
+        "baseline_rate": 0.0,
+        "perturbed_rate": 0.25,
+        "delta": 0.25,
+        "n": 24
+      },
+      "contradictory": {
+        "baseline_rate": 0.0,
+        "perturbed_rate": 0.25,
+        "delta": 0.25,
+        "n": 24
+      },
+      "noisy_prefix": {
+        "baseline_rate": 0.0,
+        "perturbed_rate": 0.25,
+        "delta": 0.25,
+        "n": 24
+      },
+      "gold_swap": {
+        "baseline_rate": 0.0,
+        "perturbed_rate": 0.25,
+        "delta": 0.25,
+        "n": 24
+      }
+    },
+    "openrouter/nvidia/nemotron-3-nano-30b-a3b:free": {
+      "prompt_injection": {
+        "baseline_rate": 0.0,
+        "perturbed_rate": 0.25,
+        "delta": 0.25,
+        "n": 24
+      },
+      "contradictory": {
+        "baseline_rate": 0.0,
+        "perturbed_rate": 0.25,
+        "delta": 0.25,
+        "n": 24
+      },
+      "noisy_prefix": {
+        "baseline_rate": 0.0,
+        "perturbed_rate": 0.25,
+        "delta": 0.25,
+        "n": 24
+      },
+      "gold_swap": {
+        "baseline_rate": 0.0,
+        "perturbed_rate": 0.25,
+        "delta": 0.25,
+        "n": 24
+      }
+    },
+    "openrouter/qwen/qwen3-coder:free": {
+      "prompt_injection": {
+        "baseline_rate": 0.0,
+        "perturbed_rate": 0.25,
+        "delta": 0.25,
+        "n": 24
+      },
+      "contradictory": {
+        "baseline_rate": 0.0,
+        "perturbed_rate": 0.25,
+        "delta": 0.25,
+        "n": 24
+      },
+      "noisy_prefix": {
+        "baseline_rate": 0.0,
+        "perturbed_rate": 0.25,
+        "delta": 0.25,
+        "n": 24
+      },
+      "gold_swap": {
+        "baseline_rate": 0.0,
+        "perturbed_rate": 0.25,
+        "delta": 0.25,
+        "n": 24
+      }
+    },
+    "groq/llama-3.3-70b-versatile": {
+      "prompt_injection": {
+        "baseline_rate": 0.0,
+        "perturbed_rate": 0.125,
+        "delta": 0.125,
+        "n": 8
+      },
+      "contradictory": {
+        "baseline_rate": 0.0,
+        "perturbed_rate": 0.125,
+        "delta": 0.125,
+        "n": 8
+      },
+      "noisy_prefix": {
+        "baseline_rate": 0.0,
+        "perturbed_rate": 0.0,
+        "delta": 0.0,
+        "n": 8
+      },
+      "gold_swap": {
+        "baseline_rate": 0.0,
+        "perturbed_rate": 0.0,
+        "delta": 0.0,
+        "n": 8
+      }
+    },
+    "gemini/gemini-2.5-flash-lite": {
+      "prompt_injection": {
+        "baseline_rate": 0.04878048780487805,
+        "perturbed_rate": 0.375,
+        "delta": 0.32621951219512196,
+        "n": 8
+      },
+      "contradictory": {
+        "baseline_rate": 0.04878048780487805,
+        "perturbed_rate": 0.5,
+        "delta": 0.45121951219512196,
+        "n": 8
+      },
+      "noisy_prefix": {
+        "baseline_rate": 0.04878048780487805,
+        "perturbed_rate": 0.0,
+        "delta": -0.04878048780487805,
+        "n": 8
+      },
+      "gold_swap": {
+        "baseline_rate": 0.04878048780487805,
+        "perturbed_rate": 0.0,
+        "delta": -0.04878048780487805,
+        "n": 8
+      }
+    }
+  },
+  "concurrency": {
+    "1": {
+      "n": 2,
+      "p50_ms": 1858.5,
+      "p95_ms": 2248.65,
+      "throughput_rps": 0.8726003490401397
+    },
+    "2": {
+      "n": 4,
+      "p50_ms": 1686.5,
+      "p95_ms": 2039.7999999999997,
+      "throughput_rps": 1.9065776930409915
+    },
+    "4": {
+      "n": 8,
+      "p50_ms": 1607.5,
+      "p95_ms": 1857.7999999999997,
+      "throughput_rps": 4.038364462392731
+    },
+    "8": {
+      "n": 16,
+      "p50_ms": 1879.5,
+      "p95_ms": 2020.75,
+      "throughput_rps": 7.014467338886453
+    },
+    "16": {
+      "n": 32,
+      "p50_ms": 2716.0,
+      "p95_ms": 3115.7,
+      "throughput_rps": 9.179575444635685
+    }
+  },
+  "rate_limit": {
+    "openrouter/openai/gpt-oss-20b:free": {
+      "n": 40,
+      "rate_limit_hits": 0,
+      "rate_limit_frac": 0.0,
+      "first_429_request_index": null
+    },
+    "openrouter/nvidia/nemotron-3-nano-30b-a3b:free": {
+      "n": 40,
+      "rate_limit_hits": 36,
+      "rate_limit_frac": 0.9,
+      "first_429_request_index": 0
+    },
+    "openrouter/qwen/qwen3-coder:free": {
+      "n": 40,
+      "rate_limit_hits": 40,
+      "rate_limit_frac": 1.0,
+      "first_429_request_index": 0
+    },
+    "openrouter/meta-llama/llama-3.3-70b-instruct:free": {
+      "n": 40,
+      "rate_limit_hits": 40,
+      "rate_limit_frac": 1.0,
+      "first_429_request_index": 0
+    },
+    "openrouter/nvidia/nemotron-3-super-120b-a12b:free": {
+      "n": 40,
+      "rate_limit_hits": 37,
+      "rate_limit_frac": 0.925,
+      "first_429_request_index": 0
+    }
+  },
+  "faults": {
+    "by_model": {
+      "openrouter/openai/gpt-oss-20b:free": {
+        "n": 18,
+        "passed": 0,
+        "n_tool_calls": 1,
+        "n_injected_faults": 0,
+        "recovered_from_fault": 0
+      },
+      "groq/llama-3.3-70b-versatile": {
+        "n": 15,
+        "passed": 0,
+        "n_tool_calls": 5,
+        "n_injected_faults": 2,
+        "recovered_from_fault": 0
+      }
+    },
+    "fault_class_hits": {
+      "simulated_500": 2
+    }
+  }
+}

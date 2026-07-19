@@ -1,0 +1,109 @@
+---
+description: Agent Robustness Benchmarks — read-only stress-test observability domain
+globs: ["**/lib/stress-benchmarks/**", "**/routes/stressBenchmarks.ts", "**/pages/agent-robustness/**", "**/corpus/stress-benchmarks/**"]
+alwaysApply: false
+---
+
+# OpenClaw — Agent Robustness Benchmarks
+
+## Purpose
+
+Show operators how well each candidate LLM holds up against a fixed battery
+of stress tests: baseline correctness, concurrency, adversarial prompts,
+transient faults, and rate-limit behaviour. The data comes from
+`mcp-universe-benchmarks` and is baked into the repo as a JSONL corpus.
+
+This is a **read-only observability domain**. It does not launch new stress
+runs from the UI. To regenerate the corpus, re-run the stress harness
+externally and update the checked-in JSONL — see
+`corpus/stress-benchmarks/PROVENANCE.md`.
+
+## Boundary with the other engines
+
+| Concern | Owner | Path |
+|---|---|---|
+| Live L1-L4 skill judgment (Archon) | **in-process** | `artifacts/api-server/src/lib/archon/*` |
+| Optional external judge | reachability-probed | `artifacts/api-server/src/lib/benchmarkClient.ts` |
+| Stress-test observability | **this domain** | `artifacts/api-server/src/lib/stress-benchmarks/*` |
+
+If you find yourself extending stress-benchmarks to *run* new evaluations,
+stop — that belongs in the Archon module or in `mcp-universe-benchmarks`
+itself, not here.
+
+## Backend — `artifacts/api-server/`
+
+```
+src/
+├── lib/stress-benchmarks/
+│   ├── types.ts        # StressRun, StressSummary, LeaderboardEntry, etc.
+│   ├── runStore.ts     # JSONL load + cache + health probe
+│   ├── aggregate.ts    # leaderboard, breakdowns, filtered pagination, facets
+│   └── README.md
+├── routes/
+│   └── stressBenchmarks.ts  # mounted at /api/stress-benchmarks/*
+└── corpus/stress-benchmarks/
+    ├── runs.jsonl              # canonical corpus
+    ├── stress_summary.json     # precomputed rollup (fallback)
+    └── PROVENANCE.md
+```
+
+### Endpoints
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/stress-benchmarks/health` | corpus availability, row count |
+| GET | `/api/stress-benchmarks/summary` | n_runs, provenance, leaderboard, all breakdowns |
+| GET | `/api/stress-benchmarks/leaderboard` | leaderboard only |
+| GET | `/api/stress-benchmarks/models` | distinct model IDs |
+| GET | `/api/stress-benchmarks/categories` | per-category rollup + domains + failure classes |
+| GET | `/api/stress-benchmarks/facets` | distinct models × categories × domains × perturbations |
+| GET | `/api/stress-benchmarks/runs?model=&category=&domain=&perturbation_id=&passed=&limit=&offset=` | filtered + paginated raw rows |
+
+Registered in `src/routes/index.ts` before `statusRouter`. The `/api/status`
+endpoint reports a `stress_benchmarks` check (see `routes/status.ts`).
+
+### Corpus contract
+
+`runs.jsonl` is the source of truth. One row = one (model × task ×
+perturbation × run_id) evaluation. The full row schema is versioned in
+`lib/stress-benchmarks/types.ts` and mirrored in
+`corpus/stress-benchmarks/PROVENANCE.md`. Changing the schema requires
+updating both.
+
+Sizing guidance: the in-memory cache is fine up to ~50 MB / ~500k rows. If
+the corpus grows past that, migrate to SQLite/DuckDB — the aggregation
+functions are pure and easy to port.
+
+## Frontend — `artifacts/openclaw-saas/`
+
+```
+src/pages/agent-robustness/
+├── index.tsx    # page shell + tabs
+└── hooks.ts     # TanStack Query bindings for /api/stress-benchmarks/*
+```
+
+- Route registered in `src/App.tsx` at `/agent-robustness` (behind
+  `ProtectedRoute`).
+- Nav entry added to `src/components/Layout.tsx` (Activity icon).
+- Tab layout: **Overview** + 5 category sub-tabs (baseline, concurrency,
+  adversarial, faults, ratelimit).
+- Uses existing `@/components/ui/{tabs,table,card,badge,skeleton,progress}`
+  primitives and `@/lib/apiFetch` for cross-origin calls.
+
+## Environment
+
+- `STRESS_CORPUS_DIR` — optional override for corpus location. Default is
+  `<api-server-cwd>/corpus/stress-benchmarks`.
+- No new secrets. No external service calls. No new DB tables.
+
+## What NOT to do here
+
+- **Do not** re-introduce a live benchmark runner in this module. Use
+  `lib/archon/benchmarkRunner.ts` for that.
+- **Do not** couple to Clerk auth in the route file — the endpoints are
+  read-only and safe to expose behind the shared middleware.
+- **Do not** copy the corpus into a database at boot. The in-memory cache
+  is intentional; migrating to SQLite is a follow-up when the size
+  demands it.
+- **Do not** add mutation endpoints (POST/PUT/DELETE). If a user wants to
+  add data, they update the JSONL and redeploy.

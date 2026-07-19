@@ -8,11 +8,21 @@ alwaysApply: false
 
 ## The Three Engines
 
-| Engine | Role | Service |
+| Engine | Role | Service — **live path** |
 |---|---|---|
-| **ZOA** | Multi-LLM router + agent orchestration | `openclaw-benchmark` (FastAPI) |
-| **Archon** | Skill generation workflow engine | `archon-factory` (Node.js) + `archon-zeta` (Render) |
-| **Kairos** | Training job execution + governance enforcement | `openclaw-benchmark` (FastAPI) |
+| **ZOA** | Multi-LLM router + agent orchestration | in-process `artifacts/api-server/src/lib/skills/zoa/*` (external `openclaw-benchmark` FastAPI is **not deployed**) |
+| **Archon** | Skill generation workflow engine | in-process `artifacts/api-server/src/lib/archon/*` — `packages/archon-factory` + `archon-zeta` are **legacy / not required at runtime** |
+| **Kairos** | Training job execution + governance enforcement | in-process helpers under `artifacts/api-server/src/lib/*` (external `openclaw-benchmark` FastAPI is **not deployed**) |
+
+> **STATUS AUDIT (Sprint A, 2026-07)** — The external `openclaw-benchmark`
+> FastAPI service referenced throughout this document does not exist as a
+> deployed endpoint. Live behaviour runs in-process on `openclaw-api`. Rows
+> below that mention external URLs describe the *vision*, not the current
+> deploy. When wiring code, treat the in-process modules as canonical.
+> Any endpoints for the Agent Robustness domain live under
+> `/api/stress-benchmarks/*` and are served by the JSONL corpus in
+> `artifacts/api-server/corpus/stress-benchmarks/` — see
+> `.cursor/rules/11-agent-robustness.mdc`.
 
 ---
 
@@ -66,6 +76,18 @@ All OpenRouter calls include:
 ## Archon — Skill Generation Engine
 
 Archon is the workflow engine for the Zeta Skill Forge. It generates, validates, benchmarks, and catalogs skills from plain-English prompts.
+
+> **CANONICAL PATH (live):** `artifacts/api-server/src/lib/archon/*`
+> (config, openrouter, skillGenerator, skillValidator, benchmarkRunner,
+> benchmarkStore, runStore, pipeline). Exposed on the API server at
+> `/api/archon/{health, generate, run/:runId, runs, debug/l1}`. This is
+> what `openclaw-api` actually calls — no external service hop.
+>
+> **LEGACY / not deployed:** `packages/archon-factory` + `archon-zeta`
+> (Render). The stand-alone Node service was the earlier design; it is
+> retained in the tree for future extraction but is not required for the
+> current product to function. Treat the `archon-zeta.onrender.com` URLs
+> below as reference documentation, not as a live target.
 
 ### Zeta Skill Forge Pipeline
 
