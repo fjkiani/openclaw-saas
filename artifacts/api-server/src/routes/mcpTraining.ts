@@ -238,6 +238,32 @@ router.post("/webhooks/modal-complete", (req: Request, res: Response) => {
     [mcp_slug],
     marked,
   );
+
+  // Archive the training-run manifest to R2 so we have a durable audit trail
+  // of every promoted adapter. Non-blocking: R2 failures do NOT block promotion.
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  import("../lib/r2Archive.js")
+    .then(({ archiveJson }) =>
+      archiveJson(`training-runs/mcp/${mcp_slug}/${tool_name}/${ts}.json`, {
+        mcp_slug,
+        tool_name,
+        functionCallId,
+        metrics,
+        marked_pairs: marked,
+        policy,
+        promoted_at: ts,
+        source: "modal-complete-webhook",
+      }),
+    )
+    .then((r) => {
+      if (r.archived) {
+        logger.info({ mcp_slug, tool_name, key: r.key, bytes: r.bytes }, "[r2] archived training run");
+      } else {
+        logger.warn({ mcp_slug, tool_name, reason: r.reason }, "[r2] archive skipped");
+      }
+    })
+    .catch((err) => logger.warn({ err, mcp_slug, tool_name }, "[r2] archive threw"));
+
   logger.info(
     { mcp_slug, tool_name, marked, functionCallId, metrics },
     "[mcp.training.webhook] promoted policy",

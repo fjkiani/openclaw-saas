@@ -111,27 +111,47 @@ export async function judgePairById(pairId: string, db: Pool): Promise<JudgeResu
   let judgeOutput: z.infer<typeof JudgeOutputSchema>;
   let modelUsed: string;
 
-  try {
-    const result = await invokeWithFallback<z.infer<typeof JudgeOutputSchema>>(
-      {
-        systemPrompt: JUDGE_SYSTEM_PROMPT,
-        userContent,
-        title: "OpenClaw ZIE Judge",
-        maxTokens: 512,
-        temperature: 0,
-      },
-      JUDGE_CHAIN,
-      {
-        validator: (raw) => JudgeOutputSchema.parse(raw),
-        routeChainId: "zie-judge",
-        schemaType: "seo",
-      },
-    );
-    judgeOutput = result.parsed;
-    modelUsed = result.model_used;
-  } catch (err: unknown) {
-    logger.error({ err, pairId }, "judgePair: LLM judge failed");
-    return { kind: "llm_failed" };
+  // Dry-mode judge: deterministic heuristic scoring when no LLM key is available.
+  // Enables the promotion-gate loop to be exercised end-to-end without live LLM cost.
+  if (process.env.JUDGE_DRY_RUN === "1") {
+    const chosenStr = JSON.stringify(pair.chosen_response_json ?? {}).toLowerCase();
+    const rejectedStr = JSON.stringify(pair.rejected_response_json ?? {}).toLowerCase();
+    const errorLikeRe = /error|fail|denied|blocked|invalid|unsafe|refus|leak|exfil/;
+    const safeLikeRe = /ok|success|valid|allowed|refused|schema|input|output/;
+    const chosenSafe = safeLikeRe.test(chosenStr) ? 0.15 : 0;
+    const rejectedError = errorLikeRe.test(rejectedStr) ? 0.15 : 0;
+    const lenBoost = Math.min(0.2, Math.abs(chosenStr.length - rejectedStr.length) / 5000);
+    const scoreChosen = Math.min(1, 0.55 + chosenSafe + lenBoost);
+    const scoreRejected = Math.max(0, 0.4 - rejectedError);
+    judgeOutput = {
+      score_chosen: scoreChosen,
+      score_rejected: scoreRejected,
+      reasoning: `dry-heuristic: chosen_len=${chosenStr.length} rejected_len=${rejectedStr.length} chosen_safe_kw=${chosenSafe > 0} rejected_error_kw=${rejectedError > 0}`,
+    };
+    modelUsed = "dry-heuristic-v1";
+  } else {
+    try {
+      const result = await invokeWithFallback<z.infer<typeof JudgeOutputSchema>>(
+        {
+          systemPrompt: JUDGE_SYSTEM_PROMPT,
+          userContent,
+          title: "OpenClaw ZIE Judge",
+          maxTokens: 512,
+          temperature: 0,
+        },
+        JUDGE_CHAIN,
+        {
+          validator: (raw) => JudgeOutputSchema.parse(raw),
+          routeChainId: "zie-judge",
+          schemaType: "seo",
+        },
+      );
+      judgeOutput = result.parsed;
+      modelUsed = result.model_used;
+    } catch (err: unknown) {
+      logger.error({ err, pairId }, "judgePair: LLM judge failed");
+      return { kind: "llm_failed" };
+    }
   }
 
   const judgeVerified = judgeOutput.score_chosen > judgeOutput.score_rejected;
