@@ -319,8 +319,8 @@ export async function checkAndDispatch(): Promise<DispatchResult[]> {
     // ZIE double-dip path already imports the Modal SDK lazily. Wire when
     // Modal tokens are provisioned in env.
     try {
-      const modal = await import("modal").catch(() => null);
-      if (!modal) {
+      const modalMod: any = await import("modal").catch(() => null);
+      if (!modalMod || !modalMod.ModalClient) {
         out.push({
           mcp_slug: c.mcp_slug,
           tool_name: c.tool_name,
@@ -330,20 +330,41 @@ export async function checkAndDispatch(): Promise<DispatchResult[]> {
         });
         continue;
       }
-      // Reference call — will need real Modal function name once wired
-      const fnName = process.env.MCP_MODAL_FUNCTION ?? "mcp-router-trainer";
-      const fn: any = (modal as any).functions?.fromName(fnName, "train_lora");
-      const call = await fn.spawn({
+      // Live: openclaw-mcp-trainer app deployed on Modal (see /workspace/openclaw-modal-judge/mcp_lora.py)
+      const appName = process.env.MCP_MODAL_APP ?? "openclaw-mcp-trainer";
+      const funcName = process.env.MCP_MODAL_FUNCTION ?? "train";
+      const modalClient = new modalMod.ModalClient();
+      const fn: any = await modalClient.functions.fromName(appName, funcName);
+      // Pass sample pairs from the buffer so the trainer has real data to
+      // fine-tune on. verified_pairs is a count; look up actual rows.
+      // BUFFER records only carry {invocation.input, label} — the chosen/rejected
+      // text pairs live in Postgres.zie_preference_pairs. For the router trainer
+      // we synthesize a supervised target from the label ("safe" → allow, "unsafe"
+      // → refuse) so the LoRA can learn to gate the call. Enough for tiny router head.
+      const bufferPairs = BUFFER
+        .filter((p) => p.mcp_slug === c.mcp_slug && p.tool_name === c.tool_name && p.label !== "defer")
+        .slice(0, 200)
+        .map((p) => ({
+          input: JSON.stringify(p.invocation?.input ?? {}),
+          chosen: p.label === "unsafe" ? "REFUSE" : "ALLOW",
+          rejected: p.label === "unsafe" ? "ALLOW" : "REFUSE",
+          label: p.label ?? "safe",
+        }));
+      // Modal SDK spawn signature: spawn(args?, kwargs?). Pass all named args as kwargs.
+      const call = await fn.spawn([], {
         mcp_slug: c.mcp_slug,
         tool_name: c.tool_name,
-        pairs: c.verified_pairs,
+        pairs: bufferPairs,
+        webhook_url: process.env.MODAL_WEBHOOK_URL ?? "",
+        webhook_secret: process.env.MCP_TRAINING_WEBHOOK_SECRET ?? "",
       });
+      const fcId = String(call?.functionCallId ?? call?.function_call_id ?? call?.object_id ?? "unknown");
       out.push({
         mcp_slug: c.mcp_slug,
         tool_name: c.tool_name,
         dispatched: true,
-        jobId: String(call?.object_id ?? "unknown"),
-        functionCallId: String(call?.function_call_id ?? "unknown"),
+        jobId: fcId,
+        functionCallId: fcId,
         pairs_used: c.verified_pairs,
         dryRun: false,
       });

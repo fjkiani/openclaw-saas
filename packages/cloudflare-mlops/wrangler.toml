@@ -26,7 +26,7 @@ workers_dev = true
 [[d1_databases]]
 binding = "MCP_METRICS"
 database_name = "openclaw-mcp-metrics"
-database_id = "REPLACE_AFTER_wrangler_d1_create"
+database_id = "ab53805e-6777-4e8d-b2ce-291c57c322d3"
 
 # ── R2: LoRA / eval artifacts ─────────────────────────────────────────────────
 [[r2_buckets]]
@@ -36,7 +36,7 @@ bucket_name = "openclaw-mcp-artifacts"
 # ── KV: router-policy cache ───────────────────────────────────────────────────
 [[kv_namespaces]]
 binding = "MCP_CONFIG"
-id = "REPLACE_AFTER_wrangler_kv_namespace_create"
+id = "81b55e60cf8b4cf69296d0f180e21187"
 
 # ── Vars ──────────────────────────────────────────────────────────────────────
 # Set INGEST_TOKEN as a Wrangler secret:  wrangler secret put INGEST_TOKEN

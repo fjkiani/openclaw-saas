@@ -9,6 +9,7 @@ import { registerZOASkills } from "./lib/skills/zoa/index.js";
 import { migrateLegalCorpus } from "./lib/legalCorpus/migrate.js";
 import { createAdminRouter } from "./routes/admin.js";
 import { intelligenceExtrasRouter } from "./routes/intelligenceExtras.js";
+import { mcpTrainingRouter } from "./routes/mcpTraining.js";
 import { backfillLegalCorpusEmbeddings } from "./lib/legalCorpus/backfillEmbeddings.js";
 
 const rawPort = process.env["PORT"];
@@ -902,6 +903,11 @@ app.use("/api/admin", createAdminRouter(pool, runMigrations));
 // Benchmark + promotion + judge extensions — unprotected like /api/mcps so
 // automation and dashboards can hit them without a Clerk session.
 app.use("/api/v1", intelligenceExtrasRouter(pool));
+
+// MCP training dispatch + webhook receiver. Path convention matches the
+// routes/index.ts mount so any client that walks /api/v1/mcps/training/*
+// hits the same endpoints regardless of which router chain served them.
+app.use("/api/v1/mcps/training", mcpTrainingRouter);
 
 // Start server immediately, run migrations + seed in background (soft-fail).
 // This ensures the server starts and serves /healthz even if the DB is temporarily
