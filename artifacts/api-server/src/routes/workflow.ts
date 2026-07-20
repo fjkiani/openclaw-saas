@@ -25,6 +25,7 @@ import { evaluatePromotion } from "../lib/promotionGate.js";
 import { getMcp } from "../lib/mcps/registry.js";
 import { metrics as mlopsMetrics } from "../lib/cloudflare/mlopsClient.js";
 import { runInference } from "../lib/modal/inferenceClient.js";
+import { runRegression } from "../lib/regressionSuite.js";
 
 const router: IRouter = Router();
 
@@ -547,6 +548,23 @@ router.post("/v1/workflow/promote", async (req: Request, res: Response): Promise
       );
       baseline = q.rows[0]?.fast_model_id ?? "baseline";
     }
+    // Regression gate: block if the candidate adapter fails the active suite.
+    // On empty suite this is neutral (gate_ok=true with a note).
+    let regression: any = null;
+    try {
+      regression = await runRegression(mcp_slug, tool_name, candidate_model_id);
+      if (!regression.gate_ok) {
+        res.json({
+          ok: true,
+          promoted: false,
+          reason: `regression gate blocked: ${regression.gate_reason.join("; ")}`,
+          regression,
+        });
+        return;
+      }
+    } catch (err) {
+      logger.warn({ err: String(err) }, "regression gate failed — continuing without it");
+    }
     const out = await evaluatePromotion(pool, {
       domain: "mcp",
       task_type: `${mcp_slug}::${tool_name}`,
@@ -560,6 +578,7 @@ router.post("/v1/workflow/promote", async (req: Request, res: Response): Promise
       gate_id: out.gate_id,
       promoted: out.promoted,
       reason: out.reason,
+      regression,
     });
   } catch (err) {
     logger.error({ err: String(err) }, "workflow.promote failed");

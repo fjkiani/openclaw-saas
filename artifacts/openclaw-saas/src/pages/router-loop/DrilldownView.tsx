@@ -23,6 +23,7 @@ import { ArrowLeft, CircleAlert } from "lucide-react";
 import { RegisterCard } from "./stages/RegisterCard";
 import { TrafficCard } from "./stages/TrafficCard";
 import { JudgeCard } from "./stages/JudgeCard";
+import { CorrectionCard } from "./stages/CorrectionCard";
 import { BenchmarkCard } from "./stages/BenchmarkCard";
 import { PromoteCard } from "./stages/PromoteCard";
 import { TrainCard } from "./stages/TrainCard";
@@ -122,6 +123,9 @@ export function DrilldownView({
             <div id="stage-traffic"><TrafficCard data={data} /></div>
             <div id="stage-judge">
               <JudgeCard data={data} mcpSlug={mcpSlug} toolName={toolName} labelingOpen={labelingOpen ?? false} onActionChange={setActiveAction} />
+            </div>
+            <div id="stage-correction">
+              <CorrectionCard data={data} mcpSlug={mcpSlug} toolName={toolName} />
             </div>
             <div id="stage-benchmark">
               <BenchmarkCard data={data} mcpSlug={mcpSlug} toolName={toolName} onActionChange={setActiveAction} />

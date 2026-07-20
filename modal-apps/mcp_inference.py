@@ -35,7 +35,10 @@ image = (
     .pip_install(
         "torch==2.5.1",
         "transformers==4.46.3",
-        "peft==0.13.2",
+        # peft 0.15.x understands the eva_config kwarg emitted by the trainer's
+        # LoraConfig (older 0.13.2 raised "unexpected keyword argument
+        # 'eva_config'" and forced the baseline fallback).
+        "peft==0.15.2",
         "accelerate==1.1.1",
     )
 )

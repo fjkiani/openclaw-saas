@@ -212,3 +212,127 @@ export function useLabelPair() {
     },
   });
 }
+
+// ────────────────────────────────────────────────────────────────────────────
+// Loop (W1/W2/W5) — agentic correction: runs, settings, run-once, promote
+// ────────────────────────────────────────────────────────────────────────────
+export type LoopRun = {
+  id: number;
+  created_at: string;
+  prompt: string;
+  orig_score: number;
+  repair_a_model: string;
+  repair_a_score: number;
+  repair_b_model: string;
+  repair_b_score: number;
+  winner: "a" | "b";
+  judge_margin: number;
+  judge_version: string;
+  pref_pair_id: string | null;
+  promoted: boolean | null;
+  promoted_auto: boolean | null;
+};
+
+export type LoopSettings = {
+  auto_promote: boolean;
+  min_margin: number;
+  min_pairs_agree: number;
+  min_confidence: number;
+};
+
+export function useLoopRuns(mcpSlug?: string, toolName?: string, limit = 20) {
+  return useQuery({
+    queryKey: ["loop", "runs", mcpSlug, toolName, limit],
+    queryFn: () =>
+      getJson<{ ok: boolean; runs: LoopRun[]; count: number }>(
+        `/api/v1/loop/runs/${encodeURIComponent(mcpSlug!)}/${encodeURIComponent(toolName!)}?limit=${limit}`,
+      ),
+    staleTime: STALE_MS,
+    refetchInterval: REFETCH_IDLE_MS,
+    enabled: Boolean(mcpSlug && toolName),
+  });
+}
+
+export function useLoopSettings(mcpSlug?: string, toolName?: string) {
+  return useQuery({
+    queryKey: ["loop", "settings", mcpSlug, toolName],
+    queryFn: () =>
+      getJson<{ ok: boolean; settings: LoopSettings }>(
+        `/api/v1/loop/settings/${encodeURIComponent(mcpSlug!)}/${encodeURIComponent(toolName!)}`,
+      ),
+    staleTime: STALE_MS,
+    enabled: Boolean(mcpSlug && toolName),
+  });
+}
+
+export function useUpdateLoopSettings(adminToken?: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: {
+      mcp_slug: string;
+      tool_name: string;
+      auto_promote?: boolean;
+      min_margin?: number;
+      min_pairs_agree?: number;
+      min_confidence?: number;
+    }) =>
+      apiFetch(`/api/v1/loop/settings/${encodeURIComponent(body.mcp_slug)}/${encodeURIComponent(body.tool_name)}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          ...(adminToken ? { "x-openclaw-admin-token": adminToken } : {}),
+        },
+        body: JSON.stringify({
+          auto_promote: body.auto_promote,
+          min_margin: body.min_margin,
+          min_pairs_agree: body.min_pairs_agree,
+          min_confidence: body.min_confidence,
+        }),
+      }).then(async (r) => {
+        if (!r.ok) throw new Error(`settings PUT ${r.status}`);
+        return r.json();
+      }),
+    onSuccess: (_d, v) => {
+      qc.invalidateQueries({ queryKey: ["loop", "settings", v.mcp_slug, v.tool_name] });
+    },
+  });
+}
+
+export function useRunLoop() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: {
+      mcp_slug: string;
+      tool_name: string;
+      prompt: string;
+      adapter_id?: string;
+      orig_response?: string;
+    }) => postJson<any>("/api/v1/loop/run", body),
+    onSuccess: (_d, v) => {
+      qc.invalidateQueries({ queryKey: ["loop", "runs", v.mcp_slug, v.tool_name] });
+      qc.invalidateQueries({ queryKey: ["workflow", "drilldown", v.mcp_slug, v.tool_name] });
+    },
+  });
+}
+
+export function usePromoteLoop(adminToken?: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { loop_run_id: number }) =>
+      apiFetch("/api/v1/loop/promote", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(adminToken ? { "x-openclaw-admin-token": adminToken } : {}),
+        },
+        body: JSON.stringify(body),
+      }).then(async (r) => {
+        if (!r.ok) throw new Error(`promote ${r.status}`);
+        return r.json();
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["loop", "runs"] });
+      qc.invalidateQueries({ queryKey: ["workflow", "drilldown"] });
+    },
+  });
+}
