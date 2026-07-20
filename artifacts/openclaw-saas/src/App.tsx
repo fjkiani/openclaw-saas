@@ -24,6 +24,9 @@ import StartupCounselPage from "@/pages/startup-counsel";
 import AgentRobustnessPage from "@/pages/agent-robustness";
 import McpsPage from "@/pages/mcps";
 import MlOpsPage from "@/pages/mlops";
+import JudgePage from "@/pages/intelligence/judge";
+import BenchmarkPage from "@/pages/intelligence/benchmark";
+import PromotionPage from "@/pages/intelligence/promotion";
 
 const queryClient = new QueryClient();
 
@@ -241,6 +244,9 @@ function AppRoutes() {
         <Route path="/agent-robustness"><ProtectedRoute component={AgentRobustnessPage} /></Route>
         <Route path="/mcps"><ProtectedRoute component={McpsPage} /></Route>
         <Route path="/mlops"><ProtectedRoute component={MlOpsPage} /></Route>
+        <Route path="/intelligence/judge"><ProtectedRoute component={JudgePage} /></Route>
+        <Route path="/intelligence/benchmark"><ProtectedRoute component={BenchmarkPage} /></Route>
+        <Route path="/intelligence/promotion"><ProtectedRoute component={PromotionPage} /></Route>
         <Route component={NotFound} />
       </Switch>
     </QueryClientProvider>

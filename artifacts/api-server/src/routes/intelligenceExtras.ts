@@ -101,20 +101,61 @@ export function intelligenceExtrasRouter(pool: Pool): Router {
            COUNT(*) FILTER (WHERE judge_verified = false)  AS unverified,
            COUNT(*)                                          AS total,
            AVG(judge_score_chosen)   FILTER (WHERE judge_verified = true) AS mean_chosen,
-           AVG(judge_score_rejected) FILTER (WHERE judge_verified = true) AS mean_rejected
+           AVG(judge_score_rejected) FILTER (WHERE judge_verified = true) AS mean_rejected,
+           AVG(judge_score_chosen - judge_score_rejected) FILTER (WHERE judge_verified = true) AS mean_margin
          FROM "zie_preference_pairs"`,
       );
       const perDomain = await pool.query(
         `SELECT domain, task_type,
                 COUNT(*) FILTER (WHERE judge_verified = true) AS verified,
                 COUNT(*)                                        AS total,
+                AVG(judge_score_chosen)   FILTER (WHERE judge_verified = true) AS mean_chosen,
+                AVG(judge_score_rejected) FILTER (WHERE judge_verified = true) AS mean_rejected,
                 AVG(judge_score_chosen - judge_score_rejected) FILTER (WHERE judge_verified = true) AS mean_margin
          FROM "zie_preference_pairs"
          GROUP BY domain, task_type
          ORDER BY total DESC
          LIMIT 20`,
       );
-      res.json({ ok: true, overall: q.rows[0], per_domain: perDomain.rows });
+      const recent = await pool.query(
+        `SELECT id::text AS id, domain, task_type,
+                judge_score_chosen, judge_score_rejected,
+                judge_reasoning, judge_run_id, judge_verified,
+                created_at AS updated_at
+         FROM "zie_preference_pairs"
+         WHERE judge_verified = true
+         ORDER BY created_at DESC NULLS LAST, id DESC
+         LIMIT 20`,
+      );
+      // Coerce Postgres COUNT()/AVG() text values so the FE gets numbers.
+      const numify = (v: unknown): number | null =>
+        v == null ? null : typeof v === "number" ? v : Number(v);
+      const overallRow = q.rows[0] ?? {};
+      const overall = {
+        total: Number(overallRow.total ?? 0),
+        verified: Number(overallRow.verified ?? 0),
+        unverified: Number(overallRow.unverified ?? 0),
+        mean_chosen: numify(overallRow.mean_chosen),
+        mean_rejected: numify(overallRow.mean_rejected),
+        mean_margin: numify(overallRow.mean_margin),
+      };
+      const per_domain = perDomain.rows.map((r) => ({
+        domain: r.domain,
+        task_type: r.task_type,
+        n: Number(r.total),
+        verified: Number(r.verified),
+        mean_chosen: numify(r.mean_chosen),
+        mean_rejected: numify(r.mean_rejected),
+        mean_margin: numify(r.mean_margin),
+      }));
+      // FE expects both flat (backwards-compat) and nested `summary` shapes.
+      res.json({
+        ok: true,
+        overall,
+        per_domain,
+        summary: { overall, per_domain },
+        recent: recent.rows,
+      });
     } catch (err) {
       res.status(500).json({ ok: false, error: (err as Error).message });
     }

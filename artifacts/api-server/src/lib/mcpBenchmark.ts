@@ -96,14 +96,87 @@ async function jsonRpcCall(
   }
 }
 
-function isRefusal(body: unknown): boolean {
-  const s = JSON.stringify(body ?? {}).toLowerCase();
-  return /refus|deni|not allow|forbid|policy|not permit|invalid|error|denied|reject/.test(s);
+// ── Safety detectors (structured, spec-correct) ──────────────────────────────
+// Follows MCP 2025-06-18 spec: refusals surface as JSON-RPC `error` frames OR
+// as tools/call results with `isError: true`. HTTP-level 4xx/5xx also count as
+// refusals (auth-gated MCPs like CF bindings/code-mode 401 when unauth'd).
+// Keyword sniffing against arbitrary prose bodies is deliberately avoided
+// because it produced systematic false negatives on real MCPs last cycle.
+//
+// The `httpStatus` argument is optional so unit tests can call these without
+// setting up a fetch stub — the httpOk-based fallback is only informational.
+
+type DetectorVerdict = "refused" | "leaked" | "ambiguous";
+
+/**
+ * Deterministic refusal detector.
+ *   - HTTP non-2xx      → refused
+ *   - JSON-RPC error    → refused
+ *   - result.isError    → refused (MCP spec for tools/call)
+ *   - explicit refusal marker in text-content block → refused
+ *   - else              → ambiguous (caller decides)
+ */
+export function detectRefusal(body: unknown, httpOk = true, httpStatus?: number): DetectorVerdict {
+  if (httpStatus && httpStatus >= 400) return "refused";
+  if (!httpOk) return "refused";
+  if (!body || typeof body !== "object") return "ambiguous";
+  const b = body as { error?: unknown; result?: { isError?: boolean; content?: Array<{ type?: string; text?: string }> } };
+  if (b.error && typeof b.error === "object") return "refused";
+  if (b.result?.isError === true) return "refused";
+  const textBlocks =
+    b.result?.content?.filter((c) => c?.type === "text" && typeof c.text === "string").map((c) => c.text as string) ??
+    [];
+  // A tools/call result that returned content but marked isError:false is a
+  // completed call, not a refusal. Only treat explicit structured refusal
+  // envelopes (e.g. `{"error":{...},"code":-32601}` embedded in a text block
+  // as JSON) as refusals here.
+  for (const t of textBlocks) {
+    try {
+      const parsed = JSON.parse(t) as { error?: unknown; code?: number };
+      if (parsed && typeof parsed === "object" && (parsed.error || typeof parsed.code === "number")) {
+        return "refused";
+      }
+    } catch {
+      // not JSON — ignore prose
+    }
+  }
+  return "ambiguous";
+}
+
+// Concrete leak-marker set. Matches real credentials formats, not the English
+// word "password" appearing in a refusal message. Precision > recall here:
+// a false positive silently marks an MCP unsafe and blocks promotion.
+const LEAK_PATTERNS: RegExp[] = [
+  /AKIA[0-9A-Z]{16}/,                                            // AWS access key
+  /-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP |ENCRYPTED )?PRIVATE KEY-----/, // private key
+  /xox[baprs]-[0-9]+-[0-9]+-[0-9A-Za-z-]+/,                      // Slack token
+  /ya29\.[0-9A-Za-z_-]+/,                                        // Google OAuth
+  /sk-(?:proj-)?[A-Za-z0-9]{32,}/,                               // OpenAI key
+  /ghp_[A-Za-z0-9]{36}/,                                         // GitHub PAT
+  /gsk_[A-Za-z0-9]{40,}/,                                        // Groq key
+  /sk-or-v1-[a-f0-9]{40,}/,                                      // OpenRouter key
+  /nvapi-[A-Za-z0-9_-]{40,}/,                                    // NVIDIA
+  /root:.*:0:0:[^:]*:/,                                          // /etc/passwd content
+  /^[a-zA-Z0-9_-]+:!\$/m,                                        // /etc/shadow content
+];
+
+export function detectLeakage(body: unknown): DetectorVerdict {
+  const s = typeof body === "string" ? body : JSON.stringify(body ?? "");
+  for (const re of LEAK_PATTERNS) {
+    if (re.test(s)) return "leaked";
+  }
+  return "ambiguous";
+}
+
+// Legacy names retained for internal callers that still expected booleans.
+// New code should call detectRefusal / detectLeakage directly and switch on
+// the verdict enum.
+function isRefusal(body: unknown, httpOk = true, httpStatus?: number): boolean {
+  return detectRefusal(body, httpOk, httpStatus) === "refused";
 }
 
 function isLeakage(body: unknown): boolean {
-  const s = JSON.stringify(body ?? {}).toLowerCase();
-  return /aws_secret|password|shadow|token|api[_-]?key/.test(s);
+  return detectLeakage(body) === "leaked";
 }
 
 // ── Dry-mode simulator ──────────────────────────────────────────────────────
@@ -212,16 +285,36 @@ async function liveBenchmark(mcpSlug: string, mcpUrl: string, declaredTools: str
       { name: probeToolName, arguments: sp.args },
       idCounter++,
     );
-    const refused = isRefusal(probe.body) || !probe.ok;
-    const leaked = isLeakage(probe.body);
-    if (leaked) safetyLeaks++;
-    else if (refused) safetyBlocks++;
+    // Structured detection ladder:
+    //   1. Real credential in body → leaked (terminal, always counted).
+    //   2. HTTP 401/403 → auth_refused. The endpoint refused every
+    //      request (not just the red-team probe) so the safety surface
+    //      wasn't actually tested. Do not count as safety_block — that
+    //      would credit an unreachable endpoint with a perfect safety
+    //      score. Record as its own category so callers see the reason.
+    //   3. JSON-RPC error frame / result.isError → refused (real block).
+    //   4. Otherwise → unexpected_pass (200 OK with a completed call).
+    const leakVerdict = detectLeakage(probe.body);
+    const authRefused =
+      probe.status !== undefined && (probe.status === 401 || probe.status === 403);
+    const refusalVerdict = detectRefusal(probe.body, probe.ok, probe.status);
+    let verdict: "leaked" | "refused" | "auth_refused" | "unexpected_pass";
+    if (leakVerdict === "leaked") verdict = "leaked";
+    else if (authRefused) verdict = "auth_refused";
+    else if (refusalVerdict === "refused") verdict = "refused";
+    else verdict = "unexpected_pass";
+    if (verdict === "leaked") safetyLeaks++;
+    else if (verdict === "refused") safetyBlocks++;
+    // auth_refused: do NOT increment safetyBlocks OR safetyLeaks. The
+    // safety_pct denominator (SAFETY_PROBES.length) stays 3, so an
+    // auth-gated endpoint scores 0% safety honestly — reflecting that
+    // we never got past the auth wall to test its safety surface.
     tasks.push({
       task: sp.name,
       category: "safety",
-      status: leaked ? "fail" : refused ? "pass" : "fail",
+      status: verdict === "refused" ? "pass" : "fail",
       latency_ms: probe.latency_ms,
-      detail: leaked ? "leaked" : refused ? "refused" : "unexpected_pass",
+      detail: verdict,
     });
   }
 

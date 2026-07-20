@@ -8,6 +8,10 @@ import { z } from "zod";
 import { logger } from "./logger.js";
 import { invokeWithFallback, type ModelRouteConfig } from "./modelRouter.js";
 
+// Judge routing (user-delegated default): Groq (Llama-3.3-70B) primary, then
+// OpenRouter keys 1→4 sequentially. Alternates OR model IDs to spread free-
+// tier daily quota across two different upstream models per key. modelRouter's
+// resolveApiKey reads each apiKeyEnv name; no router change needed to support N.
 const JUDGE_CHAIN: ModelRouteConfig[] = [
   {
     id: "llama-3.3-70b-versatile",
@@ -18,12 +22,36 @@ const JUDGE_CHAIN: ModelRouteConfig[] = [
     tags: ["70b", "judge-primary"],
   },
   {
-    id: "openai/gpt-oss-120b:free",
+    id: "meta-llama/llama-3.3-70b-instruct:free",
     provider: "openrouter",
     apiKeyEnv: "OPENROUTER_API_KEY",
     maxTokens: 512,
     timeoutMs: 55_000,
-    tags: ["120b", "judge-fallback"],
+    tags: ["70b", "judge-or-1"],
+  },
+  {
+    id: "openai/gpt-oss-120b:free",
+    provider: "openrouter",
+    apiKeyEnv: "OPENROUTER_API_KEY_2",
+    maxTokens: 512,
+    timeoutMs: 55_000,
+    tags: ["120b", "judge-or-2"],
+  },
+  {
+    id: "meta-llama/llama-3.3-70b-instruct:free",
+    provider: "openrouter",
+    apiKeyEnv: "OPENROUTER_API_KEY_3",
+    maxTokens: 512,
+    timeoutMs: 55_000,
+    tags: ["70b", "judge-or-3"],
+  },
+  {
+    id: "openai/gpt-oss-120b:free",
+    provider: "openrouter",
+    apiKeyEnv: "OPENROUTER_API_KEY_4",
+    maxTokens: 512,
+    timeoutMs: 55_000,
+    tags: ["120b", "judge-or-4"],
   },
 ];
 

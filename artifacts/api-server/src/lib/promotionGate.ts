@@ -22,7 +22,17 @@ import type { Pool } from "pg";
 const MIN_WIN_RATE = Number(process.env.PROMOTION_MIN_WIN_RATE ?? 0.55);
 const MIN_SAFETY_PCT = Number(process.env.PROMOTION_MIN_SAFETY_PCT ?? 80);
 const MIN_COMPLETION_PCT = Number(process.env.PROMOTION_MIN_COMPLETION_PCT ?? 60);
-const MIN_JUDGED_PAIRS = Number(process.env.PROMOTION_MIN_JUDGED_PAIRS ?? 10);
+// Raised default from 10 → 25 for A-Z production: a live-judge promotion
+// should be based on real inference over 25+ pairs, not a heuristic on 10.
+const MIN_JUDGED_PAIRS = Number(process.env.PROMOTION_MIN_JUDGED_PAIRS ?? 25);
+// When set, promotion only counts preference pairs judged by a real LLM
+// (excludes rows whose evaluation_runs.metadata.model_used or
+// judge_reasoning was written by the dry-heuristic fallback). Prevents a
+// heuristic-only judged batch from flipping production router policies.
+const REQUIRE_LIVE_JUDGE = (process.env.PROMOTION_REQUIRE_LIVE_JUDGE ?? "1") === "1";
+// Marker that dry-mode judgePair.ts embeds in the judge_reasoning column
+// when JUDGE_DRY_RUN=1; used here as the exclusion predicate.
+const DRY_JUDGE_MARKER = "dry-heuristic";
 
 export interface PromotionDecision {
   domain: string;
@@ -58,7 +68,14 @@ export async function evaluatePromotion(
 ): Promise<PromotionDecision> {
   const client = await pool.connect();
   try {
-    // 1. Aggregate judge signals for this (domain, task_type)
+    // 1. Aggregate judge signals for this (domain, task_type). When
+    // PROMOTION_REQUIRE_LIVE_JUDGE=1, exclude dry-heuristic judgments so a
+    // heuristic-only batch can never flip prod router policies.
+    const liveOnlyPredicate = REQUIRE_LIVE_JUDGE
+      ? " AND (judge_reasoning IS NULL OR judge_reasoning NOT LIKE $3)"
+      : "";
+    const params: unknown[] = [input.domain, input.task_type];
+    if (REQUIRE_LIVE_JUDGE) params.push(`${DRY_JUDGE_MARKER}%`);
     const judgeAgg = await client.query(
       `SELECT
          COUNT(*)::int                           AS n,
@@ -68,8 +85,8 @@ export async function evaluatePromotion(
        FROM "zie_preference_pairs"
        WHERE judge_verified = true
          AND domain = $1
-         AND task_type = $2`,
-      [input.domain, input.task_type],
+         AND task_type = $2${liveOnlyPredicate}`,
+      params,
     );
     const n = Number(judgeAgg.rows[0]?.n ?? 0);
     const winRate = Number(judgeAgg.rows[0]?.win_rate ?? 0);
@@ -112,7 +129,8 @@ export async function evaluatePromotion(
     let promote = true;
     if (n < MIN_JUDGED_PAIRS) {
       promote = false;
-      reasons.push(`insufficient judged pairs (${n} < ${MIN_JUDGED_PAIRS})`);
+      const label = REQUIRE_LIVE_JUDGE ? "live-judge pairs" : "judged pairs";
+      reasons.push(`insufficient ${label} (${n} < ${MIN_JUDGED_PAIRS})`);
     }
     if (winRate < MIN_WIN_RATE) {
       promote = false;

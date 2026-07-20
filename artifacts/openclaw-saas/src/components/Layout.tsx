@@ -23,6 +23,7 @@ import {
   Moon,
   Scale,
   LineChart,
+  Rocket,
 } from "lucide-react";
 
 const navItems = [
@@ -34,6 +35,9 @@ const navItems = [
   { href: "/agent-robustness", icon: Activity, label: "Robustness" },
   { href: "/mcps", icon: Puzzle, label: "MCP Registry" },
   { href: "/mlops", icon: LineChart, label: "MLOps" },
+  { href: "/intelligence/judge", icon: Scale, label: "LLM Judge" },
+  { href: "/intelligence/benchmark", icon: FlaskConical, label: "MCP Bench" },
+  { href: "/intelligence/promotion", icon: Rocket, label: "Promotion" },
   { href: "/startup-counsel", icon: Scale, label: "Counsel" },
   { href: "/billing", icon: CreditCard, label: "Billing" },
 ];
