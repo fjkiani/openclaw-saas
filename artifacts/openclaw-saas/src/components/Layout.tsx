@@ -18,14 +18,14 @@ import {
   ChevronRight,
   Activity,
   FlaskConical,
-  Puzzle,
   Sun,
   Moon,
   Scale,
-  LineChart,
-  Rocket,
+  Workflow,
 } from "lucide-react";
 
+// Consolidated: the 5 legacy tabs (MCP Registry, MLOps, LLM Judge, MCP Bench,
+// Promotion) collapse into one Router Loop surface at /router-loop.
 const navItems = [
   { href: "/dashboard", icon: LayoutDashboard, label: "Dashboard" },
   { href: "/agents", icon: Bot, label: "Agents" },
@@ -33,11 +33,7 @@ const navItems = [
   { href: "/zoa", icon: Zap, label: "ZOA" },
   { href: "/forge", icon: FlaskConical, label: "Model Forge" },
   { href: "/agent-robustness", icon: Activity, label: "Robustness" },
-  { href: "/mcps", icon: Puzzle, label: "MCP Registry" },
-  { href: "/mlops", icon: LineChart, label: "MLOps" },
-  { href: "/intelligence/judge", icon: Scale, label: "LLM Judge" },
-  { href: "/intelligence/benchmark", icon: FlaskConical, label: "MCP Bench" },
-  { href: "/intelligence/promotion", icon: Rocket, label: "Promotion" },
+  { href: "/router-loop", icon: Workflow, label: "Router Loop" },
   { href: "/startup-counsel", icon: Scale, label: "Counsel" },
   { href: "/billing", icon: CreditCard, label: "Billing" },
 ];
