@@ -6,9 +6,10 @@
  */
 import { useMemo, useState } from "react";
 import { useLocation } from "wouter";
-import { useFleet } from "@/pages/intelligence/workflow-hooks";
+import { useFleet, useAutopilotSettings } from "@/pages/intelligence/workflow-hooks";
 import { STAGES, STAGE_LABELS, encodeUrlState } from "@/pages/intelligence/workflow-types";
 import { StageBadge } from "./StageBadge";
+import { AutopilotCell } from "./AutopilotCell";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -34,6 +35,15 @@ export function FleetGrid() {
   const [, setLocation] = useLocation();
   const [q, setQ] = useState("");
   const { data, isLoading, error, refetch, isFetching } = useFleet();
+  const autopilot = useAutopilotSettings();
+
+  const autopilotOn = useMemo(() => {
+    const s = new Set<string>();
+    for (const a of autopilot.data?.settings ?? []) {
+      if (a.enabled) s.add(`${a.mcp_slug}::${a.tool_name}`);
+    }
+    return s;
+  }, [autopilot.data]);
 
   const rows = useMemo(() => {
     const r = data?.rows ?? [];
@@ -97,6 +107,7 @@ export function FleetGrid() {
                     {STAGE_LABELS[s]}
                   </th>
                 ))}
+                <th className="text-left px-2 py-2 font-semibold whitespace-nowrap">Autopilot</th>
               </tr>
             </thead>
             <tbody>
@@ -107,6 +118,7 @@ export function FleetGrid() {
                     {STAGES.map((s) => (
                       <td key={s} className="px-2 py-2"><Skeleton className="h-6 w-20" /></td>
                     ))}
+                    <td className="px-2 py-2"><Skeleton className="h-6 w-16" /></td>
                   </tr>
                 ))}
               {!isLoading &&
@@ -131,11 +143,18 @@ export function FleetGrid() {
                         <StageBadge data={row.stages[s]} />
                       </td>
                     ))}
+                    <td className="px-2 py-2">
+                      <AutopilotCell
+                        mcpSlug={row.mcp_slug}
+                        toolName={row.tool_name}
+                        enabled={autopilotOn.has(`${row.mcp_slug}::${row.tool_name}`)}
+                      />
+                    </td>
                   </tr>
                 ))}
               {!isLoading && rows.length === 0 && (
                 <tr>
-                  <td colSpan={STAGES.length + 1} className="px-3 py-8 text-center text-muted-foreground">
+                  <td colSpan={STAGES.length + 2} className="px-3 py-8 text-center text-muted-foreground">
                     {q ? "no matches" : "no MCP buckets yet"}
                   </td>
                 </tr>

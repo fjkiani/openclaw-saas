@@ -12,6 +12,7 @@ import { intelligenceExtrasRouter } from "./routes/intelligenceExtras.js";
 import { mcpTrainingRouter } from "./routes/mcpTraining.js";
 import { backfillLegalCorpusEmbeddings } from "./lib/legalCorpus/backfillEmbeddings.js";
 import { startArchonDaemon, stopArchonDaemon } from "./lib/archonDaemon.js";
+import { startAutopilotDaemon, stopAutopilotDaemon } from "./lib/agent/autopilotDaemon.js";
 
 const rawPort = process.env["PORT"];
 
@@ -258,6 +259,62 @@ async function runZieMigration(): Promise<void> {
     )
   `);
   await client.query(`CREATE INDEX IF NOT EXISTS "idx_archon_slug" ON "zie_archon_triage" ("mcp_slug", "dispatched_at" DESC)`);
+
+  // ── 0017_agent_executor: generic agentic task executor (Agent Console + Autopilot) ──
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS "zie_agent_runs" (
+      "id" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      "goal" TEXT NOT NULL,
+      "mode" TEXT NOT NULL DEFAULT 'console',
+      "mcp_slug" TEXT,
+      "tool_name" TEXT,
+      "status" TEXT NOT NULL DEFAULT 'planning',
+      "plan" JSONB NOT NULL DEFAULT '[]'::jsonb,
+      "current_step" INTEGER NOT NULL DEFAULT 0,
+      "replans" INTEGER NOT NULL DEFAULT 0,
+      "planner" TEXT,
+      "summary" TEXT,
+      "error" TEXT,
+      "created_by" TEXT,
+      "created_at" TIMESTAMPTZ NOT NULL DEFAULT now(),
+      "completed_at" TIMESTAMPTZ
+    )
+  `);
+  await client.query(`CREATE INDEX IF NOT EXISTS "idx_agent_runs_created" ON "zie_agent_runs" ("created_at" DESC)`);
+  await client.query(`CREATE INDEX IF NOT EXISTS "idx_agent_runs_slug" ON "zie_agent_runs" ("mcp_slug", "created_at" DESC)`);
+  await client.query(`CREATE INDEX IF NOT EXISTS "idx_agent_runs_mode_status" ON "zie_agent_runs" ("mode", "status")`);
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS "zie_agent_steps" (
+      "id" BIGSERIAL PRIMARY KEY,
+      "run_id" UUID NOT NULL REFERENCES "zie_agent_runs"("id") ON DELETE CASCADE,
+      "idx" INTEGER NOT NULL,
+      "action_type" TEXT NOT NULL,
+      "args" JSONB NOT NULL DEFAULT '{}'::jsonb,
+      "rationale" TEXT,
+      "status" TEXT NOT NULL DEFAULT 'pending',
+      "requires_approval" BOOLEAN NOT NULL DEFAULT false,
+      "approved" BOOLEAN,
+      "approved_by" TEXT,
+      "result" JSONB,
+      "error" TEXT,
+      "started_at" TIMESTAMPTZ,
+      "ended_at" TIMESTAMPTZ
+    )
+  `);
+  await client.query(`CREATE INDEX IF NOT EXISTS "idx_agent_steps_run_idx" ON "zie_agent_steps" ("run_id", "idx")`);
+  await client.query(`CREATE INDEX IF NOT EXISTS "idx_agent_steps_status" ON "zie_agent_steps" ("status")`);
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS "zie_autopilot_settings" (
+      "id" BIGSERIAL PRIMARY KEY,
+      "mcp_slug" TEXT NOT NULL,
+      "tool_name" TEXT NOT NULL,
+      "enabled" BOOLEAN NOT NULL DEFAULT false,
+      "last_run_id" UUID,
+      "updated_at" TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE ("mcp_slug", "tool_name")
+    )
+  `);
+  await client.query(`CREATE INDEX IF NOT EXISTS "idx_autopilot_enabled" ON "zie_autopilot_settings" ("enabled")`);
 
   // ── Minimal eval-table reconciliation so the judge can WRITE ───────────────
   // judge.ts writes evaluation_runs(domain, task_type) + evaluation_metrics(
@@ -1069,6 +1126,9 @@ app.listen(port, (err) => {
       // Start Archon triage daemon. Self-gated by ARCHON_TRIAGE_ENABLED.
       // Disabled by default — safe to call unconditionally.
       startArchonDaemon(pool);
+      // Start Autopilot daemon. Self-gated by AUTOPILOT_ENABLED (default 0) and
+      // per-bucket opt-in via zie_autopilot_settings — safe to call unconditionally.
+      startAutopilotDaemon(pool);
     })
     .catch((err) => {
       // Soft-fail: log the error but do NOT crash the server.
@@ -1161,8 +1221,9 @@ app.listen(port, (err) => {
 
   // Graceful shutdown — stop pg-boss before process exits
   const shutdown = async (signal: string) => {
-    logger.info({ signal }, "Received shutdown signal — stopping forge scheduler + archon daemon");
+    logger.info({ signal }, "Received shutdown signal — stopping forge scheduler + archon + autopilot daemons");
     stopArchonDaemon();
+    stopAutopilotDaemon();
     await stopForgeScheduler().catch(() => {});
     process.exit(0);
   };

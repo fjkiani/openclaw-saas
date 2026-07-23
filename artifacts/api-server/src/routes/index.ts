@@ -62,5 +62,7 @@ import regressionRouter from "./regression.js";
 router.use(regressionRouter);
 import archonTriageRouter from "./archon_triage.js";
 router.use(archonTriageRouter);
+import agentRouter from "./agent.js";
+router.use(agentRouter);
 
 export default router;

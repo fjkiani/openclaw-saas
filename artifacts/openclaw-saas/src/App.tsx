@@ -29,6 +29,7 @@ import BenchmarkPage from "@/pages/intelligence/benchmark";
 import PromotionPage from "@/pages/intelligence/promotion";
 import RouterLoopPage from "@/pages/router-loop";
 import LoopPlaygroundPage from "@/pages/loop-playground";
+import AgentConsolePage from "@/pages/agent-console";
 
 const queryClient = new QueryClient();
 
@@ -246,6 +247,7 @@ function AppRoutes() {
         <Route path="/agent-robustness"><ProtectedRoute component={AgentRobustnessPage} /></Route>
         <Route path="/router-loop"><ProtectedRoute component={RouterLoopPage} /></Route>
         <Route path="/loop-playground"><ProtectedRoute component={LoopPlaygroundPage} /></Route>
+        <Route path="/agent-console"><ProtectedRoute component={AgentConsolePage} /></Route>
         {/* Legacy routes kept reachable by deep-link during transition; not in sidebar. */}
         <Route path="/mcps"><ProtectedRoute component={McpsPage} /></Route>
         <Route path="/mlops"><ProtectedRoute component={MlOpsPage} /></Route>

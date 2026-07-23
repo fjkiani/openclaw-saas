@@ -34,6 +34,7 @@ const navItems = [
   { href: "/forge", icon: FlaskConical, label: "Model Forge" },
   { href: "/agent-robustness", icon: Activity, label: "Robustness" },
   { href: "/router-loop", icon: Workflow, label: "Router Loop" },
+  { href: "/agent-console", icon: Bot, label: "Agent Console" },
   { href: "/startup-counsel", icon: Scale, label: "Counsel" },
   { href: "/billing", icon: CreditCard, label: "Billing" },
 ];

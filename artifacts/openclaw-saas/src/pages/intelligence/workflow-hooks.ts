@@ -336,3 +336,163 @@ export function usePromoteLoop(adminToken?: string) {
     },
   });
 }
+
+// ────────────────────────────────────────────────────────────────────────────
+// Agent executor (Agent Console + Autopilot)  — added for the internal
+// platform-agent iteration. Polls at REFETCH_ACTIVE_MS while a run is active.
+// ────────────────────────────────────────────────────────────────────────────
+export type AgentStepStatus =
+  | "pending" | "running" | "awaiting_approval" | "done" | "failed" | "skipped";
+export type AgentRunStatus =
+  | "planning" | "running" | "awaiting_approval" | "completed" | "failed" | "cancelled";
+
+export interface AgentStepT {
+  idx: number;
+  action_type: string;
+  args: Record<string, unknown>;
+  rationale: string;
+  requires_approval: boolean;
+  status: AgentStepStatus;
+  approved: boolean | null;
+  approved_by: string | null;
+  result: { summary?: string; data?: unknown; ok?: boolean; error?: string | null } | null;
+  error: string | null;
+  started_at: string | null;
+  ended_at: string | null;
+}
+export interface AgentRunT {
+  id: string;
+  goal: string;
+  mode: "console" | "autopilot";
+  mcp_slug: string | null;
+  tool_name: string | null;
+  status: AgentRunStatus;
+  plan: unknown[];
+  current_step: number;
+  replans: number;
+  planner: string | null;
+  summary: string | null;
+  error: string | null;
+  created_at: string;
+  completed_at: string | null;
+  steps?: AgentStepT[];
+}
+export interface AgentActionT {
+  action_type: string;
+  describe: string;
+  mutating: boolean;
+}
+
+const ACTIVE_RUN_STATES: AgentRunStatus[] = ["planning", "running", "awaiting_approval"];
+
+export function useAgentActions() {
+  return useQuery({
+    queryKey: ["agent", "actions"],
+    queryFn: () => getJson<{ ok: boolean; actions: AgentActionT[] }>("/api/v1/agent/actions"),
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useAgentRuns(limit = 20, mode?: "console" | "autopilot") {
+  return useQuery({
+    queryKey: ["agent", "runs", limit, mode],
+    queryFn: () =>
+      getJson<{ ok: boolean; runs: AgentRunT[]; count: number }>(
+        `/api/v1/agent/runs?limit=${limit}${mode ? `&mode=${mode}` : ""}`,
+      ),
+    refetchInterval: REFETCH_ACTIVE_MS,
+  });
+}
+
+export function useAgentRunDetail(runId?: string) {
+  return useQuery({
+    queryKey: ["agent", "run", runId],
+    queryFn: () => getJson<{ ok: boolean; run: AgentRunT }>(`/api/v1/agent/run/${runId}`),
+    enabled: Boolean(runId),
+    refetchInterval: (q) => {
+      const st = (q.state.data as { run?: AgentRunT } | undefined)?.run?.status;
+      return st && ACTIVE_RUN_STATES.includes(st) ? REFETCH_ACTIVE_MS : false;
+    },
+  });
+}
+
+export function useStartAgentRun(adminToken?: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { goal: string; mode?: string; mcp_slug?: string | null; tool_name?: string | null }) =>
+      postJson<{ ok: boolean; run_id: string; pollUrl: string }>(
+        "/api/v1/agent/run",
+        body,
+        adminToken ? { "x-openclaw-admin-token": adminToken } : undefined,
+      ),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["agent", "runs"] }),
+  });
+}
+
+export function useApproveAgentStep(adminToken?: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { runId: string; step_idx: number; decision: "approve" | "reject" }) =>
+      postJson<{ ok: boolean; run: AgentRunT }>(
+        `/api/v1/agent/run/${body.runId}/approve`,
+        { step_idx: body.step_idx, decision: body.decision },
+        adminToken ? { "x-openclaw-admin-token": adminToken } : undefined,
+      ),
+    onSuccess: (_d, v) => {
+      qc.invalidateQueries({ queryKey: ["agent", "run", v.runId] });
+      qc.invalidateQueries({ queryKey: ["agent", "runs"] });
+    },
+  });
+}
+
+export function useCancelAgentRun(adminToken?: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (runId: string) =>
+      postJson<{ ok: boolean; run: AgentRunT }>(
+        `/api/v1/agent/run/${runId}/cancel`,
+        {},
+        adminToken ? { "x-openclaw-admin-token": adminToken } : undefined,
+      ),
+    onSuccess: (_d, runId) => {
+      qc.invalidateQueries({ queryKey: ["agent", "run", runId] });
+      qc.invalidateQueries({ queryKey: ["agent", "runs"] });
+    },
+  });
+}
+
+export function useAutopilotSettings() {
+  return useQuery({
+    queryKey: ["agent", "autopilot"],
+    queryFn: () =>
+      getJson<{ ok: boolean; settings: Array<{ mcp_slug: string; tool_name: string; enabled: boolean; last_run_id: string | null }> }>(
+        "/api/v1/agent/autopilot",
+      ),
+    refetchInterval: REFETCH_ACTIVE_MS,
+  });
+}
+
+export function useToggleAutopilot(adminToken?: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { mcp_slug: string; tool_name: string; enabled: boolean }) =>
+      postJson<{ ok: boolean }>(
+        "/api/v1/agent/autopilot",
+        body,
+        adminToken ? { "x-openclaw-admin-token": adminToken } : undefined,
+      ),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["agent", "autopilot"] }),
+  });
+}
+
+export function useAgentRunsForBucket(mcpSlug?: string, toolName?: string, limit = 5) {
+  return useQuery({
+    queryKey: ["agent", "runs", "bucket", mcpSlug, toolName, limit],
+    queryFn: () =>
+      getJson<{ ok: boolean; runs: AgentRunT[]; count: number }>(
+        `/api/v1/agent/runs/bucket/${encodeURIComponent(mcpSlug!)}/${encodeURIComponent(toolName!)}?limit=${limit}`,
+      ),
+    enabled: Boolean(mcpSlug && toolName),
+    refetchInterval: REFETCH_ACTIVE_MS,
+  });
+}
