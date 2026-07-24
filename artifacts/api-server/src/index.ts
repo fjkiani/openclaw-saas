@@ -368,6 +368,67 @@ async function runZieMigration(): Promise<void> {
   await client.query(`CREATE INDEX IF NOT EXISTS "idx_mcp_cert_slug" ON "zie_mcp_certificates" ("slug")`);
   await client.query(`CREATE INDEX IF NOT EXISTS "idx_mcp_cert_score" ON "zie_mcp_certificates" ("trust_score" DESC)`);
 
+  // ── Rigor-Gate: house-model catalog (OpenRouter wrapper rename) ────────────
+  // Maps a house model name (e.g. "zeta-rigor-fast") to the real upstream
+  // OpenRouter id. Extends the zie_router_policies promotion semantics: a row
+  // can be repointed to a promoted/fine-tuned model without changing the public
+  // house name. "paid" marks rows that require a key and are only surfaced when
+  // one is present. Seeded idempotently below via ON CONFLICT.
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS "zie_model_catalog" (
+      "id" BIGSERIAL PRIMARY KEY,
+      "house_name" TEXT NOT NULL UNIQUE,
+      "openrouter_id" TEXT NOT NULL,
+      "tier" TEXT NOT NULL,
+      "paid" BOOLEAN NOT NULL DEFAULT false,
+      "description" TEXT,
+      "context_window" INTEGER,
+      "enabled" BOOLEAN NOT NULL DEFAULT true,
+      "created_at" TIMESTAMPTZ NOT NULL DEFAULT now(),
+      "updated_at" TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `);
+  await client.query(`CREATE INDEX IF NOT EXISTS "idx_rigor_catalog_house" ON "zie_model_catalog" ("house_name")`);
+  // Seed the four house models. ON CONFLICT keeps existing rows' repoints intact
+  // (idempotent, non-destructive) while ensuring the defaults exist.
+  await client.query(`
+    INSERT INTO "zie_model_catalog"
+      ("house_name", "openrouter_id", "tier", "paid", "description", "context_window")
+    VALUES
+      ('zeta-rigor-fast',     'liquid/lfm-2.5-1.2b-instruct:free',       'fast',     false, 'Fast house model for low-latency gated completions.', 32768),
+      ('zeta-rigor-balanced', 'meta-llama/llama-3.3-70b-instruct:free',  'balanced', false, 'Balanced house model (default) for gated completions.', 131072),
+      ('zeta-rigor-max',      'openai/gpt-oss-120b:free',                'max',      false, 'Max-capability free house model for hard gated tasks.', 131072),
+      ('zeta-rigor-frontier', 'openai/gpt-4o',                           'frontier', true,  'Paid frontier model; only surfaced when a key is present.', 128000)
+    ON CONFLICT ("house_name") DO NOTHING
+  `);
+
+  // ── Rigor-Gate: captured slop→rigor records (behavioral lake) ──────────────
+  // One row per gated run: the slop first-attempt, the guardian verdicts, the
+  // corrected final, model/executor path, and before/after scores. Feeds the
+  // DPO exporter alongside zie_preference_pairs (preference_source="rigor_gate").
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS "zie_rigor_records" (
+      "id" BIGSERIAL PRIMARY KEY,
+      "task_type" TEXT NOT NULL DEFAULT 'general',
+      "house_model" TEXT,
+      "prompt_hash" TEXT NOT NULL UNIQUE,
+      "prompt_json" JSONB NOT NULL DEFAULT '{}'::jsonb,
+      "slop_output_json" JSONB NOT NULL DEFAULT '{}'::jsonb,
+      "guardian_verdicts_json" JSONB NOT NULL DEFAULT '[]'::jsonb,
+      "corrected_output_json" JSONB NOT NULL DEFAULT '{}'::jsonb,
+      "attempts" INTEGER NOT NULL DEFAULT 1,
+      "model_path" JSONB NOT NULL DEFAULT '[]'::jsonb,
+      "executor_path" TEXT NOT NULL DEFAULT 'native',
+      "rigor_score_before" INTEGER,
+      "rigor_score_after" INTEGER,
+      "escalated" BOOLEAN NOT NULL DEFAULT false,
+      "created_at" TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `);
+  await client.query(`CREATE INDEX IF NOT EXISTS "idx_rigor_records_task" ON "zie_rigor_records" ("task_type")`);
+  await client.query(`CREATE INDEX IF NOT EXISTS "idx_rigor_records_created" ON "zie_rigor_records" ("created_at" DESC)`);
+  await client.query(`CREATE INDEX IF NOT EXISTS "idx_rigor_records_escalated" ON "zie_rigor_records" ("escalated")`);
+
   // ── Minimal eval-table reconciliation so the judge can WRITE ───────────────
   // judge.ts writes evaluation_runs(domain, task_type) + evaluation_metrics(
   // metric_value). The bootstrap above created the forge shape (job_id NOT NULL

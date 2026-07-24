@@ -20,6 +20,7 @@
     "@workspace/db": "workspace:*",
     "@workspace/gateway-provisioner": "workspace:*",
     "@workspace/skill-contract": "workspace:*",
+    "aislop": "0.13.1",
     "cookie-parser": "^1.4.7",
     "cors": "^2",
     "drizzle-orm": "catalog:",

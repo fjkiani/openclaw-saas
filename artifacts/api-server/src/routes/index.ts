@@ -68,5 +68,7 @@ import archonTriageRouter from "./archon_triage.js";
 router.use(archonTriageRouter);
 import agentRouter from "./agent.js";
 router.use(agentRouter);
+import rigorRouter from "./rigor.js";
+router.use(rigorRouter);
 
 export default router;

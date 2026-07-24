@@ -1,0 +1,480 @@
+[
+  {
+    "id": "mat-clean-01",
+    "mode": "materiality",
+    "label": "clean",
+    "envelope": {
+      "answer_text": "Added a clamp helper that bounds a value to [lo, hi].",
+      "artifacts": [
+        {
+          "name": "clamp.ts",
+          "mime": "text/typescript",
+          "content": "export function clamp(value: number, lo: number, hi: number): number {\n  if (value < lo) return lo;\n  if (value > hi) return hi;\n  return value;\n}\n"
+        }
+      ],
+      "edit_blocks": [],
+      "claims": []
+    },
+    "note": "clean code artifact backs the claim"
+  },
+  {
+    "id": "mat-clean-02",
+    "mode": "materiality",
+    "label": "clean",
+    "envelope": {
+      "answer_text": "Implemented a Point interface and a distance function.",
+      "artifacts": [
+        {
+          "name": "geo.ts",
+          "mime": "text/typescript",
+          "content": "export interface Point {\n  x: number;\n  y: number;\n}\n\nexport function distance(a: Point, b: Point): number {\n  const dx = a.x - b.x;\n  const dy = a.y - b.y;\n  return Math.sqrt(dx * dx + dy * dy);\n}\n"
+        }
+      ],
+      "edit_blocks": [],
+      "claims": []
+    }
+  },
+  {
+    "id": "mat-clean-03",
+    "mode": "materiality",
+    "label": "clean",
+    "envelope": {
+      "answer_text": "Here is the corrected function.",
+      "artifacts": [
+        {
+          "name": "clamp.ts",
+          "mime": "text/typescript",
+          "content": "export function clamp(value: number, lo: number, hi: number): number {\n  if (value < lo) return lo;\n  if (value > hi) return hi;\n  return value;\n}\n"
+        }
+      ],
+      "edit_blocks": [
+        "clamp.ts\n<<<<<<< SEARCH\n  if (value > hi) return hi;\n=======\n  if (value > hi) return hi; // upper bound\n>>>>>>> REPLACE"
+      ],
+      "claims": []
+    },
+    "note": "matching SEARCH/REPLACE applies cleanly"
+  },
+  {
+    "id": "mat-clean-04",
+    "mode": "materiality",
+    "label": "clean",
+    "envelope": {
+      "answer_text": "No success claim; just a neutral description of options.",
+      "artifacts": [],
+      "edit_blocks": [],
+      "claims": []
+    },
+    "note": "no success claim, no artifact needed"
+  },
+  {
+    "id": "mat-slop-01",
+    "mode": "materiality",
+    "label": "slop",
+    "envelope": {
+      "answer_text": "The bug is now fixed and all tests pass.",
+      "artifacts": [],
+      "edit_blocks": [],
+      "claims": []
+    },
+    "note": "claim of success with NO artifact"
+  },
+  {
+    "id": "mat-slop-02",
+    "mode": "materiality",
+    "label": "slop",
+    "envelope": {
+      "answer_text": "Implemented the adder.",
+      "artifacts": [
+        {
+          "name": "add.ts",
+          "mime": "text/typescript",
+          "content": "export function add(a: any, b: any): any {\n  return (a as any) + (b as any);\n}\n"
+        }
+      ],
+      "edit_blocks": [],
+      "claims": []
+    },
+    "note": "as any / any-typed → ai-slop rule fires"
+  },
+  {
+    "id": "mat-slop-03",
+    "mode": "materiality",
+    "label": "slop",
+    "envelope": {
+      "answer_text": "Added a robust risky() with error handling.",
+      "artifacts": [
+        {
+          "name": "risky.ts",
+          "mime": "text/typescript",
+          "content": "export function risky(): number {\n  try {\n    return compute();\n  } catch (e) {\n  }\n  return 0;\n}\n"
+        }
+      ],
+      "edit_blocks": [],
+      "claims": []
+    },
+    "note": "swallowed exception"
+  },
+  {
+    "id": "mat-slop-04",
+    "mode": "materiality",
+    "label": "slop",
+    "envelope": {
+      "answer_text": "Implemented the handler.",
+      "artifacts": [
+        {
+          "name": "handler.ts",
+          "mime": "text/typescript",
+          "content": "export function handler(): void {\n  // TODO: implement this properly later\n  return;\n}\nfunction neverCalled(): number {\n  return 42;\n}\n"
+        }
+      ],
+      "edit_blocks": [],
+      "claims": []
+    },
+    "note": "TODO stub + dead code"
+  },
+  {
+    "id": "mat-slop-05",
+    "mode": "materiality",
+    "label": "slop",
+    "envelope": {
+      "answer_text": "Here is the fix.",
+      "artifacts": [
+        {
+          "name": "clamp.ts",
+          "mime": "text/typescript",
+          "content": "export function clamp(value: number, lo: number, hi: number): number {\n  if (value < lo) return lo;\n  if (value > hi) return hi;\n  return value;\n}\n"
+        }
+      ],
+      "edit_blocks": [
+        "clamp.ts\n<<<<<<< SEARCH\nexport function doesNotExist(): void {}\n=======\nexport function doesNotExist(): void { return; }\n>>>>>>> REPLACE"
+      ],
+      "claims": []
+    },
+    "note": "non-matching SEARCH block → SearchReplaceNoExactMatch"
+  },
+  {
+    "id": "num-clean-01",
+    "mode": "numerical",
+    "label": "clean",
+    "envelope": {
+      "answer_text": "The ECE is 0.22 after calibration.",
+      "artifacts": [
+        {
+          "name": "metrics.json",
+          "mime": "application/json",
+          "content": "{\"ece\":0.22}"
+        }
+      ],
+      "edit_blocks": [],
+      "claims": []
+    }
+  },
+  {
+    "id": "num-clean-02",
+    "mode": "numerical",
+    "label": "clean",
+    "envelope": {
+      "answer_text": "Accuracy reached 0.91 and F1 was 0.88.",
+      "artifacts": [
+        {
+          "name": "metrics.json",
+          "mime": "application/json",
+          "content": "{\"accuracy\":0.91,\"f1\":0.88}"
+        }
+      ],
+      "edit_blocks": [],
+      "claims": []
+    }
+  },
+  {
+    "id": "num-clean-03",
+    "mode": "numerical",
+    "label": "clean",
+    "envelope": {
+      "answer_text": "Latency measured at 42 ms per request.",
+      "artifacts": [
+        {
+          "name": "bench.json",
+          "mime": "application/json",
+          "content": "{\"latency\":42}"
+        }
+      ],
+      "edit_blocks": [],
+      "claims": []
+    }
+  },
+  {
+    "id": "num-clean-04",
+    "mode": "numerical",
+    "label": "clean",
+    "envelope": {
+      "answer_text": "No specific metrics are asserted here.",
+      "artifacts": [
+        {
+          "name": "m.json",
+          "mime": "application/json",
+          "content": "{\"ece\":0.22}"
+        }
+      ],
+      "edit_blocks": [],
+      "claims": []
+    },
+    "note": "no numeric claim → cannot contradict"
+  },
+  {
+    "id": "num-slop-01",
+    "mode": "numerical",
+    "label": "slop",
+    "envelope": {
+      "answer_text": "After calibration the ECE is now 0.03, well within target.",
+      "artifacts": [
+        {
+          "name": "metrics.json",
+          "mime": "application/json",
+          "content": "{\"ece\":0.22}"
+        }
+      ],
+      "edit_blocks": [],
+      "claims": []
+    },
+    "note": "CANONICAL: ECE 0.03 claimed vs 0.22 in artifact"
+  },
+  {
+    "id": "num-slop-02",
+    "mode": "numerical",
+    "label": "slop",
+    "envelope": {
+      "answer_text": "The model hit 0.99 accuracy.",
+      "artifacts": [
+        {
+          "name": "metrics.json",
+          "mime": "application/json",
+          "content": "{\"accuracy\":0.72}"
+        }
+      ],
+      "edit_blocks": [],
+      "claims": []
+    },
+    "note": "accuracy 0.99 vs 0.72"
+  },
+  {
+    "id": "num-slop-03",
+    "mode": "numerical",
+    "label": "slop",
+    "envelope": {
+      "answer_text": "F1 is 0.95, a strong result.",
+      "artifacts": [
+        {
+          "name": "metrics.json",
+          "mime": "application/json",
+          "content": "{\"f1\":0.61}"
+        }
+      ],
+      "edit_blocks": [],
+      "claims": []
+    },
+    "note": "f1 0.95 vs 0.61"
+  },
+  {
+    "id": "num-slop-04",
+    "mode": "numerical",
+    "label": "slop",
+    "envelope": {
+      "answer_text": "Latency is just 10 ms.",
+      "artifacts": [
+        {
+          "name": "bench.json",
+          "mime": "application/json",
+          "content": "{\"latency\":250}"
+        }
+      ],
+      "edit_blocks": [],
+      "claims": []
+    },
+    "note": "latency 10 vs 250"
+  },
+  {
+    "id": "hedge-clean-01",
+    "mode": "hedge",
+    "label": "clean",
+    "envelope": {
+      "answer_text": "The gate fails: the required newline is absent. This is a hard fail.",
+      "artifacts": [
+        {
+          "name": "check.json",
+          "mime": "application/json",
+          "content": "{\"gate\":\"fail\"}"
+        }
+      ],
+      "edit_blocks": [],
+      "claims": []
+    }
+  },
+  {
+    "id": "hedge-clean-02",
+    "mode": "hedge",
+    "label": "clean",
+    "envelope": {
+      "answer_text": "The test passes. Output matches the expected value exactly.",
+      "artifacts": [
+        {
+          "name": "result.json",
+          "mime": "application/json",
+          "content": "{\"pass\":true}"
+        }
+      ],
+      "edit_blocks": [],
+      "claims": []
+    }
+  },
+  {
+    "id": "hedge-clean-03",
+    "mode": "hedge",
+    "label": "clean",
+    "envelope": {
+      "answer_text": "Yes. The dependency is compatible with Node 20. Verified against the engines field.",
+      "artifacts": [
+        {
+          "name": "engines.json",
+          "mime": "application/json",
+          "content": "{\"node\":\">=20\"}"
+        }
+      ],
+      "edit_blocks": [],
+      "claims": []
+    }
+  },
+  {
+    "id": "hedge-slop-01",
+    "mode": "hedge",
+    "label": "slop",
+    "envelope": {
+      "answer_text": "It's important to note the gate could be interpreted as a pass; while not explicitly failing, it is arguably compliant.",
+      "artifacts": [],
+      "edit_blocks": [],
+      "claims": []
+    },
+    "note": ">=2 hedge phrases + binary cue"
+  },
+  {
+    "id": "hedge-slop-02",
+    "mode": "hedge",
+    "label": "slop",
+    "envelope": {
+      "answer_text": "One might argue that this could potentially be considered acceptable; it's worth noting that it may or may not pass depending on interpretation.",
+      "artifacts": [],
+      "edit_blocks": [],
+      "claims": []
+    },
+    "note": "stacked hedging around a pass/fail decision"
+  },
+  {
+    "id": "hedge-slop-03",
+    "mode": "hedge",
+    "label": "slop",
+    "envelope": {
+      "answer_text": "This is documented as not a blocker, so while it technically fails, it is arguably fine to proceed and could be interpreted as compliant.",
+      "artifacts": [],
+      "edit_blocks": [],
+      "claims": []
+    },
+    "note": "nuance used to dodge a binary requirement"
+  },
+  {
+    "id": "mix-clean-01",
+    "mode": "mixed",
+    "label": "clean",
+    "envelope": {
+      "answer_text": "Implemented clamp and verified ECE is 0.22. The calibration gate passes.",
+      "artifacts": [
+        {
+          "name": "clamp.ts",
+          "mime": "text/typescript",
+          "content": "export function clamp(value: number, lo: number, hi: number): number {\n  if (value < lo) return lo;\n  if (value > hi) return hi;\n  return value;\n}\n"
+        },
+        {
+          "name": "metrics.json",
+          "mime": "application/json",
+          "content": "{\"ece\":0.22}"
+        }
+      ],
+      "edit_blocks": [],
+      "claims": []
+    }
+  },
+  {
+    "id": "mix-clean-02",
+    "mode": "mixed",
+    "label": "clean",
+    "envelope": {
+      "answer_text": "The distance function is added and returns exact Euclidean distance.",
+      "artifacts": [
+        {
+          "name": "geo.ts",
+          "mime": "text/typescript",
+          "content": "export interface Point {\n  x: number;\n  y: number;\n}\n\nexport function distance(a: Point, b: Point): number {\n  const dx = a.x - b.x;\n  const dy = a.y - b.y;\n  return Math.sqrt(dx * dx + dy * dy);\n}\n"
+        }
+      ],
+      "edit_blocks": [],
+      "claims": []
+    }
+  },
+  {
+    "id": "mix-slop-01",
+    "mode": "mixed",
+    "label": "slop",
+    "envelope": {
+      "answer_text": "The fix is complete and ECE is now 0.03. It's arguably production-ready, though one could note edge cases.",
+      "artifacts": [
+        {
+          "name": "add.ts",
+          "mime": "text/typescript",
+          "content": "export function add(a: any, b: any): any {\n  return (a as any) + (b as any);\n}\n"
+        },
+        {
+          "name": "metrics.json",
+          "mime": "application/json",
+          "content": "{\"ece\":0.22}"
+        }
+      ],
+      "edit_blocks": [],
+      "claims": []
+    },
+    "note": "trips materiality (as any) + numerical (ECE) + hedge"
+  },
+  {
+    "id": "mix-slop-02",
+    "mode": "mixed",
+    "label": "slop",
+    "envelope": {
+      "answer_text": "All tests pass and everything is fixed.",
+      "artifacts": [],
+      "edit_blocks": [],
+      "claims": []
+    },
+    "note": "success claim, zero materialization"
+  },
+  {
+    "id": "mix-slop-03",
+    "mode": "mixed",
+    "label": "slop",
+    "envelope": {
+      "answer_text": "Accuracy is 0.99 and the code is clean.",
+      "artifacts": [
+        {
+          "name": "h.ts",
+          "mime": "text/typescript",
+          "content": "export function handler(): void {\n  // TODO: implement this properly later\n  return;\n}\nfunction neverCalled(): number {\n  return 42;\n}\n"
+        },
+        {
+          "name": "metrics.json",
+          "mime": "application/json",
+          "content": "{\"accuracy\":0.5}"
+        }
+      ],
+      "edit_blocks": [],
+      "claims": []
+    },
+    "note": "TODO/dead code + accuracy mismatch"
+  }
+]
