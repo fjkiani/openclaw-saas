@@ -337,6 +337,37 @@ async function runZieMigration(): Promise<void> {
   await client.query(`CREATE INDEX IF NOT EXISTS "idx_krios_events_ts" ON "zie_krios_events" ("id" DESC)`);
   await client.query(`CREATE INDEX IF NOT EXISTS "idx_krios_events_run" ON "zie_krios_events" ("run_id")`);
 
+  // ── 0019_mcp_certificates: signed MCP Trust Certificates ────────────────────
+  // Persists every issued Trust Certificate: the fused trust score + grade, the
+  // per-axis breakdown, the full signed payload, and its HMAC signature. The
+  // signature makes each row independently verifiable (tamper-evident). One
+  // logical certificate per (slug, version) is kept current via upsert; cert_id
+  // is globally unique and is the public verification handle. revoked_at is set
+  // by an admin revoke and flips the public verify result.
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS "zie_mcp_certificates" (
+      "id" BIGSERIAL PRIMARY KEY,
+      "cert_id" TEXT NOT NULL UNIQUE,
+      "slug" TEXT NOT NULL,
+      "version" TEXT NOT NULL,
+      "trust_score" INTEGER NOT NULL,
+      "grade" TEXT NOT NULL,
+      "eval_mode" TEXT NOT NULL,
+      "model_evaluated" TEXT,
+      "suite_version" TEXT NOT NULL,
+      "n_leaked" INTEGER NOT NULL DEFAULT 0,
+      "axes" JSONB NOT NULL DEFAULT '{}'::jsonb,
+      "payload" JSONB NOT NULL DEFAULT '{}'::jsonb,
+      "signature" TEXT NOT NULL,
+      "algorithm" TEXT NOT NULL DEFAULT 'HMAC-SHA256',
+      "issued_at" TIMESTAMPTZ NOT NULL DEFAULT now(),
+      "revoked_at" TIMESTAMPTZ,
+      CONSTRAINT "uq_mcp_cert_slug_version" UNIQUE ("slug", "version")
+    )
+  `);
+  await client.query(`CREATE INDEX IF NOT EXISTS "idx_mcp_cert_slug" ON "zie_mcp_certificates" ("slug")`);
+  await client.query(`CREATE INDEX IF NOT EXISTS "idx_mcp_cert_score" ON "zie_mcp_certificates" ("trust_score" DESC)`);
+
   // ── Minimal eval-table reconciliation so the judge can WRITE ───────────────
   // judge.ts writes evaluation_runs(domain, task_type) + evaluation_metrics(
   // metric_value). The bootstrap above created the forge shape (job_id NOT NULL

@@ -24,6 +24,7 @@ export const KRIOS_EVENT_KINDS = [
   "awaiting_approval", // a gated (mutating) step paused for the numeric gate
   "promoted",          // a promote_policy step cleared the gate + shipped
   "trained",           // a training dispatch fired (Modal, dry-stub under MODAL_DRY_RUN)
+  "certified",         // an MCP Trust Certificate was issued for a promoted item
   "completed",         // a Krios-launched run reached terminal success
   "failed",            // a Krios-launched run/dispatch failed (graceful, never hangs)
   "skipped",           // an item was skipped (green / deduped / capacity)
@@ -41,6 +42,7 @@ export const KRIOS_STAGES = [
   "regress",   // run_regression
   "promote",   // promote_policy / rollback_policy
   "train",     // train_adapter (+ standalone training dispatch)
+  "certify",   // issue a signed MCP Trust Certificate for the promoted item
   "deploy",    // terminal: a promoted/trained item is "on the floor" / shipped
 ] as const;
 
@@ -62,6 +64,8 @@ export function stageForAction(action_type: string): KriosStage {
       return "promote";
     case "train_adapter":
       return "train";
+    case "certify_mcp":
+      return "certify";
     default:
       return "inspect";
   }

@@ -28,6 +28,7 @@ import statusRouter from "./status.js";
 import workflowRouter from "./workflow.js";
 import loopRouter from "./loop.js";
 import kriosRouter from "./krios.js";
+import certifyRouter from "./certify.js";
 
 const router: IRouter = Router();
 
@@ -60,6 +61,7 @@ router.use(statusRouter);
 router.use(workflowRouter);
 router.use(loopRouter);
 router.use(kriosRouter);
+router.use(certifyRouter);
 import regressionRouter from "./regression.js";
 router.use(regressionRouter);
 import archonTriageRouter from "./archon_triage.js";

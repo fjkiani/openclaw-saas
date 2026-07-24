@@ -31,6 +31,7 @@ import RouterLoopPage from "@/pages/router-loop";
 import LoopPlaygroundPage from "@/pages/loop-playground";
 import AgentConsolePage from "@/pages/agent-console";
 import KriosPage from "@/pages/krios";
+import CertifyPage from "@/pages/certify";
 
 const queryClient = new QueryClient();
 
@@ -250,6 +251,7 @@ function AppRoutes() {
         <Route path="/loop-playground"><ProtectedRoute component={LoopPlaygroundPage} /></Route>
         <Route path="/agent-console"><ProtectedRoute component={AgentConsolePage} /></Route>
         <Route path="/krios"><ProtectedRoute component={KriosPage} /></Route>
+        <Route path="/certify"><ProtectedRoute component={CertifyPage} /></Route>
         {/* Legacy routes kept reachable by deep-link during transition; not in sidebar. */}
         <Route path="/mcps"><ProtectedRoute component={McpsPage} /></Route>
         <Route path="/mlops"><ProtectedRoute component={MlOpsPage} /></Route>

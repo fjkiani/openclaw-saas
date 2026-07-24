@@ -33,6 +33,7 @@ export const KRIOS_EVENT_KINDS = [
   "awaiting_approval",
   "promoted",
   "trained",
+  "certified",
   "completed",
   "failed",
   "skipped",
@@ -46,6 +47,7 @@ export const KRIOS_STAGES = [
   "regress",
   "promote",
   "train",
+  "certify",
   "deploy",
 ] as const;
 export type KriosStage = (typeof KRIOS_STAGES)[number];
@@ -348,6 +350,7 @@ export const STAGE_LABELS: Record<KriosStage, string> = {
   regress: "Regress",
   promote: "Promote",
   train: "Train",
+  certify: "Certify",
   deploy: "Deploy",
 };
 
@@ -359,6 +362,7 @@ export const STAGE_COLORS: Record<KriosStage, string> = {
   regress: "#E69F00", // orange
   promote: "#CC79A7", // pink/magenta
   train: "#D55E00", // vermilion
+  certify: "#7E57C2", // violet (trust/seal)
   deploy: "#75A025", // olive/ship
 };
 
@@ -370,6 +374,7 @@ export const EVENT_KIND_LABELS: Record<KriosEventKind, string> = {
   awaiting_approval: "awaiting approval",
   promoted: "promoted",
   trained: "trained",
+  certified: "certified",
   completed: "completed",
   failed: "failed",
   skipped: "skipped",
@@ -389,6 +394,10 @@ export function eventSummary(ev: KriosEvent): string {
       return `Launched ${d.kind === "train" ? "training" : "repair"} for ${bucket}.`;
     case "skipped":
       return `Skipped ${bucket}${d.reason ? ` — ${d.reason}` : ""}.`;
+    case "certified":
+      return d.certified
+        ? `Certified ${bucket || ev.mcp_slug || ""} — ${String(d.grade ?? "").toUpperCase()} (trust ${d.trust_score ?? "?"}).`
+        : `${bucket || ev.mcp_slug || "Item"} reached certify lane — no certificate issued yet.`;
     default:
       return `${EVENT_KIND_LABELS[ev.kind]}${bucket ? ` — ${bucket}` : ""}.`;
   }

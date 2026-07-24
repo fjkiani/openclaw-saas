@@ -128,6 +128,7 @@ const KIND_TONE: Record<KriosEventKind, string> = {
   awaiting_approval: "text-amber-400",
   promoted: "text-emerald-400",
   trained: "text-orange-400",
+  certified: "text-violet-400",
   completed: "text-emerald-400",
   failed: "text-red-400",
   skipped: "text-zinc-500",

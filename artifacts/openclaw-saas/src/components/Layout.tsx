@@ -23,6 +23,7 @@ import {
   Scale,
   Workflow,
   Factory,
+  ShieldCheck,
 } from "lucide-react";
 
 // Consolidated: the 5 legacy tabs (MCP Registry, MLOps, LLM Judge, MCP Bench,
@@ -37,6 +38,7 @@ const navItems = [
   { href: "/router-loop", icon: Workflow, label: "Router Loop" },
   { href: "/agent-console", icon: Bot, label: "Agent Console" },
   { href: "/krios", icon: Factory, label: "Krios" },
+  { href: "/certify", icon: ShieldCheck, label: "Certify" },
   { href: "/startup-counsel", icon: Scale, label: "Counsel" },
   { href: "/billing", icon: CreditCard, label: "Billing" },
 ];

@@ -174,6 +174,7 @@ export function FactoryFloor({
       regress: [],
       promote: [],
       train: [],
+      certify: [],
       deploy: [],
     };
     for (const r of state?.in_flight ?? []) {
@@ -189,7 +190,7 @@ export function FactoryFloor({
   const recentShips = useMemo(
     () =>
       stream.events
-        .filter((e) => e.kind === "promoted" || e.kind === "completed" || e.kind === "trained")
+        .filter((e) => e.kind === "promoted" || e.kind === "completed" || e.kind === "trained" || e.kind === "certified")
         .slice(-6)
         .reverse(),
     [stream.events],
@@ -218,7 +219,7 @@ export function FactoryFloor({
         </Card>
       ) : (
         <Card className="overflow-x-auto p-4">
-          <div className="grid min-w-[840px] grid-cols-7 gap-2">
+          <div className="grid min-w-[960px] grid-cols-8 gap-2">
             {KRIOS_STAGES.map((stage) => (
               <Lane
                 key={stage}

@@ -31,6 +31,50 @@ import { kriosConfig } from "./config.js";
 import { appendEvent, inflightCount, KRIOS_CREATED_BY, progressForRun } from "./store.js";
 import { stageForAction } from "./contract.js";
 import type { AgentStep } from "../agent/contract.js";
+import { getLatestBySlug } from "../mcps/certStore.js";
+
+/**
+ * When Krios promotes an MCP/policy, the factory advances the work-item into the
+ * `certify` lane and surfaces its Trust Certificate. This is best-effort and
+ * MUST NOT block or throw inside the reconciler tick: we look up the LATEST
+ * persisted certificate for the promoted slug (issued out-of-band by the
+ * /api/v1/certify flow — we never fabricate one here, and we never run a live
+ * eval synchronously in the daemon). If a cert exists we emit its real grade/
+ * score/cert_id; if none exists we emit an honest `uncertified` marker so the
+ * Floor shows the item reached the Certify lane but still needs certification.
+ */
+export async function emitCertifiedForPromotion(run: {
+  id: string;
+  mcp_slug?: string | null;
+  tool_name?: string | null;
+}, stepIdx: number): Promise<void> {
+  try {
+    const slug = run.mcp_slug ?? null;
+    const cert = slug ? await getLatestBySlug(slug) : null;
+    const detail: Record<string, unknown> = cert
+      ? {
+          step_idx: stepIdx,
+          certified: true,
+          cert_id: cert.cert_id,
+          grade: cert.grade,
+          trust_score: cert.trust_score,
+          eval_mode: cert.eval_mode,
+          revoked: cert.revoked_at != null,
+        }
+      : { step_idx: stepIdx, certified: false, reason: "no_certificate_issued" };
+    await appendEvent({
+      kind: "certified",
+      mcp_slug: slug,
+      tool_name: run.tool_name ?? null,
+      run_id: run.id,
+      stage: "certify",
+      detail,
+    });
+  } catch (err) {
+    // Never let certificate lookup break the reconciler tick.
+    logger.warn({ err, run_id: run.id }, "krios: emitCertifiedForPromotion failed (non-fatal)");
+  }
+}
 
 const TERMINAL = new Set(["completed", "failed", "cancelled"]);
 
@@ -238,6 +282,12 @@ async function reconcileRun(runId: string): Promise<void> {
     });
     emitted = i + 1;
     if (awaitingIdx === i) awaitingIdx = null; // the parked step resolved
+
+    // The moment the factory PROMOTES an item, advance it into the Certify lane
+    // and surface its Trust Certificate (best-effort, non-blocking).
+    if (kind === "promoted") {
+      await emitCertifiedForPromotion(run, step.idx);
+    }
   }
 
   let terminalDone = prev.terminalDone;
