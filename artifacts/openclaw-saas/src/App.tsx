@@ -30,6 +30,7 @@ import PromotionPage from "@/pages/intelligence/promotion";
 import RouterLoopPage from "@/pages/router-loop";
 import LoopPlaygroundPage from "@/pages/loop-playground";
 import AgentConsolePage from "@/pages/agent-console";
+import KriosPage from "@/pages/krios";
 
 const queryClient = new QueryClient();
 
@@ -248,6 +249,7 @@ function AppRoutes() {
         <Route path="/router-loop"><ProtectedRoute component={RouterLoopPage} /></Route>
         <Route path="/loop-playground"><ProtectedRoute component={LoopPlaygroundPage} /></Route>
         <Route path="/agent-console"><ProtectedRoute component={AgentConsolePage} /></Route>
+        <Route path="/krios"><ProtectedRoute component={KriosPage} /></Route>
         {/* Legacy routes kept reachable by deep-link during transition; not in sidebar. */}
         <Route path="/mcps"><ProtectedRoute component={McpsPage} /></Route>
         <Route path="/mlops"><ProtectedRoute component={MlOpsPage} /></Route>

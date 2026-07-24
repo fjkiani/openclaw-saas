@@ -13,6 +13,7 @@ import { mcpTrainingRouter } from "./routes/mcpTraining.js";
 import { backfillLegalCorpusEmbeddings } from "./lib/legalCorpus/backfillEmbeddings.js";
 import { startArchonDaemon, stopArchonDaemon } from "./lib/archonDaemon.js";
 import { startAutopilotDaemon, stopAutopilotDaemon } from "./lib/agent/autopilotDaemon.js";
+import { startKriosConductor, stopKriosConductor } from "./lib/krios/conductor.js";
 
 const rawPort = process.env["PORT"];
 
@@ -315,6 +316,26 @@ async function runZieMigration(): Promise<void> {
     )
   `);
   await client.query(`CREATE INDEX IF NOT EXISTS "idx_autopilot_enabled" ON "zie_autopilot_settings" ("enabled")`);
+
+  // ── 0018_krios_events: Krios factory conductor — live event ledger ──────────
+  // Every factory state transition (queued/started/step_done/awaiting_approval/
+  // promoted/trained/failed/heartbeat) is appended here. It is the single source
+  // of truth for the /v1/krios/stream SSE feed and the Control Room event log.
+  // Events are DERIVED from real agent runs + training dispatch — never fabricated.
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS "zie_krios_events" (
+      "id" BIGSERIAL PRIMARY KEY,
+      "ts" TIMESTAMPTZ NOT NULL DEFAULT now(),
+      "kind" TEXT NOT NULL,
+      "mcp_slug" TEXT,
+      "tool_name" TEXT,
+      "run_id" UUID,
+      "stage" TEXT,
+      "detail" JSONB NOT NULL DEFAULT '{}'::jsonb
+    )
+  `);
+  await client.query(`CREATE INDEX IF NOT EXISTS "idx_krios_events_ts" ON "zie_krios_events" ("id" DESC)`);
+  await client.query(`CREATE INDEX IF NOT EXISTS "idx_krios_events_run" ON "zie_krios_events" ("run_id")`);
 
   // ── Minimal eval-table reconciliation so the judge can WRITE ───────────────
   // judge.ts writes evaluation_runs(domain, task_type) + evaluation_metrics(
@@ -1129,6 +1150,10 @@ app.listen(port, (err) => {
       // Start Autopilot daemon. Self-gated by AUTOPILOT_ENABLED (default 0) and
       // per-bucket opt-in via zie_autopilot_settings — safe to call unconditionally.
       startAutopilotDaemon(pool);
+      // Start Krios factory conductor. Self-gated by KRIOS_ENABLED (default 0) —
+      // safe to call unconditionally. Unifies repair (agent executor) + training
+      // (Forge/Modal dispatch) into one visible production line.
+      startKriosConductor(pool);
     })
     .catch((err) => {
       // Soft-fail: log the error but do NOT crash the server.
@@ -1224,6 +1249,7 @@ app.listen(port, (err) => {
     logger.info({ signal }, "Received shutdown signal — stopping forge scheduler + archon + autopilot daemons");
     stopArchonDaemon();
     stopAutopilotDaemon();
+    stopKriosConductor();
     await stopForgeScheduler().catch(() => {});
     process.exit(0);
   };

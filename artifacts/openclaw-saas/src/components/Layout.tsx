@@ -22,6 +22,7 @@ import {
   Moon,
   Scale,
   Workflow,
+  Factory,
 } from "lucide-react";
 
 // Consolidated: the 5 legacy tabs (MCP Registry, MLOps, LLM Judge, MCP Bench,
@@ -35,6 +36,7 @@ const navItems = [
   { href: "/agent-robustness", icon: Activity, label: "Robustness" },
   { href: "/router-loop", icon: Workflow, label: "Router Loop" },
   { href: "/agent-console", icon: Bot, label: "Agent Console" },
+  { href: "/krios", icon: Factory, label: "Krios" },
   { href: "/startup-counsel", icon: Scale, label: "Counsel" },
   { href: "/billing", icon: CreditCard, label: "Billing" },
 ];

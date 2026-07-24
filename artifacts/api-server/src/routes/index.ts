@@ -27,6 +27,7 @@ import { mcpTrainingRouter } from "./mcpTraining.js";
 import statusRouter from "./status.js";
 import workflowRouter from "./workflow.js";
 import loopRouter from "./loop.js";
+import kriosRouter from "./krios.js";
 
 const router: IRouter = Router();
 
@@ -58,6 +59,7 @@ router.use("/mcps/training", mcpTrainingRouter);
 router.use(statusRouter);
 router.use(workflowRouter);
 router.use(loopRouter);
+router.use(kriosRouter);
 import regressionRouter from "./regression.js";
 router.use(regressionRouter);
 import archonTriageRouter from "./archon_triage.js";

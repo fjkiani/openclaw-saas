@@ -23,7 +23,10 @@ import {
   Shield,
   ArrowRight,
   ChevronRight,
+  Radio,
 } from "lucide-react";
+import { Link as WLink } from "wouter";
+import { useKriosState, useKriosStream, type KriosStage } from "@/pages/krios/useKrios";
 
 // ─── Pipeline visualization ───────────────────────────────────────────────────
 
@@ -35,36 +38,127 @@ const PIPELINE_NODES = [
   { icon: Server,   label: "Deployment", color: "text-emerald-400", border: "border-emerald-500/20", bg: "bg-emerald-500/5" },
 ];
 
+// Map each Forge pipeline node onto the Krios factory stage(s) that "light" it.
+// Krios drives the same production line at a finer granularity; the Forge view is
+// the 5-node executive summary, so several Krios stages fold into one Forge node.
+const NODE_STAGES: KriosStage[][] = [
+  ["inspect"],            // Dataset      ← inspect_bucket
+  ["loop", "train"],      // Training     ← run_loop / train_adapter
+  ["judge", "regress"],   // Eval         ← judge_batch / run_regression
+  ["promote"],            // Registry     ← promote_policy
+  ["deploy"],             // Deployment   ← terminal ship
+];
+
+/**
+ * PipelineViz — the Forge's 5-node production line.
+ *
+ * Upgraded to a LIVE variant fed by the same Krios stream as the /krios page:
+ * when the Krios factory is running, nodes light up as work flows through their
+ * mapped stages (recent events pulse the node; in-flight runs show a live count).
+ * When Krios is disabled or idle, it falls back to the original static rendering
+ * — byte-for-byte the same look — so the Forge page is unchanged for users who
+ * never touch Krios.
+ */
 function PipelineViz({ workspaceCount }: { workspaceCount: number }) {
+  const stream = useKriosStream();
+  const stateQuery = useKriosState(stream.status === "live");
+  const state = stateQuery.data;
+  const live = Boolean(state?.enabled) && stream.status === "live";
+
+  // Per-stage in-flight counts (from the snapshot) and recently-pulsed stages
+  // (from the tail of the stream) → collapse onto the 5 Forge nodes.
+  const stageCounts = state?.stage_counts;
+  const [pulseAt, setPulseAt] = useState<Record<string, number>>({});
+  const lastId = useRef(0);
+  useEffect(() => {
+    const fresh = stream.events.filter((e) => e.id > lastId.current);
+    if (!fresh.length) return;
+    lastId.current = stream.events[stream.events.length - 1]?.id ?? lastId.current;
+    const now = Date.now();
+    const add: Record<string, number> = {};
+    for (const e of fresh) if (e.stage) add[e.stage] = now;
+    if (Object.keys(add).length) setPulseAt((p) => ({ ...p, ...add }));
+  }, [stream.events]);
+  const [, tick] = useState(0);
+  useEffect(() => {
+    if (!live) return;
+    const t = setInterval(() => tick((n) => n + 1), 600);
+    return () => clearInterval(t);
+  }, [live]);
+
+  const now = Date.now();
+  const nodeCount = (i: number) =>
+    NODE_STAGES[i].reduce((sum, st) => sum + (stageCounts?.[st] ?? 0), 0);
+  const nodePulsing = (i: number) =>
+    live && NODE_STAGES[i].some((st) => now - (pulseAt[st] ?? 0) < 1400);
+
   return (
     <div className="bg-card border border-border rounded-lg p-5 mb-6">
       <div className="flex items-center gap-2 mb-4">
         <FlaskConical className="w-4 h-4 text-primary" />
         <span className="text-xs font-mono font-bold text-foreground">The Model Forge</span>
-        <span className="ml-auto text-[10px] font-mono text-muted-foreground">
-          Dataset → Training → Eval → Registry → Deployment
-        </span>
+        {live ? (
+          <WLink
+            href="/krios"
+            className="ml-auto inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-mono text-emerald-400 hover:bg-emerald-500/20"
+            data-testid="forge-krios-live"
+          >
+            <Radio className="w-3 h-3 animate-pulse" aria-hidden="true" />
+            Krios live
+          </WLink>
+        ) : (
+          <span className="ml-auto text-[10px] font-mono text-muted-foreground">
+            Dataset → Training → Eval → Registry → Deployment
+          </span>
+        )}
       </div>
 
-      <div className="flex items-center gap-0 overflow-x-auto pb-1">
-        {PIPELINE_NODES.map(({ icon: Icon, label, color, border, bg }, i) => (
-          <div key={label} className="flex items-center shrink-0">
-            <div className={`flex flex-col items-center gap-1.5 px-4 py-3 rounded-lg border ${border} ${bg} min-w-[90px]`}>
-              <Icon className={`w-4 h-4 ${color}`} />
-              <span className={`text-[10px] font-mono font-bold ${color}`}>{label}</span>
-              {i === 0 && workspaceCount > 0 && (
-                <span className="text-[9px] font-mono text-muted-foreground">{workspaceCount} ready</span>
+      <div className="flex items-center gap-0 overflow-x-auto pb-1" data-testid="forge-pipeline-viz">
+        {PIPELINE_NODES.map(({ icon: Icon, label, color, border, bg }, i) => {
+          const pulsing = nodePulsing(i);
+          const count = nodeCount(i);
+          return (
+            <div key={label} className="flex items-center shrink-0">
+              <div
+                className={`relative flex flex-col items-center gap-1.5 px-4 py-3 rounded-lg border ${border} ${bg} min-w-[90px] transition-all duration-300 ${
+                  pulsing ? "ring-2 ring-primary/50 scale-105" : ""
+                }`}
+                data-testid={`forge-node-${label.toLowerCase()}`}
+              >
+                <Icon className={`w-4 h-4 ${color} ${pulsing ? "animate-pulse" : ""}`} />
+                <span className={`text-[10px] font-mono font-bold ${color}`}>{label}</span>
+                {i === 0 && workspaceCount > 0 && !live && (
+                  <span className="text-[9px] font-mono text-muted-foreground">{workspaceCount} ready</span>
+                )}
+                {live && count > 0 && (
+                  <span
+                    className="absolute -right-1.5 -top-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[9px] font-bold text-primary-foreground tabular-nums"
+                    data-testid={`forge-node-count-${label.toLowerCase()}`}
+                  >
+                    {count}
+                  </span>
+                )}
+              </div>
+              {i < PIPELINE_NODES.length - 1 && (
+                <ChevronRight className={`w-4 h-4 mx-1 shrink-0 ${pulsing ? "text-primary" : "text-muted-foreground"}`} />
               )}
             </div>
-            {i < PIPELINE_NODES.length - 1 && (
-              <ChevronRight className="w-4 h-4 text-muted-foreground mx-1 shrink-0" />
-            )}
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       <p className="text-[10px] font-mono text-muted-foreground mt-3">
-        Where your AI workforce is built. Each workspace runs the full pipeline — from raw data to governed live endpoint.
+        {live ? (
+          <>
+            The factory is running — work items are flowing through the line right now.{" "}
+            <WLink href="/krios" className="text-primary underline">
+              Open the Krios factory floor
+            </WLink>
+            .
+          </>
+        ) : (
+          <>Where your AI workforce is built. Each workspace runs the full pipeline — from raw data to governed live endpoint.</>
+        )}
       </p>
     </div>
   );
