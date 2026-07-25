@@ -29,6 +29,7 @@ import {
 import { hashPrompt } from "../doubleDipRouter.js";
 import { runPanel } from "./guardians/panel.js";
 import { buildCorrection } from "./correction.js";
+import { geminiGenerate, geminiJudgeAvailable, geminiExecModelForTier } from "./geminiJudge.js";
 import { buildSwapChain, DEFAULT_HOUSE_MODEL } from "./catalog.js";
 import type {
   ExecutorEnvelope,
@@ -36,6 +37,7 @@ import type {
   PanelResult,
   RigorAttempt,
   RigorRunResult,
+  RigorVerdict,
 } from "./types.js";
 
 const MAX_ATTEMPTS = Number(process.env.RIGOR_MAX_ATTEMPTS ?? "6");
@@ -53,6 +55,10 @@ export interface RigorRunInput {
   seed_artifacts?: ExecutorEnvelope["artifacts"];
   /** Force the native executor even if the sidecar is up (used by tests/benchmark). */
   force_native?: boolean;
+  /** Per-request override of RIGOR_MAX_ATTEMPTS (native path loop cap + DSPy max_n). */
+  max_attempts?: number;
+  /** Per-request override of RIGOR_SWAP_AFTER (consecutive same-model fails before swap). */
+  swap_after?: number;
 }
 
 // ── DSPy sidecar client ───────────────────────────────────────────────────────
@@ -98,7 +104,7 @@ async function callDspyRefine(
         openrouter_id: model.openrouter_id,
         contract: input.contract ?? {},
         threshold: MIN_SCORE / 100,
-        max_n: MAX_ATTEMPTS,
+        max_n: input.max_attempts ?? MAX_ATTEMPTS,
         task_type: input.task_type ?? "rigor_generic",
         prompt_hash: promptHash,
         run_id: runId,
@@ -174,8 +180,32 @@ async function nativeExecute(
   seed: ExecutorEnvelope["artifacts"],
 ): Promise<{ envelope: ExecutorEnvelope; live: boolean }> {
   const chain: ModelRouteConfig[] = [
-    { id: model.openrouter_id, provider: "openrouter", apiKeyEnv: model.api_key_env, maxTokens: 1600 },
+    { id: model.openrouter_id, provider: "openrouter", apiKeyEnv: model.api_key_env, maxTokens: 4000 },
   ];
+  // PRIMARY executor: Google Gemini when a key is present. The OpenRouter free
+  // tier has a hard per-day cap (free-models-per-day) that, once hit, 429s every
+  // nvidia model until reset; Gemini is an independent, healthy quota that emits
+  // clean envelope JSON in ~2s. On ANY Gemini failure we fall through to the
+  // OpenRouter chain below (which reports its real per-entry reasons and, if it
+  // also fails, produces the honest dry envelope → UNVERIFIED). Opt-out via
+  // RIGOR_DISABLE_GEMINI_EXEC=1.
+  if (geminiJudgeAvailable() && process.env.RIGOR_DISABLE_GEMINI_EXEC !== "1") {
+    try {
+      const g = await geminiGenerate(EXECUTOR_SYSTEM, buildExecutorUser(input, hint, seed), {
+        temperature: 0.2,
+        maxOutputTokens: 4000,
+        timeoutMs: 45_000,
+        model: geminiExecModelForTier(model.tier),
+      });
+      logger.info({ model: g.model_used, house: model.house_name }, "[rigor.orchestrator] executor via Gemini (primary)");
+      return { envelope: parseNativeEnvelope(g.raw, seed), live: true };
+    } catch (gErr) {
+      logger.warn(
+        { err: String(gErr), house: model.house_name },
+        "[rigor.orchestrator] Gemini executor failed — falling back to OpenRouter chain",
+      );
+    }
+  }
   try {
     const res = await invokeWithFallback(
       {
@@ -183,20 +213,36 @@ async function nativeExecute(
         userContent: buildExecutorUser(input, hint, seed),
         title: "rigor-executor",
         temperature: 0.7,
-        maxTokens: 1600,
+        maxTokens: 4000,
       },
       chain,
-      { routeChainId: `rigor-exec:${model.house_name}` },
+      // schemaType:"seo" is the escape hatch that skips detectUnusableOutput's
+      // LEGAL-clause field checks (rationale_summary/recommended_action). The
+      // rigor executor emits answer_text/artifacts/claims and does its OWN
+      // tolerant parsing via parseNativeEnvelope, so the legal validator must
+      // not run — otherwise every rigor call is falsely flagged "unusable
+      // (empty rationale_summary)" and silently dry-falls-back. (2026-07)
+      { routeChainId: `rigor-exec:${model.house_name}`, schemaType: "seo", retry: { max: 2, baseMs: 1000 } },
     );
     return { envelope: parseNativeEnvelope(res.raw, seed), live: true };
   } catch (err) {
     if (err instanceof RouterExhaustedError) {
-      // No key / all entries exhausted → honest dry. Synthesize a minimal
-      // envelope from the prompt so deterministic guardians still run; this is
-      // NOT a fabricated pass — it will be gated like any other envelope.
+      // All entries exhausted. This is NOT necessarily "no key" — it can be
+      // 429/402/timeout/empty-content with a valid key. Surface the ACTUAL
+      // per-entry reasons so failures are never silently masked as dry, and
+      // reflect the real cause in the envelope (which is still gated normally).
+      const reasons = err.attempt_log.map(
+        (a) => `${a.provider}:${a.model_id} -> ${a.status}${a.error ? ` (${a.error.slice(0, 120)})` : ""}`,
+      );
+      const anyKeyMissing = err.attempt_log.every((a) => a.status === "key_missing");
+      logger.warn(
+        { model: model.house_name, openrouter_id: model.openrouter_id, reasons },
+        "[rigor.orchestrator] executor call exhausted — falling back to dry envelope",
+      );
+      const label = anyKeyMissing ? "no LLM key available" : `executor unavailable: ${reasons.join("; ")}`;
       return {
         envelope: {
-          answer_text: `[dry-mode: no LLM key available] Task echoed for guardian evaluation: ${input.prompt.slice(0, 400)}`,
+          answer_text: `[dry-mode: ${label}] Task echoed for guardian evaluation: ${input.prompt.slice(0, 400)}`,
           artifacts: seed,
           edit_blocks: [],
           claims: [],
@@ -213,6 +259,10 @@ async function nativeExecute(
 export async function runRigorGate(input: RigorRunInput): Promise<RigorRunResult> {
   const houseName = input.house_model ?? DEFAULT_HOUSE_MODEL;
   const taskType = input.task_type ?? "general";
+  // Per-request overrides (fall back to env-configured module defaults). Clamped
+  // to sane bounds so a caller cannot request a pathological loop.
+  const maxAttempts = Math.max(1, Math.min(20, input.max_attempts ?? MAX_ATTEMPTS));
+  const swapAfter = Math.max(1, Math.min(maxAttempts, input.swap_after ?? SWAP_AFTER));
   const promptHash = hashPrompt(`${taskType}::${input.prompt}`);
   const runId = crypto.randomUUID();
   const seed = input.seed_artifacts ?? [];
@@ -278,14 +328,21 @@ export async function runRigorGate(input: RigorRunInput): Promise<RigorRunResult
   let hint = "";
   let lastEnvelope: ExecutorEnvelope | null = null;
   let lastPanel: PanelResult | null = null;
+  let lastLive = false; // liveness of the most recent attempt's executor
 
-  for (let attemptNo = 1; attemptNo <= MAX_ATTEMPTS; attemptNo++) {
+  for (let attemptNo = 1; attemptNo <= maxAttempts; attemptNo++) {
     const model = swapChain[Math.min(modelIdx, swapChain.length - 1)];
     const swapped = modelPath.length > 0 && modelPath[modelPath.length - 1] !== model.house_name;
     modelPath.push(model.house_name);
 
     const { envelope, live } = await nativeExecute(input, model, hint, seed);
-    if (!live) modeLive = false;
+    // Per-attempt liveness. The FINAL verdict's mode must reflect the WINNING
+    // attempt's executor, not a sticky "any attempt ever went dry" flag: an
+    // early attempt can dry-fall-back on a transient 503 and a later attempt can
+    // succeed live. Track the last attempt's liveness and pass THAT to finalize.
+    const attemptLive = live;
+    lastLive = live;
+    if (!live) modeLive = false; // retained only for legacy telemetry, not verdict
     const panel = await runPanel(envelope);
     lastEnvelope = envelope;
     lastPanel = panel;
@@ -313,7 +370,8 @@ export async function runRigorGate(input: RigorRunInput): Promise<RigorRunResult
         modelPath,
         executorPath: "native",
         scoreBefore,
-        modeLive,
+        // Verdict reflects THIS (winning) attempt's executor liveness.
+        modeLive: attemptLive,
       });
     }
 
@@ -322,10 +380,10 @@ export async function runRigorGate(input: RigorRunInput): Promise<RigorRunResult
     const correction = buildCorrection(panel);
     hint = correction.advice;
     consecutiveFails += 1;
-    if (consecutiveFails >= SWAP_AFTER && modelIdx < swapChain.length - 1) {
+    if (consecutiveFails >= swapAfter && modelIdx < swapChain.length - 1) {
       modelIdx += 1;
       consecutiveFails = 0;
-      hint += `\n\n[Escalating to a stronger model after ${SWAP_AFTER} failed attempts.]`;
+      hint += `\n\n[Escalating to a stronger model after ${swapAfter} failed attempts.]`;
     }
   }
 
@@ -342,7 +400,10 @@ export async function runRigorGate(input: RigorRunInput): Promise<RigorRunResult
     modelPath,
     executorPath: "native",
     scoreBefore,
-    modeLive,
+    // Verdict reflects the LAST attempt's executor liveness (an early transient
+    // dry-fallback must not force the whole run to UNVERIFIED if later attempts
+    // ran live). If the last attempt was dry → UNVERIFIED; else → ESCALATED.
+    modeLive: lastLive,
     forceEscalated: true,
     lastPanel,
   });
@@ -367,12 +428,36 @@ function finalize(args: {
   lastPanel?: PanelResult | null;
 }): RigorRunResult {
   const last = args.attempts[args.attempts.length - 1];
-  const passed = !args.forceEscalated && Boolean(last?.panel.pass);
   const scoreAfter = last?.panel.score ?? 0;
-  const escalated = !passed;
   const dedupModelPath = [...new Set(args.modelPath)];
+
+  // ── Fail-closed verdict ─────────────────────────────────────────────────────
+  // Integrity rule: the gate must never CERTIFY output it could not verify.
+  //   1. Executor dry (rate-limit/timeout/no-key)  → UNVERIFIED. The model never
+  //      produced the output; a dry echo passing the deterministic guardians is
+  //      NOT a real pass, and it is not a real reject either.
+  //   2. Last panel passed but was not fully verified (an LLM guardian fell back
+  //      to dry) → UNVERIFIED. We cannot stand behind a pass whose judge did not
+  //      actually run.
+  //   3. Passed AND verified AND executor live → PASS.
+  //   4. Otherwise (live, evaluated, guardians rejected to the cap) → ESCALATED.
+  const executorLive = args.modeLive;
+  const lastPanelPass = Boolean(last?.panel.pass);
+  const lastPanelVerified = Boolean(last?.panel.verified);
+  let verdict: RigorVerdict;
+  if (!executorLive) {
+    verdict = "UNVERIFIED";
+  } else if (!args.forceEscalated && lastPanelPass && lastPanelVerified) {
+    verdict = "PASS";
+  } else if (!args.forceEscalated && lastPanelPass && !lastPanelVerified) {
+    verdict = "UNVERIFIED";
+  } else {
+    verdict = "ESCALATED";
+  }
+  const passed = verdict === "PASS";
+  const escalated = verdict === "ESCALATED";
   return {
-    verdict: passed ? "PASS" : "ESCALATED",
+    verdict,
     run_id: args.runId,
     task_type: args.taskType,
     house_model: args.houseName,

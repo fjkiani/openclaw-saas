@@ -16,20 +16,30 @@
 import { z } from "zod";
 import type { ExecutorEnvelope, GuardianVerdict } from "../types.js";
 import { invokeWithFallback, type ModelRouteConfig } from "../../modelRouter.js";
+import { geminiJudge, geminiJudgeAvailable } from "../geminiJudge.js";
 import { logger } from "../../logger.js";
 
 const MIN_SCORE = Number(process.env.RIGOR_MIN_SCORE ?? "80");
+// Soft per-axis backstop: an axis below this is "broken on that dimension" and
+// fails regardless of overall. Set well below MIN_SCORE so terse-but-correct
+// answers (naturally low on inapplicable axes) are not false-rejected.
+const AXIS_FLOOR = Number(process.env.RIGOR_AXIS_FLOOR ?? "50");
 
 // Same free-tier ladder as judgePair.JUDGE_CHAIN (Groq 70B → OR keys 1-4).
 // RIGOR_GUARDIAN_MODEL can override the primary model id if set.
 function buildChain(): ModelRouteConfig[] {
   const override = (process.env.RIGOR_GUARDIAN_MODEL || "").trim();
+  // 2026-07: original free judge slugs (llama-3.3-70b:free, gpt-oss-120b:free) are
+  // all 404/delisted and no GROQ key exists → judge silently dry-fell-back on every
+  // call. Repointed to verified-working free nvidia nemotron models. Groq entry kept
+  // first but is auto-skipped when GROQ_API_KEY is unset (no-op today). Larger models
+  // first so the judge is the strongest available; smaller as rate-limit fallbacks.
   const chain: ModelRouteConfig[] = [
-    { id: "llama-3.3-70b-versatile", provider: "groq", apiKeyEnv: "GROQ_API_KEY", maxTokens: 512, timeoutMs: 20_000 },
-    { id: "meta-llama/llama-3.3-70b-instruct:free", provider: "openrouter", apiKeyEnv: "OPENROUTER_API_KEY", maxTokens: 512, timeoutMs: 55_000 },
-    { id: "openai/gpt-oss-120b:free", provider: "openrouter", apiKeyEnv: "OPENROUTER_API_KEY_2", maxTokens: 512, timeoutMs: 55_000 },
-    { id: "meta-llama/llama-3.3-70b-instruct:free", provider: "openrouter", apiKeyEnv: "OPENROUTER_API_KEY_3", maxTokens: 512, timeoutMs: 55_000 },
-    { id: "openai/gpt-oss-120b:free", provider: "openrouter", apiKeyEnv: "OPENROUTER_API_KEY_4", maxTokens: 512, timeoutMs: 55_000 },
+    { id: "llama-3.3-70b-versatile", provider: "groq", apiKeyEnv: "GROQ_API_KEY", maxTokens: 700, timeoutMs: 20_000 },
+    { id: "nvidia/nemotron-3-super-120b-a12b:free", provider: "openrouter", apiKeyEnv: "OPENROUTER_API_KEY", maxTokens: 700, timeoutMs: 90_000 },
+    { id: "nvidia/nemotron-3-ultra-550b-a55b:free", provider: "openrouter", apiKeyEnv: "OPENROUTER_API_KEY", maxTokens: 700, timeoutMs: 90_000 },
+    { id: "nvidia/nemotron-3-nano-30b-a3b:free", provider: "openrouter", apiKeyEnv: "OPENROUTER_API_KEY", maxTokens: 700, timeoutMs: 60_000 },
+    { id: "nvidia/nemotron-nano-9b-v2:free", provider: "openrouter", apiKeyEnv: "OPENROUTER_API_KEY", maxTokens: 700, timeoutMs: 60_000 },
   ];
   if (override) chain.unshift({ id: override, provider: "openrouter", apiKeyEnv: "OPENROUTER_API_KEY", maxTokens: 512, timeoutMs: 55_000 });
   return chain;
@@ -55,12 +65,22 @@ const RUBRIC_PROMPT = `You are a strict rigor auditor. Score the AI answer 0-100
 Then give an "overall" 0-100 (holistic, not a mean). Be harsh on slop: unbacked claims,
 vague hedging, or numbers that don't match artifacts should score low.
 
+IMPORTANT — do not penalize appropriate concision. Judge relative to what the TASK needs:
+- A correct, decisive short answer to a simple question (e.g. a yes/no with a brief reason,
+  or "no numeric claim is made here") is HIGH quality, not low.
+- If an axis does not apply to the task (e.g. methodological_completeness or actionability
+  for a factual yes/no), score that axis HIGH (>=80) to mean "no deficiency", never low.
+- Only score an axis low when the answer is genuinely deficient on that dimension (a claim
+  that SHOULD have an artifact but doesn't; a number that contradicts the artifact; real
+  hedging on a binary question). Missing detail that the task never required is NOT a defect.
+
 Output ONLY JSON:
 {"materiality":<0-100>,"numerical_grounding":<0-100>,"decisiveness":<0-100>,"methodological_completeness":<0-100>,"actionability":<0-100>,"overall":<0-100>,"reasoning":"<one sentence>"}`;
 
 function hasLlmKey(): boolean {
   return Boolean(
-    (process.env.GROQ_API_KEY || "").trim() ||
+    geminiJudgeAvailable() ||
+      (process.env.GROQ_API_KEY || "").trim() ||
       (process.env.OPENROUTER_API_KEY || "").trim() ||
       (process.env.OPENROUTER_API_KEY_2 || "").trim() ||
       (process.env.OPENROUTER_API_KEY_3 || "").trim() ||
@@ -97,18 +117,41 @@ export async function rubricGuardian(env: ExecutorEnvelope): Promise<GuardianVer
   }
 
   try {
-    const res = await invokeWithFallback<z.infer<typeof RubricSchema>>(
-      {
-        systemPrompt: RUBRIC_PROMPT,
-        userContent: serializeForJudge(env),
-        title: "Rigor Rubric Judge",
-        maxTokens: 512,
-        temperature: 0,
-      },
-      buildChain(),
-      { validator: (raw) => RubricSchema.parse(raw), routeChainId: "rigor-rubric", schemaType: "seo" },
-    );
-    const r = res.parsed;
+    // Primary judge: Google Gemini (independent rate-limit bucket + independent
+    // model family from the nvidia executors). Fall back to the nvidia OpenRouter
+    // chain only if Gemini is unavailable/errors. Either way we end with a
+    // validated RubricSchema `r` and a `modelUsed` label.
+    let r: z.infer<typeof RubricSchema>;
+    let modelUsed: string | undefined;
+    if (geminiJudgeAvailable()) {
+      try {
+        const g = await geminiJudge(
+          RUBRIC_PROMPT,
+          serializeForJudge(env),
+          (raw) => RubricSchema.parse(raw),
+          { maxOutputTokens: 4000, temperature: 0, timeoutMs: 40_000 },
+        );
+        r = g.parsed;
+        modelUsed = g.model_used;
+      } catch (gErr) {
+        logger.warn({ err: String(gErr) }, "[rigor.rubric] Gemini primary failed — falling back to nvidia chain");
+        const res = await invokeWithFallback<z.infer<typeof RubricSchema>>(
+          { systemPrompt: RUBRIC_PROMPT, userContent: serializeForJudge(env), title: "Rigor Rubric Judge", maxTokens: 700, temperature: 0 },
+          buildChain(),
+          { validator: (raw) => RubricSchema.parse(raw), routeChainId: "rigor-rubric", schemaType: "seo", retry: { max: 2, baseMs: 1000 } },
+        );
+        r = res.parsed;
+        modelUsed = res.model_used;
+      }
+    } else {
+      const res = await invokeWithFallback<z.infer<typeof RubricSchema>>(
+        { systemPrompt: RUBRIC_PROMPT, userContent: serializeForJudge(env), title: "Rigor Rubric Judge", maxTokens: 700, temperature: 0 },
+        buildChain(),
+        { validator: (raw) => RubricSchema.parse(raw), routeChainId: "rigor-rubric", schemaType: "seo", retry: { max: 2, baseMs: 1000 } },
+      );
+      r = res.parsed;
+      modelUsed = res.model_used;
+    }
     const axes = {
       materiality: r.materiality,
       numerical_grounding: r.numerical_grounding,
@@ -117,24 +160,40 @@ export async function rubricGuardian(env: ExecutorEnvelope): Promise<GuardianVer
       actionability: r.actionability,
     };
     const minAxis = Math.min(...Object.values(axes));
-    const failedAxes = Object.entries(axes)
-      .filter(([, v]) => v < MIN_SCORE)
+    // Gate rule (2026-07-25): overall >= MIN_SCORE (quality bar) AND every axis
+    // >= AXIS_FLOOR (a soft "not broken on any dimension" backstop).
+    //
+    // WHY NOT "every axis >= MIN_SCORE": that min-axis rule false-rejected terse-
+    // but-correct answers. A correct one-liner ("Yes, compatible with Node 20,
+    // verified against engines") scores ~96 overall but naturally low on
+    // methodological_completeness/actionability (there is no methodology to show
+    // for a yes/no), so a single inapplicable sub-80 axis failed the whole run.
+    // Live benchmark measured false-reject 0.54 from exactly this. The overall
+    // score already reflects the judge's holistic quality view; the axis floor
+    // only catches output that is genuinely broken on some dimension (<50),
+    // preserving 1.0 slop recall without punishing concision.
+    const axisFloor = AXIS_FLOOR;
+    const belowFloor = Object.entries(axes)
+      .filter(([, v]) => v < axisFloor)
       .map(([k, v]) => `${k}=${v}`);
-    const pass = r.overall >= MIN_SCORE && minAxis >= MIN_SCORE;
+    const pass = r.overall >= MIN_SCORE && minAxis >= axisFloor;
     return {
       guardian: "rubric",
       pass,
       reason: pass
-        ? `Rubric overall ${r.overall} ≥ ${MIN_SCORE}; all axes clear. ${r.reasoning}`
-        : `Rubric below threshold (overall ${r.overall}, failing axes: ${failedAxes.join(", ") || "none"}). ${r.reasoning}`,
+        ? `Rubric overall ${r.overall} ≥ ${MIN_SCORE}; no axis below floor ${axisFloor}. ${r.reasoning}`
+        : r.overall < MIN_SCORE
+          ? `Rubric overall ${r.overall} < ${MIN_SCORE}. ${r.reasoning}`
+          : `Rubric axis below floor ${axisFloor} (${belowFloor.join(", ")}) despite overall ${r.overall}. ${r.reasoning}`,
       evidence: [
         `overall=${r.overall}`,
+        `axis_floor=${axisFloor}`,
         ...Object.entries(axes).map(([k, v]) => `${k}=${v}`),
       ],
       severity: pass ? "low" : "high",
       score: Math.max(0, Math.min(1, r.overall / 100)),
       mode: "live",
-      detail: { axes, overall: r.overall, min_score: MIN_SCORE, model: res.model_used },
+      detail: { axes, overall: r.overall, min_score: MIN_SCORE, axis_floor: axisFloor, model: modelUsed },
     };
   } catch (err) {
     logger.warn({ err: String(err) }, "[rigor.rubric] LLM judge failed — honest dry fallback");

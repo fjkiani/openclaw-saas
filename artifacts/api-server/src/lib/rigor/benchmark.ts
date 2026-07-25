@@ -99,11 +99,16 @@ export interface BenchmarkMetrics {
   numerical_mismatch_catch_rate: number | null;
   latency_ms: { mean: number; p50: number; max: number };
   baseline_self_judge: ReturnType<typeof rates>;
+  // How many fixtures ran with EVERY guardian in live/deterministic mode (no dry
+  // LLM fallback). n_verified < n_fixtures means the run was quota-contaminated and
+  // its accuracy numbers must be discarded.
+  n_verified: number;
   per_fixture: Array<{
     id: string;
     mode: string;
     label: string;
     panel_pass: boolean;
+    verified: boolean;
     correct: boolean;
     score: number;
     failing: string[];
@@ -186,6 +191,7 @@ export async function runBenchmark(): Promise<BenchmarkMetrics> {
       mode: fx.mode,
       label: fx.label,
       panel_pass: panel.pass,
+      verified: panel.verified,
       correct,
       score: panel.score,
       failing: panel.verdicts.filter((v) => !v.pass).map((v) => v.guardian),
@@ -210,6 +216,7 @@ export async function runBenchmark(): Promise<BenchmarkMetrics> {
       max: sorted[sorted.length - 1] ?? 0,
     },
     baseline_self_judge: rates(baseline),
+    n_verified: perFixture.filter((f) => f.verified).length,
     per_fixture: perFixture,
   };
 }

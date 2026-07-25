@@ -15,6 +15,7 @@
 
 import type { ExecutorEnvelope, GuardianVerdict } from "../types.js";
 import { invokeWithFallback, type ModelRouteConfig } from "../../modelRouter.js";
+import { geminiJudge, geminiJudgeAvailable } from "../geminiJudge.js";
 import { z } from "zod";
 import { logger } from "../../logger.js";
 
@@ -72,10 +73,13 @@ function scanSignals(env: ExecutorEnvelope): HedgeSignals {
 }
 
 // LLM adjudication chain — same free-tier ladder as judgePair.
+// 2026-07: repointed off dead free slugs to working nvidia nemotron models
+// (see rubric.ts buildChain for rationale). maxTokens raised 256->500 so the
+// reasoning models leave room for the JSON verdict after their reasoning tokens.
 const HEDGE_CHAIN: ModelRouteConfig[] = [
-  { id: "llama-3.3-70b-versatile", provider: "groq", apiKeyEnv: "GROQ_API_KEY", maxTokens: 256, timeoutMs: 20_000 },
-  { id: "meta-llama/llama-3.3-70b-instruct:free", provider: "openrouter", apiKeyEnv: "OPENROUTER_API_KEY", maxTokens: 256, timeoutMs: 45_000 },
-  { id: "openai/gpt-oss-120b:free", provider: "openrouter", apiKeyEnv: "OPENROUTER_API_KEY_2", maxTokens: 256, timeoutMs: 45_000 },
+  { id: "llama-3.3-70b-versatile", provider: "groq", apiKeyEnv: "GROQ_API_KEY", maxTokens: 500, timeoutMs: 20_000 },
+  { id: "nvidia/nemotron-3-super-120b-a12b:free", provider: "openrouter", apiKeyEnv: "OPENROUTER_API_KEY", maxTokens: 500, timeoutMs: 60_000 },
+  { id: "nvidia/nemotron-3-nano-30b-a3b:free", provider: "openrouter", apiKeyEnv: "OPENROUTER_API_KEY", maxTokens: 500, timeoutMs: 60_000 },
 ];
 
 const HedgeJudgeSchema = z.object({
@@ -93,7 +97,8 @@ Output ONLY JSON: {"dodges_requirement": <true|false>, "reason": "<one sentence>
 
 function hasLlmKey(): boolean {
   return Boolean(
-    (process.env.GROQ_API_KEY || "").trim() ||
+    geminiJudgeAvailable() ||
+      (process.env.GROQ_API_KEY || "").trim() ||
       (process.env.OPENROUTER_API_KEY || "").trim() ||
       (process.env.OPENROUTER_API_KEY_2 || "").trim(),
   );
@@ -151,17 +156,30 @@ export async function hedgeGuardian(env: ExecutorEnvelope): Promise<GuardianVerd
   const borderline = hedgingOnBinary && sig.hedgePhrases.length === 1;
   if (borderline && hasLlmKey()) {
     try {
-      const res = await invokeWithFallback<z.infer<typeof HedgeJudgeSchema>>(
-        {
-          systemPrompt: HEDGE_JUDGE_PROMPT,
-          userContent: env.answer_text ?? "",
-          title: "Rigor Hedge Judge",
-          maxTokens: 256,
-          temperature: 0,
-        },
-        HEDGE_CHAIN,
-        { validator: (raw) => HedgeJudgeSchema.parse(raw), routeChainId: "rigor-hedge" },
-      );
+      // Primary: Gemini (independent model family + bucket). Fallback: nvidia chain.
+      let res: { parsed: z.infer<typeof HedgeJudgeSchema>; model_used?: string };
+      if (geminiJudgeAvailable()) {
+        try {
+          res = await geminiJudge(HEDGE_JUDGE_PROMPT, env.answer_text ?? "", (raw) => HedgeJudgeSchema.parse(raw), {
+            maxOutputTokens: 2000,
+            temperature: 0,
+            timeoutMs: 30_000,
+          });
+        } catch (gErr) {
+          logger.warn({ err: String(gErr) }, "[rigor.hedge] Gemini adjudication failed — nvidia fallback");
+          res = await invokeWithFallback<z.infer<typeof HedgeJudgeSchema>>(
+            { systemPrompt: HEDGE_JUDGE_PROMPT, userContent: env.answer_text ?? "", title: "Rigor Hedge Judge", maxTokens: 256, temperature: 0 },
+            HEDGE_CHAIN,
+            { validator: (raw) => HedgeJudgeSchema.parse(raw), routeChainId: "rigor-hedge", schemaType: "seo", retry: { max: 2, baseMs: 1000 } },
+          );
+        }
+      } else {
+        res = await invokeWithFallback<z.infer<typeof HedgeJudgeSchema>>(
+          { systemPrompt: HEDGE_JUDGE_PROMPT, userContent: env.answer_text ?? "", title: "Rigor Hedge Judge", maxTokens: 256, temperature: 0 },
+          HEDGE_CHAIN,
+          { validator: (raw) => HedgeJudgeSchema.parse(raw), routeChainId: "rigor-hedge", schemaType: "seo", retry: { max: 2, baseMs: 1000 } },
+        );
+      }
       if (res.parsed.dodges_requirement) {
         evidence.push(`LLM adjudication: ${res.parsed.reason}`);
         return {

@@ -149,6 +149,8 @@ async function handleRun(req: Request, res: Response, wrapperShape: boolean): Pr
     contract: body.contract && typeof body.contract === "object" ? body.contract : undefined,
     seed_artifacts: Array.isArray(body.seed_artifacts) ? body.seed_artifacts : undefined,
     force_native: body.force_native === true,
+    max_attempts: Number.isFinite(body.max_attempts) ? Number(body.max_attempts) : undefined,
+    swap_after: Number.isFinite(body.swap_after) ? Number(body.swap_after) : undefined,
   };
 
   try {
@@ -186,7 +188,8 @@ async function handleRun(req: Request, res: Response, wrapperShape: boolean): Pr
       res.json({ ok: true, result, capture });
     }
   } catch (err) {
-    logger.error({ err: String(err) }, "[rigor] run failed");
+    // Log the full stack server-side for diagnosis; do not leak it in the HTTP body.
+    logger.error({ err: String(err), stack: err instanceof Error ? err.stack : undefined }, "[rigor] run failed");
     res.status(500).json({ ok: false, error: String(err) });
   }
 }

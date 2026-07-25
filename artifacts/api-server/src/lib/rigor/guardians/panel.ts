@@ -50,6 +50,10 @@ export async function runPanel(
     verdicts.length > 0
       ? (verdicts.reduce((s, v) => s + v.score, 0) / verdicts.length) * 100
       : 0;
+  // "verified" only if no guardian fell back to dry mode. A dry LLM guardian
+  // means that axis was never actually evaluated, so the panel result cannot be
+  // treated as a trustworthy pass by the orchestrator.
+  const verified = verdicts.every((v) => v.mode !== "dry");
 
-  return { pass, score: Math.round(score * 100) / 100, verdicts };
+  return { pass, score: Math.round(score * 100) / 100, verdicts, verified };
 }

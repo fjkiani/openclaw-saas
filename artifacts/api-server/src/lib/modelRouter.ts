@@ -94,6 +94,12 @@ export interface InvokeOptions<T> {
   routeChainId?: string;
   /** "standard" | "premium" | "seo" — used by detectUnusableOutput. Defaults to "standard". */
   schemaType?: "standard" | "premium" | "seo";
+  /**
+   * Opt-in bounded retry-with-backoff on transient 429/timeout PER chain entry,
+   * before falling through to the next entry. Off by default so existing callers
+   * are unchanged. Used by the rigor gate against rate-limited free-tier models.
+   */
+  retry?: { max: number; baseMs: number };
 }
 
 // ── Provider config resolution ────────────────────────────────────────────────
@@ -201,32 +207,48 @@ export async function invokeWithFallback<T = unknown>(
       });
     };
 
-    let response: Response;
-    try {
-      response = await makeRequest(input.systemPrompt);
-    } catch (err: unknown) {
-      const isTimeout =
-        err instanceof Error &&
-        (err.name === "AbortError" || err.name === "TimeoutError");
-      attempt_log.push({
-        model_id: entry.id,
-        provider: entry.provider,
-        status: isTimeout ? "timeout" : "http_error",
-        latency_ms: Date.now() - t_entry,
-        error: err instanceof Error ? err.message : String(err),
-        repair_attempted: false,
-      });
-      if (i < chain.length - 1) { fallback_count++; continue; }
-      throw new RouterExhaustedError(attempt_log);
+    // Opt-in bounded retry on transient 429/timeout for THIS entry before we
+    // fall through to the next chain entry. Default (no opts.retry): single try,
+    // identical to prior behavior.
+    const retryMax = opts.retry ? Math.max(0, opts.retry.max) : 0;
+    const retryBase = opts.retry?.baseMs ?? 800;
+    let response: Response | null = null;
+    let transientErr: { kind: "timeout" | "http_error" | "rate_limited"; msg?: string } | null = null;
+    for (let r = 0; r <= retryMax; r++) {
+      if (r > 0) {
+        // Exponential backoff with light jitter: base * 2^(r-1) + [0,250)ms.
+        const delay = retryBase * 2 ** (r - 1) + Math.floor(Math.random() * 250);
+        await new Promise((res) => setTimeout(res, delay));
+      }
+      try {
+        const resp = await makeRequest(input.systemPrompt);
+        if (resp.status === 429) {
+          transientErr = { kind: "rate_limited" };
+          continue; // retry (or exhaust) on rate limit
+        }
+        response = resp;
+        transientErr = null;
+        break;
+      } catch (err: unknown) {
+        const isTimeout =
+          err instanceof Error &&
+          (err.name === "AbortError" || err.name === "TimeoutError");
+        transientErr = {
+          kind: isTimeout ? "timeout" : "http_error",
+          msg: err instanceof Error ? err.message : String(err),
+        };
+        if (!isTimeout) break; // non-timeout throw: don't retry, record below
+      }
     }
 
-    // ── 3. Rate-limited ───────────────────────────────────────────────────────
-    if (response.status === 429) {
+    if (!response) {
+      // All retries for this entry failed transiently → record and fall through.
       attempt_log.push({
         model_id: entry.id,
         provider: entry.provider,
-        status: "rate_limited",
+        status: transientErr?.kind ?? "http_error",
         latency_ms: Date.now() - t_entry,
+        error: transientErr?.msg,
         repair_attempted: false,
       });
       if (i < chain.length - 1) { fallback_count++; continue; }

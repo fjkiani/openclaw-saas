@@ -14,10 +14,16 @@ import { resolveApiKey } from "../resolveApiKey.js";
 import type { HouseModel } from "./types.js";
 
 // Ordered fast→frontier. Mirrors the ZIE seed; used as fallback + swap order.
+// NOTE (2026-07-25): remapped to models the live OpenRouter key can actually
+// reach. The prior slugs (liquid/lfm-2.5-1.2b:free, llama-3.3-70b:free,
+// gpt-oss-120b:free) were all 404 — either delisted or no longer free — and the
+// account has no paid credits, so every tier maps to a verified-working free
+// model. All four were probed live and returned real completions. They are
+// reasoning models (emit a `reasoning` field + final `content`).
 const DEFAULT_CATALOG: HouseModel[] = [
   {
     house_name: "zeta-rigor-fast",
-    openrouter_id: "liquid/lfm-2.5-1.2b-instruct:free",
+    openrouter_id: "nvidia/nemotron-nano-9b-v2:free",
     tier: "fast",
     paid: false,
     api_key_env: "OPENROUTER_API_KEY",
@@ -25,7 +31,7 @@ const DEFAULT_CATALOG: HouseModel[] = [
   },
   {
     house_name: "zeta-rigor-balanced",
-    openrouter_id: "meta-llama/llama-3.3-70b-instruct:free",
+    openrouter_id: "nvidia/nemotron-3-nano-30b-a3b:free",
     tier: "balanced",
     paid: false,
     api_key_env: "OPENROUTER_API_KEY",
@@ -33,7 +39,7 @@ const DEFAULT_CATALOG: HouseModel[] = [
   },
   {
     house_name: "zeta-rigor-max",
-    openrouter_id: "openai/gpt-oss-120b:free",
+    openrouter_id: "nvidia/nemotron-3-super-120b-a12b:free",
     tier: "max",
     paid: false,
     api_key_env: "OPENROUTER_API_KEY",
@@ -41,11 +47,11 @@ const DEFAULT_CATALOG: HouseModel[] = [
   },
   {
     house_name: "zeta-rigor-frontier",
-    openrouter_id: "openai/gpt-4o",
+    openrouter_id: "nvidia/nemotron-3-ultra-550b-a55b:free",
     tier: "frontier",
-    paid: true,
+    paid: false,
     api_key_env: "OPENROUTER_API_KEY",
-    description: "Paid frontier model; only surfaced when a key is present.",
+    description: "Largest available house model for the hardest gated tasks.",
   },
 ];
 

@@ -18,8 +18,14 @@ export function buildCorrection(panel: PanelResult): CorrectionPayload {
   // Pull failed SEARCH/REPLACE blocks out of the materiality detail, if present.
   const failed_edit_blocks: string[] = [];
   for (const v of failing) {
-    const sr = v.detail?.searchReplace as { failures?: string[] } | undefined;
-    if (sr?.failures) failed_edit_blocks.push(...sr.failures);
+    const sr = v.detail?.searchReplace as { failures?: unknown } | undefined;
+    // Guard against a truthy-but-non-array `failures` (e.g. under an exhausted /
+    // dry executor the detail can be a non-iterable). A bare `if (sr?.failures)`
+    // let a non-array through and `push(...nonIterable)` threw
+    // "Spread syntax requires ...iterable". (2026-07-25)
+    if (Array.isArray(sr?.failures)) {
+      failed_edit_blocks.push(...(sr.failures as string[]).filter((f) => typeof f === "string"));
+    }
   }
 
   const adviceLines: string[] = [

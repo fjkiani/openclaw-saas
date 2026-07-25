@@ -57,6 +57,14 @@ export interface PanelResult {
   /** 0..100 aggregate rigor score (mean of guardian sub-scores * 100). */
   score: number;
   verdicts: GuardianVerdict[];
+  /**
+   * True only if EVERY LLM-dependent guardian actually ran live (mode !== "dry").
+   * When false, the panel's pass/score are not fully trustworthy: an LLM axis
+   * could not be evaluated, so a "pass" here must NOT be certified by the
+   * orchestrator (it becomes UNVERIFIED). Deterministic-only guardians never
+   * make a panel unverified.
+   */
+  verified: boolean;
 }
 
 // ── Correction payload fed back to the executor on REJECT ─────────────────────
@@ -71,7 +79,14 @@ export interface CorrectionPayload {
 }
 
 // ── Orchestrator run result ───────────────────────────────────────────────────
-export type RigorVerdict = "PASS" | "ESCALATED";
+// PASS       — executor ran live AND every guardian passed (fully verified).
+// ESCALATED  — executor ran live, guardians rejected up to the attempt cap.
+// UNVERIFIED — the gate could NOT verify: the final envelope came from a dry
+//              executor (rate-limit/timeout/no-key), or the decisive verdict
+//              depended on an LLM guardian that could not run. NEVER a pass —
+//              a gate that cannot verify must not certify. Excluded from
+//              accuracy metrics (it is neither a true reject nor a real pass).
+export type RigorVerdict = "PASS" | "ESCALATED" | "UNVERIFIED";
 
 export interface RigorAttempt {
   attempt: number;

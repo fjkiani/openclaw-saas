@@ -220,7 +220,7 @@ def refine(req: RefineRequest) -> dict[str, Any]:
         api_key=key,
         api_base="https://openrouter.ai/api/v1",
         temperature=1.0,
-        max_tokens=1600,
+        max_tokens=4000,
         num_retries=2,
     )
     dspy.configure(lm=lm)
