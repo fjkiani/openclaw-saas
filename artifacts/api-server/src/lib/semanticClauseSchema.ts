@@ -246,10 +246,13 @@ export function classifyModelResponse(raw: string): ResponseClassification {
  */
 export function detectUnusableOutput(
   parsed: unknown,
-  schemaType: "standard" | "premium" | "seo",
+  schemaType: "standard" | "premium" | "seo" | "generic",
 ): string | null {
   // Non-legal schemas have their own validators — skip legal-specific field checks.
-  if (schemaType === "seo") return null;
+  // "generic" is for callers whose response shape is not a legal clause at all (for example the
+  // verification rubric judge, which returns {overall, axes}). Such callers must supply their own
+  // `validator`; applying the clause-field checks here would discard every valid response.
+  if (schemaType === "seo" || schemaType === "generic") return null;
   const p = parsed as Record<string, unknown>;
   if (!p.rationale_summary || String(p.rationale_summary).trim().length === 0)
     return "empty rationale_summary";

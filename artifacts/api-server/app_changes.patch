@@ -1,0 +1,52 @@
+--- a/src/lib/modelRouter.ts	2026-07-28 00:05:29.000000000 +0000
++++ b/src/lib/modelRouter.ts	2026-07-28 22:10:32.829779672 +0000
+@@ -92,8 +92,12 @@
+   validator?: (parsed: unknown) => T;
+   /** Passed through to result.route_chain_id. */
+   routeChainId?: string;
+-  /** "standard" | "premium" | "seo" — used by detectUnusableOutput. Defaults to "standard". */
+-  schemaType?: "standard" | "premium" | "seo";
++  /**
++   * Used by detectUnusableOutput. Defaults to "standard", which applies legal-clause field checks
++   * (rationale_summary / recommended_action). Non-clause callers must pass "generic" and supply a
++   * `validator`, otherwise every valid response is discarded as unusable.
++   */
++  schemaType?: "standard" | "premium" | "seo" | "generic";
+ }
+ 
+ // ── Provider config resolution ────────────────────────────────────────────────
+@@ -222,11 +226,16 @@
+ 
+     // ── 3. Rate-limited ───────────────────────────────────────────────────────
+     if (response.status === 429) {
++      // Capture the upstream explanation. A 429 can mean requests-per-minute, tokens-per-minute,
++      // tokens-per-day, or "add credits", and those need opposite responses: pace slower, wait for
++      // the daily reset, or change accounts. Recording only the status forces an operator to guess.
++      const limitBody = await response.text().catch(() => "");
+       attempt_log.push({
+         model_id: entry.id,
+         provider: entry.provider,
+         status: "rate_limited",
+         latency_ms: Date.now() - t_entry,
++        error: limitBody.slice(0, 400) || undefined,
+         repair_attempted: false,
+       });
+       if (i < chain.length - 1) { fallback_count++; continue; }
+--- a/src/lib/semanticClauseSchema.ts	2026-07-28 00:05:22.000000000 +0000
++++ b/src/lib/semanticClauseSchema.ts	2026-07-28 20:54:01.680099993 +0000
+@@ -246,10 +246,13 @@
+  */
+ export function detectUnusableOutput(
+   parsed: unknown,
+-  schemaType: "standard" | "premium" | "seo",
++  schemaType: "standard" | "premium" | "seo" | "generic",
+ ): string | null {
+   // Non-legal schemas have their own validators — skip legal-specific field checks.
+-  if (schemaType === "seo") return null;
++  // "generic" is for callers whose response shape is not a legal clause at all (for example the
++  // verification rubric judge, which returns {overall, axes}). Such callers must supply their own
++  // `validator`; applying the clause-field checks here would discard every valid response.
++  if (schemaType === "seo" || schemaType === "generic") return null;
+   const p = parsed as Record<string, unknown>;
+   if (!p.rationale_summary || String(p.rationale_summary).trim().length === 0)
+     return "empty rationale_summary";

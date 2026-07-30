@@ -52,19 +52,28 @@ export async function migrateLegalCorpus(): Promise<void> {
     `);
 
     // ── pgvector column for ANN search (Supabase has vector ext enabled) ────
-    await client.query(`CREATE EXTENSION IF NOT EXISTS vector`);
+    // pgvector may not be available (e.g. local dev Postgres without the extension,
+    // or Render free-tier Postgres). Wrap in try-catch so the migration can still
+    // seed the corpus — semantic retrieval will fall back to BM25-only.
+    try {
+      await client.query(`CREATE EXTENSION IF NOT EXISTS vector`);
+      await client.query(`
+        ALTER TABLE legal_corpus_chunks
+          ADD COLUMN IF NOT EXISTS embedding_vec vector(3072)
+      `);
+      logger.info("legalCorpus: pgvector extension available — semantic retrieval enabled");
+    } catch (vecErr) {
+      logger.warn(
+        { err: vecErr instanceof Error ? vecErr.message : String(vecErr) },
+        "legalCorpus: pgvector not available — semantic retrieval disabled, BM25-only fallback",
+      );
+    }
 
+    // Legacy embedding column (real[]) — always safe to add
     await client.query(`
       ALTER TABLE legal_corpus_chunks
         ADD COLUMN IF NOT EXISTS embedding real[]
     `);
-
-    await client.query(`
-      ALTER TABLE legal_corpus_chunks
-        ADD COLUMN IF NOT EXISTS embedding_vec vector(2048)
-    `);
-
-    // HNSW limited to 2000 dims on Supabase; skip ANN index for 2048-dim Nemotron.
 
     const ingestedCount = await client.query<{ n: number }>(
       `SELECT COUNT(*)::int AS n FROM legal_corpus_documents

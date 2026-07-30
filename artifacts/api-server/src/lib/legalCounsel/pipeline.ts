@@ -24,6 +24,8 @@ import { COFOUNDER_STATUTE_SLUGS } from "../legalCorpus/cofounderSlugs.js";
 import { runOrchestrator } from "./orchestrator.js";
 import { buildDealMemo, type DealMemo } from "./dealMemo.js";
 
+const GEMINI_OPENAI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
+
 const COUNSEL_CHAIN: ModelRouteConfig[] = [
   {
     id: "llama-3.3-70b-versatile",
@@ -34,28 +36,30 @@ const COUNSEL_CHAIN: ModelRouteConfig[] = [
     tags: ["70b", "counsel-groq"],
   },
   {
-    id: "openai/gpt-oss-120b:free",
-    provider: "openrouter",
-    apiKeyEnv: "OPENROUTER_API_KEY",
+    id: "openai/gpt-oss-120b",
+    provider: "groq",
+    apiKeyEnv: "GROQ_API_KEY",
     maxTokens: 4096,
     timeoutMs: 90_000,
-    tags: ["120b", "counsel-primary-or"],
+    tags: ["120b", "counsel-groq-120b"],
   },
   {
-    id: "meta-llama/llama-3.3-70b-instruct:free",
-    provider: "openrouter",
-    apiKeyEnv: "OPENROUTER_API_KEY_2",
+    id: "gemini-2.5-flash",
+    provider: "local",
+    apiKeyEnv: "GOOGLE_API_KEY",
+    baseUrl: GEMINI_OPENAI_ENDPOINT,
     maxTokens: 4096,
     timeoutMs: 55_000,
-    tags: ["70b", "counsel-or-k2"],
+    tags: ["gemini", "counsel-gemini"],
   },
   {
-    id: "openai/gpt-oss-20b:free",
-    provider: "openrouter",
-    apiKeyEnv: "OPENROUTER_API_KEY_2",
+    id: "gemini-2.5-flash-lite",
+    provider: "local",
+    apiKeyEnv: "GOOGLE_API_KEY",
+    baseUrl: GEMINI_OPENAI_ENDPOINT,
     maxTokens: 4096,
     timeoutMs: 55_000,
-    tags: ["20b", "counsel-last-resort"],
+    tags: ["gemini-lite", "counsel-last-resort"],
   },
 ];
 

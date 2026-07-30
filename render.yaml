@@ -3,8 +3,8 @@ services:
     name: openclaw-api
     runtime: node
     region: oregon
-    plan: starter
-    buildCommand: pnpm install --frozen-lockfile && pnpm run typecheck:libs && pnpm --filter @workspace/api-server run build
+    plan: free
+    buildCommand: NODE_ENV=development pnpm install --no-frozen-lockfile && pnpm run typecheck:libs && pnpm --filter @workspace/api-server run build
     startCommand: node artifacts/api-server/dist/index.mjs
     healthCheckPath: /api/healthz
     envVars:
@@ -16,55 +16,35 @@ services:
         fromDatabase:
           name: zeta-caid-prod
           property: connectionString
-      - key: CLERK_SECRET_KEY
+      - key: OPENCLAW_ADMIN_TOKEN
         sync: false
-      - key: SESSION_SECRET
-        generateValue: true
-      - key: RENDER_API_KEY
+      - key: GROQ_API_KEY
         sync: false
-      - key: RENDER_OWNER_ID
+      - key: GOOGLE_API_KEY
         sync: false
-      - key: BENCHMARK_SERVICE_URL
-        value: https://openclaw-benchmark.onrender.com
-      - key: BENCHMARK_GATE_ENABLED
+      - key: JUDGE_NO_CACHE
+        value: "1"
+      - key: MCP_BENCH_DRY_RUN
+        value: "0"
+      - key: LEGAL_CORPUS_BOOT_SEED
         value: "true"
-      - key: KAIROS_SERVICE_URL
-        value: https://openclaw-benchmark.onrender.com
-      - key: OPENROUTER_API_KEY
-        sync: false
-      - key: OPENROUTER_API_KEY_2
-        sync: false
-      - key: GOOGLE_AI_API_KEY
-        sync: false
       - key: DRY_RUN
-        value: "true"
-      - key: OPENCLAW_SERVICE_TOKEN
-        sync: false
-      # CORS: set to the exact URL of the openclaw-saas static site on Render
+        value: "false"
       - key: FRONTEND_URL
-        value: https://openclaw-lfky.onrender.com
+        sync: false
+      - key: CORS_ORIGIN
+        sync: false
 
   - type: web
     name: openclaw-saas
     runtime: static
     region: oregon
-    buildCommand: pnpm install --frozen-lockfile && pnpm --filter @workspace/openclaw-saas run build
+    plan: free
+    buildCommand: NODE_ENV=development pnpm install --no-frozen-lockfile && pnpm --filter @workspace/openclaw-saas run build
     staticPublishPath: artifacts/openclaw-saas/dist/public
     envVars:
-      - key: VITE_CLERK_PUBLISHABLE_KEY
-        sync: false
-      # Proxy URL must point to the actual deployed API service URL + /api/__clerk
-      # This tells ClerkProvider to route all FAPI calls through your own backend,
-      # which forwards them to Clerk with the correct Clerk-Proxy-Url header.
-      # IMPORTANT: replace the hostname below with your actual openclaw-api Render URL.
-      - key: VITE_CLERK_PROXY_URL
-        value: https://openclaw-api-b9wb.onrender.com/api/__clerk
       - key: VITE_API_URL
-        value: https://openclaw-api-b9wb.onrender.com
-      - key: VITE_ZOA_SERVICE_URL
-        value: https://openclaw-benchmark.onrender.com/api/v1/zoa
-      - key: VITE_ARCHON_FACTORY_URL
-        value: https://archon-factory.onrender.com
+        sync: false
     headers:
       - path: /*
         name: Cache-Control
@@ -73,46 +53,6 @@ services:
       - type: rewrite
         source: /*
         destination: /index.html
-
-  - type: web
-    name: openclaw-benchmark
-    runtime: python
-    region: oregon
-    plan: starter
-    buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
-    healthCheckPath: /health
-    rootDir: backend
-    envVars:
-      - key: OPENROUTER_API_KEY
-        sync: false
-      - key: DATABASE_URL
-        fromDatabase:
-          name: zeta-caid-prod
-          property: connectionString
-
-  - type: web
-    name: archon-factory
-    runtime: node
-    region: oregon
-    plan: starter
-    buildCommand: pnpm install && pnpm run build
-    startCommand: node dist/index.js
-    healthCheckPath: /health
-    rootDir: packages/archon-factory
-    envVars:
-      - key: NODE_ENV
-        value: production
-      - key: PORT
-        value: "3002"
-      - key: OPENROUTER_API_KEY
-        sync: false
-      - key: BENCHMARK_SERVICE_URL
-        value: https://openclaw-benchmark.onrender.com
-      - key: OPENCLAW_API_URL
-        value: https://openclaw-api-b9wb.onrender.com
-      - key: ARCHON_SERVICE_URL
-        value: https://archon-zeta.onrender.com
 
 databases:
   - name: zeta-caid-prod

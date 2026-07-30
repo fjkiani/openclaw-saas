@@ -21,6 +21,7 @@ import ForgeWorkspacePage from "@/pages/forge/workspace";
 import VerticalPickerPage from "@/pages/onboarding/vertical-picker";
 import SetupPage from "@/pages/onboarding/setup";
 import StartupCounselPage from "@/pages/startup-counsel";
+import RigorGatePage from "@/pages/rigor-gate";
 
 const queryClient = new QueryClient();
 
@@ -235,6 +236,7 @@ function AppRoutes() {
         <Route path="/onboarding"><ProtectedRoute component={VerticalPickerPage} /></Route>
         <Route path="/onboarding/setup"><ProtectedRoute component={SetupPage} /></Route>
         <Route path="/startup-counsel"><ProtectedRoute component={StartupCounselPage} /></Route>
+        <Route path="/rigor-gate"><ProtectedRoute component={RigorGatePage} /></Route>
         <Route component={NotFound} />
       </Switch>
     </QueryClientProvider>

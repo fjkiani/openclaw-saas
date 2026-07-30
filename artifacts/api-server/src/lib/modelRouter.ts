@@ -24,6 +24,20 @@ import {
 } from "./semanticClauseSchema.js";
 import { resolveApiKey } from "./resolveApiKey.js";
 
+// Lazy logger import to avoid circular dependency at module load time.
+let _logger: { warn?: (obj: unknown, msg: string) => void; info?: (obj: unknown, msg: string) => void } | null = null;
+async function getLogger() {
+  if (!_logger) {
+    try {
+      const mod = await import("./logger.js");
+      _logger = mod.logger;
+    } catch {
+      _logger = { warn: () => {}, info: () => {} };
+    }
+  }
+  return _logger;
+}
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export type ProviderId = "groq" | "openrouter" | "local";
@@ -92,8 +106,12 @@ export interface InvokeOptions<T> {
   validator?: (parsed: unknown) => T;
   /** Passed through to result.route_chain_id. */
   routeChainId?: string;
-  /** "standard" | "premium" | "seo" — used by detectUnusableOutput. Defaults to "standard". */
-  schemaType?: "standard" | "premium" | "seo";
+  /**
+   * Used by detectUnusableOutput. Defaults to "standard", which applies legal-clause field checks
+   * (rationale_summary / recommended_action). Non-clause callers must pass "generic" and supply a
+   * `validator`, otherwise every valid response is discarded as unusable.
+   */
+  schemaType?: "standard" | "premium" | "seo" | "generic";
 }
 
 // ── Provider config resolution ────────────────────────────────────────────────
@@ -201,6 +219,7 @@ export async function invokeWithFallback<T = unknown>(
       });
     };
 
+    let repairAttempted = false;
     let response: Response;
     try {
       response = await makeRequest(input.systemPrompt);
@@ -220,14 +239,97 @@ export async function invokeWithFallback<T = unknown>(
       throw new RouterExhaustedError(attempt_log);
     }
 
-    // ── 3. Rate-limited ───────────────────────────────────────────────────────
+    // ── 3. Rate-limited (with one retry-after-delay) ──────────────────────────
     if (response.status === 429) {
+      // Capture the upstream explanation. A 429 can mean requests-per-minute, tokens-per-minute,
+      // tokens-per-day, or "add credits", and those need opposite responses: pace slower, wait for
+      // the daily reset, or change accounts. Recording only the status forces an operator to guess.
+      const limitBody = await response.text().catch(() => "");
+
+      // Retry once after a short delay for transient rate limits (TPM/RPM).
+      // Parse "try again in Xs" from Groq, or use Retry-After header, or default 10s.
+      // Only retry if we haven't already retried this entry.
+      if (!repairAttempted) {
+        const retryAfterMatch = limitBody.match(/try again in ([\d.]+)s/i);
+        const retryAfterHeader = response.headers.get("Retry-After");
+        const waitSec = retryAfterMatch
+          ? Math.ceil(parseFloat(retryAfterMatch[1]))
+          : retryAfterHeader
+            ? parseInt(retryAfterHeader, 10)
+            : 10;
+        const cappedWait = Math.min(waitSec, 15); // cap at 15s to avoid long hangs
+        const lg = await getLogger();
+        lg?.warn?.(
+          { model_id: entry.id, provider: entry.provider, wait_s: cappedWait },
+          "modelRouter: 429 rate-limited, retrying after delay",
+        );
+        await new Promise((r) => setTimeout(r, cappedWait * 1000));
+        repairAttempted = true;
+        try {
+          response = await makeRequest(input.systemPrompt);
+          if (response.ok) {
+            // Retry succeeded — fall through to normal processing below
+            const retryData = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
+            const retryRaw = retryData.choices?.[0]?.message?.content ?? "";
+            const retryClass = classifyModelResponse(retryRaw);
+            if (retryClass.kind === "valid_json") {
+              const retryParsed = (retryClass as { kind: "valid_json"; parsed: unknown }).parsed;
+              const retryUnusable = detectUnusableOutput(retryParsed, schemaType);
+              if (retryUnusable === null) {
+                let retryValidated: T;
+                if (validator) {
+                  try {
+                    retryValidated = validator(retryParsed);
+                  } catch {
+                    // schema failed on retry — log and fall through to skip
+                    attempt_log.push({
+                      model_id: entry.id,
+                      provider: entry.provider,
+                      status: "schema_error",
+                      latency_ms: Date.now() - t_entry,
+                      error: "schema validation failed after 429 retry",
+                      repair_attempted: true,
+                    });
+                    if (i < chain.length - 1) { fallback_count++; continue; }
+                    throw new RouterExhaustedError(attempt_log);
+                  }
+                } else {
+                  retryValidated = retryParsed as T;
+                }
+                attempt_log.push({
+                  model_id: entry.id,
+                  provider: entry.provider,
+                  status: "success",
+                  latency_ms: Date.now() - t_entry,
+                  repair_attempted: true,
+                });
+                return {
+                  parsed: retryValidated,
+                  raw: retryRaw,
+                  model_used: entry.id,
+                  provider_used: entry.provider,
+                  fallback_used: fallback_count > 0,
+                  fallback_count,
+                  latency_ms: Date.now() - t_total,
+                  attempt_log,
+                  route_chain_id: routeChainId,
+                };
+              }
+            }
+          }
+          // Retry also got 429 or failed — record and skip
+        } catch (retryErr: unknown) {
+          // retry fetch failed — record and skip
+        }
+      }
+
       attempt_log.push({
         model_id: entry.id,
         provider: entry.provider,
         status: "rate_limited",
         latency_ms: Date.now() - t_entry,
-        repair_attempted: false,
+        error: limitBody.slice(0, 400) || undefined,
+        repair_attempted: repairAttempted,
       });
       if (i < chain.length - 1) { fallback_count++; continue; }
       throw new RouterExhaustedError(attempt_log);
@@ -268,7 +370,6 @@ export async function invokeWithFallback<T = unknown>(
     }
 
     // ── 7. Empty / partial JSON — repair attempt ──────────────────────────────
-    let repairAttempted = false;
     if (classification.kind === "empty" || classification.kind === "partial_json") {
       repairAttempted = true;
       try {

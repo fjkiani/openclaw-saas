@@ -6,14 +6,17 @@
  */
 
 import { z } from "zod";
-import { invokeWithFallback, type ModelRouteConfig } from "../../modelRouter.js";
+import { invokeWithFallback, RouterExhaustedError, type ModelRouteConfig } from "../../modelRouter.js";
+import { logger } from "../../logger.js";
 import type { LensInput, LensOutput } from "../types.js";
+
+const GEMINI_OPENAI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
 
 const COUNSEL_CHAIN: ModelRouteConfig[] = [
   { id: "llama-3.3-70b-versatile", provider: "groq", apiKeyEnv: "GROQ_API_KEY", maxTokens: 2048, timeoutMs: 35_000 },
-  { id: "openai/gpt-oss-120b:free", provider: "openrouter", apiKeyEnv: "OPENROUTER_API_KEY", maxTokens: 2048, timeoutMs: 90_000 },
-  { id: "meta-llama/llama-3.3-70b-instruct:free", provider: "openrouter", apiKeyEnv: "OPENROUTER_API_KEY_2", maxTokens: 2048, timeoutMs: 55_000 },
-  { id: "openai/gpt-oss-20b:free", provider: "openrouter", apiKeyEnv: "OPENROUTER_API_KEY_2", maxTokens: 2048, timeoutMs: 55_000 },
+  { id: "openai/gpt-oss-120b", provider: "groq", apiKeyEnv: "GROQ_API_KEY", maxTokens: 2048, timeoutMs: 90_000 },
+  { id: "gemini-2.5-flash", provider: "local", apiKeyEnv: "GOOGLE_API_KEY", baseUrl: GEMINI_OPENAI_ENDPOINT, maxTokens: 2048, timeoutMs: 55_000 },
+  { id: "gemini-2.5-flash-lite", provider: "local", apiKeyEnv: "GOOGLE_API_KEY", baseUrl: GEMINI_OPENAI_ENDPOINT, maxTokens: 2048, timeoutMs: 55_000 },
 ];
 
 const SYSTEM_PROMPT = `You are a tax and securities specialist reviewing a startup agreement.
@@ -56,17 +59,17 @@ const LensOutputSchema = z.object({
     lens: z.literal("tax_securities"),
     severity: z.enum(["critical", "high", "medium", "low", "info"]),
     issue: z.string().min(5),
-    chunk_id: z.number().int().optional(),
-    slug: z.string().optional(),
-    corpus_excerpt: z.string().optional(),
-    contract_excerpt: z.string().optional(),
-    recommendation: z.string().min(5),
-    is_inferred: z.boolean().optional(),
-    inferred_reason: z.string().optional(),
+    chunk_id: z.number().int().nullish(),
+    slug: z.string().nullish(),
+    corpus_excerpt: z.string().nullish(),
+    contract_excerpt: z.string().nullish(),
+    recommendation: z.string().min(5).nullable().or(z.literal("").transform(() => "See recommendation above")),
+    is_inferred: z.boolean().nullish(),
+    inferred_reason: z.string().nullish(),
   })).default([]),
   redlines: z.array(z.object({
     section: z.string(),
-    original_excerpt: z.string(),
+    original_excerpt: z.string().nullish(),
     suggested_text: z.string(),
     rationale: z.string(),
     favors: z.enum(["company", "balanced", "counterparty"]),
@@ -118,7 +121,12 @@ export async function runTaxSecuritiesLens(input: LensInput): Promise<LensOutput
       model_used: result.model_used,
       latency_ms: Date.now() - t0,
     };
-  } catch {
+  } catch (err: unknown) {
+    const attempts = err instanceof RouterExhaustedError ? err.attempt_log : [];
+    logger.error(
+      { lens: "tax_securities", err: err instanceof Error ? err.message : String(err), attempts },
+      "taxSecuritiesLens: all models exhausted",
+    );
     return { lens: "tax_securities", findings: [], redlines: [], opportunities: [], model_used: "failed", latency_ms: Date.now() - t0 };
   }
 }
