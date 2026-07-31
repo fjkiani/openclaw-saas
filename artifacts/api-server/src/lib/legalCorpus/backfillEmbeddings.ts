@@ -1,6 +1,6 @@
 import { pool } from "@workspace/db";
 import { logger } from "../logger.js";
-import { embedTextWithRetry } from "./embeddings.js";
+import { embedTextWithRetry, embedBatchWithRetry } from "./embeddings.js";
 import {
   ensureCollection,
   upsertPoints,
@@ -27,10 +27,13 @@ export interface EmbedBackfillResult {
  * for which points already exist.
  */
 export async function backfillLegalCorpusEmbeddings(
-  opts: { maxChunks?: number; delayMs?: number } = {},
+  opts: { maxChunks?: number; delayMs?: number; batchSize?: number } = {},
 ): Promise<EmbedBackfillResult> {
   const maxChunks = opts.maxChunks ?? 500;
   const delayMs = opts.delayMs ?? 400;
+  // Texts per batchEmbedContents request (Gemini caps at 100). Larger batches
+  // mean far fewer rate-limited requests on long backfills.
+  const batchSize = Math.min(Math.max(opts.batchSize ?? 100, 1), 100);
 
   if (process.env.LEGAL_EMBED_DISABLE === "true") {
     return { updated: 0, remaining: 0, stopped_early: false };
@@ -97,22 +100,13 @@ export async function backfillLegalCorpusEmbeddings(
     let failed = 0;
     let stoppedEarly = false;
 
+    // Cap the work to maxChunks up front so batching respects the same limit.
+    const work = toEmbed.slice(0, maxChunks);
+    stoppedEarly = toEmbed.length > work.length;
+
     const points: QdrantPoint[] = [];
-    for (const row of toEmbed) {
-      if (totalUpdated >= maxChunks) {
-        stoppedEarly = true;
-        break;
-      }
 
-      // Retry with backoff; skip only after all attempts fail so one bad chunk
-      // (or a transient rate limit) does not halt the entire backfill.
-      const vec = await embedTextWithRetry(row.content);
-      if (!vec) {
-        failed++;
-        logger.warn({ documentId: row.document_id, chunkIndex: row.chunk_index }, "legalCorpus: backfill — chunk embed failed after retries, skipping");
-        continue;
-      }
-
+    const pushPoint = (row: (typeof work)[number], vec: number[]): void => {
       const pointId = row.document_id * 10000 + row.chunk_index;
       points.push({
         id: pointId,
@@ -129,16 +123,59 @@ export async function backfillLegalCorpusEmbeddings(
           content: row.content,
         },
       });
+    };
 
-      totalUpdated++;
+    // Process in batches of `batchSize` texts per API request. Batching cuts
+    // the number of rate-limited requests ~100x vs one request per chunk.
+    for (let i = 0; i < work.length; i += batchSize) {
+      const slice = work.slice(i, i + batchSize);
+      const vecs = await embedBatchWithRetry(slice.map((r: (typeof work)[number]) => r.content));
 
-      if (delayMs > 0) {
+      if (vecs) {
+        for (let j = 0; j < slice.length; j++) {
+          const vec = vecs[j];
+          if (vec) {
+            pushPoint(slice[j], vec);
+            totalUpdated++;
+          } else {
+            // Per-text failure inside a successful batch: fall back to single.
+            const single = await embedTextWithRetry(slice[j].content);
+            if (single) {
+              pushPoint(slice[j], single);
+              totalUpdated++;
+            } else {
+              failed++;
+              logger.warn({ documentId: slice[j].document_id, chunkIndex: slice[j].chunk_index }, "legalCorpus: backfill — chunk embed failed after batch+single retries, skipping");
+            }
+          }
+        }
+      } else {
+        // Whole-batch request failed after retries: fall back to per-chunk
+        // single embeds so one bad batch does not lose the whole slice.
+        logger.warn({ batchStart: i, count: slice.length }, "legalCorpus: backfill — batch failed, falling back to single embeds");
+        for (const row of slice) {
+          const vec = await embedTextWithRetry(row.content);
+          if (vec) {
+            pushPoint(row, vec);
+            totalUpdated++;
+          } else {
+            failed++;
+          }
+          if (delayMs > 0) {
+            await new Promise((r) => setTimeout(r, delayMs));
+          }
+        }
+      }
+
+      // Upsert incrementally per batch so progress is durable even if the
+      // request is later interrupted (free-tier request timeouts).
+      if (points.length > 0) {
+        await upsertPoints(LEGAL_CORPUS_COLLECTION, points.splice(0, points.length));
+      }
+
+      if (delayMs > 0 && i + batchSize < work.length) {
         await new Promise((r) => setTimeout(r, delayMs));
       }
-    }
-
-    if (points.length > 0) {
-      await upsertPoints(LEGAL_CORPUS_COLLECTION, points);
     }
 
     const remaining = toEmbed.length - totalUpdated - failed;

@@ -76,6 +76,71 @@ export async function embedTextWithRetry(
   return null;
 }
 
+/**
+ * Embed a batch of texts in a single API call via Gemini's batchEmbedContents.
+ * Up to 100 texts per request — drastically fewer HTTP requests than one
+ * embedContent call per chunk, which matters because the free-tier rate limit
+ * (HTTP 429) is per-request: fewer requests = fewer 429 stalls on long
+ * backfills. Returns an array the same length as `texts`; each element is the
+ * 3072-dim vector or null if that text failed. Returns null for the whole
+ * array on request-level failure so callers can fall back / retry.
+ */
+export async function embedBatch(texts: string[]): Promise<(number[] | null)[] | null> {
+  const apiKey = resolveApiKey("GOOGLE_API_KEY");
+  if (!apiKey) return null;
+  if (texts.length === 0) return [];
+  // Gemini batchEmbedContents caps at 100 requests per call.
+  const batch = texts.slice(0, 100).map((t) => ({
+    model: `models/${EMBED_MODEL}`,
+    content: { parts: [{ text: t.slice(0, 8192) }] },
+    taskType: "RETRIEVAL_DOCUMENT",
+  }));
+  try {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${EMBED_MODEL}:batchEmbedContents?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ requests: batch }),
+        signal: AbortSignal.timeout(60_000),
+      },
+    );
+    if (!res.ok) {
+      logger.warn({ status: res.status, count: batch.length }, "legalCorpus embedBatch: API error");
+      return null;
+    }
+    const data = (await res.json()) as { embeddings?: { values?: number[] }[] };
+    const embs = data.embeddings;
+    if (!embs?.length) return null;
+    return embs.map((e) => (e?.values?.length ? e.values : null));
+  } catch (err: unknown) {
+    logger.warn({ err }, "legalCorpus embedBatch: failed");
+    return null;
+  }
+}
+
+/**
+ * Batch embed with exponential-backoff retry on transient request-level
+ * failure. Returns an array aligned to `texts` (null per failed text), or
+ * null if every attempt failed at the request level.
+ */
+export async function embedBatchWithRetry(
+  texts: string[],
+  opts: { maxAttempts?: number; baseDelayMs?: number } = {},
+): Promise<(number[] | null)[] | null> {
+  const maxAttempts = opts.maxAttempts ?? 6;
+  const baseDelayMs = opts.baseDelayMs ?? 1000;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const out = await embedBatch(texts);
+    if (out) return out;
+    const delay = baseDelayMs * Math.pow(2, attempt) + Math.floor(Math.random() * 500);
+    logger.warn({ attempt: attempt + 1, maxAttempts, delayMs: delay, count: texts.length }, "legalCorpus embedBatch: retrying after failure");
+    await new Promise((r) => setTimeout(r, delay));
+  }
+  logger.error({ maxAttempts, count: texts.length }, "legalCorpus embedBatch: all retry attempts failed");
+  return null;
+}
+
 export function cosineSimilarity(a: number[], b: number[]): number {
   if (a.length !== b.length || a.length === 0) return 0;
   let dot = 0;

@@ -93,7 +93,21 @@ router.post("/v1/legal/kb/embed-backfill", async (req: Request, res: Response): 
     }
   }
 
-  const result = await backfillLegalCorpusEmbeddings({ maxChunks: 500, delayMs: 400 });
+  // Optional tuning from the front-end / API caller. Defaults match the MCP
+  // legal_corpus_backfill tool so both surfaces drive the same capability.
+  const BodySchema = z.object({
+    max_chunks: z.number().int().min(1).max(5000).optional(),
+    delay_ms: z.number().int().min(0).max(5000).optional(),
+    batch_size: z.number().int().min(1).max(100).optional(),
+  });
+  const body = BodySchema.safeParse(req.body ?? {});
+  const params = body.success ? body.data : {};
+
+  const result = await backfillLegalCorpusEmbeddings({
+    maxChunks: params.max_chunks ?? 500,
+    delayMs: params.delay_ms ?? 400,
+    batchSize: params.batch_size ?? 100,
+  });
   const status = await legalCorpusStatus();
 
   res.json({
@@ -126,7 +140,13 @@ router.post("/v1/legal/kb/ingest", async (req: Request, res: Response): Promise<
     return;
   }
 
-  const doc = await ingestLegalDocument(parsed.data);
+  // ingestLegalDocument persists priority as "critical" | "normal"; map the
+  // route's broader enum down so the types line up (high/medium -> normal).
+  const { priority, ...rest } = parsed.data;
+  const doc = await ingestLegalDocument({
+    ...rest,
+    priority: priority === "critical" ? "critical" : "normal",
+  });
   res.status(201).json({ ok: true, ...doc });
 });
 
