@@ -11,6 +11,7 @@
  * Tools exposed (all backed by real subsystems — no stubs):
  *   legal_corpus_search      — hybrid BM25 + Qdrant semantic retrieval
  *   legal_corpus_stats       — corpus + vector-store statistics
+ *   legal_corpus_backfill    — embed pending chunks into the vector store (resumable)
  *   contract_analyze         — run the legal-counsel lens pipeline on contract text
  *   workflow_list            — list registered workflow definitions
  *   workflow_run             — execute a workflow definition
@@ -89,6 +90,25 @@ export function createOpenClawMcpServer(): McpServer {
         by_source: bySource.rows,
         qdrant: qdrant ? { collection: LEGAL_CORPUS_COLLECTION, points: qdrant.points_count, dims: qdrant.dims } : null,
       });
+    },
+  );
+
+  // ── legal_corpus_backfill ────────────────────────────────────────────────
+  server.registerTool(
+    "legal_corpus_backfill",
+    {
+      description:
+        "Backfill legal-corpus chunk embeddings into the Qdrant vector store. Reads chunks from Postgres, embeds them with retry/backoff, and upserts vectors. Resumable: skips chunks already vectorized. Use to complete semantic-search coverage.",
+      inputSchema: {
+        max_chunks: z.number().int().min(1).max(5000).optional().describe("Max chunks to embed this call (default 500)"),
+        delay_ms: z.number().int().min(0).max(5000).optional().describe("Delay between embed calls in ms (default 400, respects rate limits)"),
+      },
+    },
+    async ({ max_chunks, delay_ms }) => {
+      const { backfillLegalCorpusEmbeddings } = await import("../legalCorpus/backfillEmbeddings.js");
+      const result = await backfillLegalCorpusEmbeddings({ maxChunks: max_chunks ?? 500, delayMs: delay_ms ?? 400 });
+      const qdrant = await collectionInfo(LEGAL_CORPUS_COLLECTION);
+      return text({ ...result, qdrant_points: qdrant?.points_count ?? null });
     },
   );
 
