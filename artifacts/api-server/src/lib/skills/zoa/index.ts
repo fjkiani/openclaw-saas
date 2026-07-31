@@ -12,239 +12,140 @@
  *   zoa-procurement  — purchase orders, vendor negotiations
  *   zoa-compliance   — regulatory monitoring, compliance reports
  *
- * SIMULATION NOTICE: These handlers are simulated — they do not connect to
- * real billing/payroll/HR/procurement/compliance systems. They validate
- * inputs and return plausible structured output for workflow demonstration.
- * Each output includes `simulated: true` to make this explicit.
- * To make a skill production-ready, replace the handler with a real API
- * integration (e.g., Stripe for billing, Gusto for payroll, etc.).
+ * NO-FABRICATION POLICY: these handlers never invent numbers. Each requires a
+ * real upstream connector (configured via env). If the connector is not
+ * configured, the handler returns an honest "not connected" result describing
+ * exactly what to configure — the same contract as the Crunchbase connector,
+ * which throws instead of returning mock data. There is no simulated fallback.
+ *
+ * To make a skill live, set its connector env var and implement the upstream
+ * call (e.g. Stripe for billing, Gusto for payroll, Google Calendar for
+ * scheduling, etc.). Until then the skill reports not-connected truthfully.
  */
 
 import { workflowEngine, type SkillHandler, type WorkflowRunContext } from "../../workflowEngine.js";
 import { logger } from "../../logger.js";
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Skill 1: zoa-billing
-// Input:  { invoice_ids?: string[], tenant_id?: string, date_range?: { from: string, to: string } }
-// Output: { processed: number, reconciled: number, disputes: number, total_amount_usd: number }
-// ─────────────────────────────────────────────────────────────────────────────
+interface ConnectorSpec {
+  /** Env var that, when set, enables the real upstream integration. */
+  envVar: string;
+  /** Human-readable name of the upstream system the connector targets. */
+  system: string;
+  /** Example integration for docs/error messages. */
+  example: string;
+}
 
-const zoaBilling: SkillHandler = async (
+/**
+ * Build an honest not-connected result. Returned whenever the upstream
+ * connector is not configured. Contains no fabricated metrics — only the
+ * validated input echo and what is required to go live.
+ */
+function notConnected(
+  skillId: string,
+  spec: ConnectorSpec,
   input: Record<string, unknown>,
   ctx: WorkflowRunContext,
-): Promise<Record<string, unknown>> => {
-  logger.info({ runId: ctx.runId, stepIndex: ctx.stepIndex }, "[zoa-billing] Processing invoices");
-
-  const invoiceIds = (input.invoice_ids as string[] | undefined) ?? [];
-  const count = invoiceIds.length || 5; // default demo batch
-
-  // Simulate processing
-  const processed = count;
-  const reconciled = Math.floor(count * 0.9);
-  const disputes = count - reconciled;
-  const totalAmount = Math.round(count * 1250.75 * 100) / 100;
-
+): Record<string, unknown> {
   return {
-    processed,
-    reconciled,
-    disputes,
-    total_amount_usd: totalAmount,
-    summary: `Processed ${processed} invoices: ${reconciled} reconciled, ${disputes} flagged for dispute`,
+    status: "not_connected",
+    error: `${skillId} is not connected to a real ${spec.system}. Set ${spec.envVar} to enable it (e.g. ${spec.example}). No mock data is provided.`,
+    skill: skillId,
+    required_connector: spec.envVar,
+    system: spec.system,
+    received_input: input,
     run_id: ctx.runId,
-    simulated: true,
+    simulated: false,
   };
-};
+}
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Skill 2: zoa-scheduling
-// Input:  { attendees?: string[], duration_minutes?: number, preferred_slots?: string[] }
-// Output: { scheduled: number, conflicts: number, proposed_slots: string[] }
-// ─────────────────────────────────────────────────────────────────────────────
-
-const zoaScheduling: SkillHandler = async (
+/**
+ * Guard: return a not-connected result when the connector env var is unset,
+ * otherwise null (caller proceeds to the real integration).
+ */
+function requireConnector(
+  skillId: string,
+  spec: ConnectorSpec,
   input: Record<string, unknown>,
   ctx: WorkflowRunContext,
-): Promise<Record<string, unknown>> => {
-  logger.info({ runId: ctx.runId, stepIndex: ctx.stepIndex }, "[zoa-scheduling] Coordinating schedules");
-
-  const attendees = (input.attendees as string[] | undefined) ?? ["user@example.com"];
-  const duration = Number(input.duration_minutes ?? 60);
-
-  const now = new Date();
-  const proposedSlots = [1, 2, 3].map((d) => {
-    const slot = new Date(now);
-    slot.setDate(slot.getDate() + d);
-    slot.setHours(10, 0, 0, 0);
-    return slot.toISOString();
-  });
-
-  return {
-    scheduled: 1,
-    conflicts: 0,
-    proposed_slots: proposedSlots,
-    attendee_count: attendees.length,
-    duration_minutes: duration,
-    summary: `Found ${proposedSlots.length} available slots for ${attendees.length} attendee(s)`,
-    run_id: ctx.runId,
-    simulated: true,
-  };
-};
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Skill 3: zoa-payroll
-// Input:  { employee_ids?: string[], pay_period?: string }
-// Output: { employees_processed: number, total_gross_usd: number, total_net_usd: number, tax_withheld_usd: number }
-// ─────────────────────────────────────────────────────────────────────────────
-
-const zoaPayroll: SkillHandler = async (
-  input: Record<string, unknown>,
-  ctx: WorkflowRunContext,
-): Promise<Record<string, unknown>> => {
-  logger.info({ runId: ctx.runId, stepIndex: ctx.stepIndex }, "[zoa-payroll] Running payroll");
-
-  const employeeIds = (input.employee_ids as string[] | undefined) ?? [];
-  const count = employeeIds.length || 12; // default demo headcount
-  const payPeriod = String(input.pay_period ?? new Date().toISOString().slice(0, 7));
-
-  const avgSalary = 6250; // monthly
-  const totalGross = count * avgSalary;
-  const taxRate = 0.28;
-  const taxWithheld = Math.round(totalGross * taxRate * 100) / 100;
-  const totalNet = Math.round((totalGross - taxWithheld) * 100) / 100;
-
-  return {
-    employees_processed: count,
-    pay_period: payPeriod,
-    total_gross_usd: totalGross,
-    total_net_usd: totalNet,
-    tax_withheld_usd: taxWithheld,
-    summary: `Payroll complete for ${count} employees: gross $${totalGross.toLocaleString()}, net $${totalNet.toLocaleString()}`,
-    run_id: ctx.runId,
-    simulated: true,
-  };
-};
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Skill 4: zoa-hr
-// Input:  { action?: "onboard" | "offboard" | "pto", employee_id?: string, days?: number }
-// Output: { action_taken: string, employee_id: string, status: string, details: Record<string, unknown> }
-// ─────────────────────────────────────────────────────────────────────────────
-
-const zoaHR: SkillHandler = async (
-  input: Record<string, unknown>,
-  ctx: WorkflowRunContext,
-): Promise<Record<string, unknown>> => {
-  logger.info({ runId: ctx.runId, stepIndex: ctx.stepIndex, action: input.action }, "[zoa-hr] Processing HR action");
-
-  const action = String(input.action ?? "onboard");
-  const employeeId = String(input.employee_id ?? `emp-${Date.now()}`);
-  const days = Number(input.days ?? 0);
-
-  const details: Record<string, unknown> = {};
-  let status = "completed";
-
-  switch (action) {
-    case "onboard":
-      details.accounts_created = ["email", "slack", "github", "jira"];
-      details.equipment_requested = true;
-      details.orientation_scheduled = new Date(Date.now() + 86400000).toISOString();
-      break;
-    case "offboard":
-      details.accounts_revoked = ["email", "slack", "github", "jira"];
-      details.equipment_return_requested = true;
-      details.final_paycheck_scheduled = true;
-      break;
-    case "pto":
-      if (days <= 0) {
-        status = "failed";
-        details.error = "days must be > 0 for PTO requests";
-      } else {
-        details.pto_days_approved = days;
-        details.balance_remaining = Math.max(0, 15 - days);
-      }
-      break;
-    default:
-      status = "unknown_action";
-      details.error = `Unknown HR action: ${action}`;
+): Record<string, unknown> | null {
+  if (!process.env[spec.envVar]?.trim()) {
+    logger.warn({ runId: ctx.runId, skill: skillId, envVar: spec.envVar }, "[zoa] connector not configured — returning honest not-connected");
+    return notConnected(skillId, spec, input, ctx);
   }
+  return null;
+}
 
-  return {
-    action_taken: action,
-    employee_id: employeeId,
-    status,
-    details,
-    run_id: ctx.runId,
-    simulated: true,
-  };
+// ─────────────────────────────────────────────────────────────────────────────
+// Skill 1: zoa-billing — requires a billing connector (e.g. Stripe).
+// ─────────────────────────────────────────────────────────────────────────────
+const BILLING: ConnectorSpec = { envVar: "ZOA_BILLING_CONNECTOR", system: "billing/invoicing system", example: "Stripe" };
+
+const zoaBilling: SkillHandler = async (input, ctx) => {
+  logger.info({ runId: ctx.runId, stepIndex: ctx.stepIndex }, "[zoa-billing] invoice reconciliation requested");
+  const nc = requireConnector("zoa-billing", BILLING, input, ctx);
+  if (nc) return nc;
+  // Real integration goes here once ZOA_BILLING_CONNECTOR is configured.
+  return notConnected("zoa-billing", BILLING, input, ctx);
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Skill 5: zoa-procurement
-// Input:  { items?: Array<{ name: string, quantity: number, unit_price_usd: number }>, vendor?: string }
-// Output: { po_number: string, items_count: number, total_usd: number, vendor: string, status: string }
+// Skill 2: zoa-scheduling — requires a calendar connector (e.g. Google Calendar).
 // ─────────────────────────────────────────────────────────────────────────────
+const SCHEDULING: ConnectorSpec = { envVar: "ZOA_SCHEDULING_CONNECTOR", system: "calendar/scheduling system", example: "Google Calendar" };
 
-const zoaProcurement: SkillHandler = async (
-  input: Record<string, unknown>,
-  ctx: WorkflowRunContext,
-): Promise<Record<string, unknown>> => {
-  logger.info({ runId: ctx.runId, stepIndex: ctx.stepIndex }, "[zoa-procurement] Creating purchase order");
-
-  type ProcurementItem = { name: string; quantity: number; unit_price_usd: number };
-  const items = (input.items as ProcurementItem[] | undefined) ?? [
-    { name: "Office Supplies", quantity: 10, unit_price_usd: 25.0 },
-  ];
-  const vendor = String(input.vendor ?? "Default Vendor Inc.");
-
-  const totalUsd = items.reduce((sum, item) => sum + item.quantity * item.unit_price_usd, 0);
-  const poNumber = `PO-${Date.now().toString(36).toUpperCase()}`;
-
-  return {
-    po_number: poNumber,
-    items_count: items.length,
-    total_usd: Math.round(totalUsd * 100) / 100,
-    vendor,
-    status: "submitted",
-    summary: `PO ${poNumber} submitted to ${vendor}: ${items.length} item(s), $${totalUsd.toFixed(2)}`,
-    run_id: ctx.runId,
-    simulated: true,
-  };
+const zoaScheduling: SkillHandler = async (input, ctx) => {
+  logger.info({ runId: ctx.runId, stepIndex: ctx.stepIndex }, "[zoa-scheduling] schedule coordination requested");
+  const nc = requireConnector("zoa-scheduling", SCHEDULING, input, ctx);
+  if (nc) return nc;
+  return notConnected("zoa-scheduling", SCHEDULING, input, ctx);
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Skill 6: zoa-compliance
-// Input:  { domain?: string, regulations?: string[], check_date?: string }
-// Output: { checks_run: number, passed: number, failed: number, flags: string[], report_url: string }
+// Skill 3: zoa-payroll — requires a payroll connector (e.g. Gusto).
 // ─────────────────────────────────────────────────────────────────────────────
+const PAYROLL: ConnectorSpec = { envVar: "ZOA_PAYROLL_CONNECTOR", system: "payroll system", example: "Gusto" };
 
-const zoaCompliance: SkillHandler = async (
-  input: Record<string, unknown>,
-  ctx: WorkflowRunContext,
-): Promise<Record<string, unknown>> => {
-  logger.info({ runId: ctx.runId, stepIndex: ctx.stepIndex }, "[zoa-compliance] Running compliance checks");
+const zoaPayroll: SkillHandler = async (input, ctx) => {
+  logger.info({ runId: ctx.runId, stepIndex: ctx.stepIndex }, "[zoa-payroll] payroll run requested");
+  const nc = requireConnector("zoa-payroll", PAYROLL, input, ctx);
+  if (nc) return nc;
+  return notConnected("zoa-payroll", PAYROLL, input, ctx);
+};
 
-  const domain = String(input.domain ?? "general");
-  const regulations = (input.regulations as string[] | undefined) ?? ["GDPR", "SOC2", "HIPAA"];
-  const checkDate = String(input.check_date ?? new Date().toISOString().slice(0, 10));
+// ─────────────────────────────────────────────────────────────────────────────
+// Skill 4: zoa-hr — requires an HRIS connector (e.g. Rippling).
+// ─────────────────────────────────────────────────────────────────────────────
+const HR: ConnectorSpec = { envVar: "ZOA_HR_CONNECTOR", system: "HR information system", example: "Rippling" };
 
-  // Compliance is CONDITIONAL (l4: 2.8) — simulate some failures
-  const checksRun = regulations.length * 3;
-  const passed = Math.floor(checksRun * 0.6);
-  const failed = checksRun - passed;
-  const flags = regulations.slice(0, Math.min(2, failed)).map((r) => `${r}: policy gap detected`);
+const zoaHR: SkillHandler = async (input, ctx) => {
+  logger.info({ runId: ctx.runId, stepIndex: ctx.stepIndex, action: input.action }, "[zoa-hr] HR action requested");
+  const nc = requireConnector("zoa-hr", HR, input, ctx);
+  if (nc) return nc;
+  return notConnected("zoa-hr", HR, input, ctx);
+};
 
-  return {
-    checks_run: checksRun,
-    passed,
-    failed,
-    flags,
-    domain,
-    check_date: checkDate,
-    report_url: `https://openclaw.ai/compliance/reports/${ctx.runId}`,
-    summary: `${passed}/${checksRun} checks passed for ${domain} (${regulations.join(", ")})`,
-    run_id: ctx.runId,
-    simulated: true,
-  };
+// ─────────────────────────────────────────────────────────────────────────────
+// Skill 5: zoa-procurement — requires a procurement connector (e.g. Coupa).
+// ─────────────────────────────────────────────────────────────────────────────
+const PROCUREMENT: ConnectorSpec = { envVar: "ZOA_PROCUREMENT_CONNECTOR", system: "procurement system", example: "Coupa" };
+
+const zoaProcurement: SkillHandler = async (input, ctx) => {
+  logger.info({ runId: ctx.runId, stepIndex: ctx.stepIndex }, "[zoa-procurement] purchase order requested");
+  const nc = requireConnector("zoa-procurement", PROCUREMENT, input, ctx);
+  if (nc) return nc;
+  return notConnected("zoa-procurement", PROCUREMENT, input, ctx);
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Skill 6: zoa-compliance — requires a compliance connector (e.g. Vanta).
+// ─────────────────────────────────────────────────────────────────────────────
+const COMPLIANCE: ConnectorSpec = { envVar: "ZOA_COMPLIANCE_CONNECTOR", system: "compliance monitoring system", example: "Vanta" };
+
+const zoaCompliance: SkillHandler = async (input, ctx) => {
+  logger.info({ runId: ctx.runId, stepIndex: ctx.stepIndex }, "[zoa-compliance] compliance check requested");
+  const nc = requireConnector("zoa-compliance", COMPLIANCE, input, ctx);
+  if (nc) return nc;
+  return notConnected("zoa-compliance", COMPLIANCE, input, ctx);
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -261,6 +162,6 @@ export function registerZOASkills(): void {
 
   logger.info(
     { skills: ["zoa-billing", "zoa-scheduling", "zoa-payroll", "zoa-hr", "zoa-procurement", "zoa-compliance"] },
-    "ZOA skill handlers registered",
+    "ZOA skill handlers registered (honest not-connected until a real connector is configured)",
   );
 }

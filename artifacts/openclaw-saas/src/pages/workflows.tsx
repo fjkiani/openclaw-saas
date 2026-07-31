@@ -898,6 +898,10 @@ function DeploymentTab({ token }: { token: string }) {
   const [bundleFiles, setBundleFiles] = useState<SovereignFile[] | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [mcpTools, setMcpTools] = useState<Array<{ name: string; description?: string }> | null>(null);
+  const [backfilling, setBackfilling] = useState(false);
+  const [backfillResult, setBackfillResult] = useState<{ updated: number; remaining: number; failed?: number; qdrant_points?: number } | null>(null);
+  const [mcpTestResult, setMcpTestResult] = useState<string | null>(null);
+  const [mcpTesting, setMcpTesting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const loadCorpusStats = useCallback(async () => {
@@ -977,6 +981,48 @@ function DeploymentTab({ token }: { token: string }) {
     }
   };
 
+  const runBackfill = async () => {
+    setBackfilling(true);
+    setError(null);
+    try {
+      const res = await apiCall("/api/v1/legal/kb/embed-backfill", token, { method: "POST" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+      const data = await res.json();
+      setBackfillResult({ updated: data.updated ?? 0, remaining: data.remaining ?? 0, failed: data.failed, qdrant_points: data.qdrant_points });
+      loadCorpusStats();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBackfilling(false);
+    }
+  };
+
+  const runMcpTest = async () => {
+    setMcpTesting(true);
+    setMcpTestResult(null);
+    setError(null);
+    try {
+      const apiBase = ((import.meta.env.VITE_API_URL as string | undefined) ?? "").replace(/\/+$/, "");
+      const res = await fetch(`${apiBase}/mcp`, {
+        method: "POST",
+        headers: { "content-type": "application/json", accept: "application/json, text/event-stream" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: Date.now(), method: "tools/call", params: { name: "legal_corpus_stats", arguments: {} } }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const raw = await res.text();
+      // Streamable HTTP may return SSE; extract the data: line.
+      const dataLine = raw.split("\n").find((l) => l.startsWith("data:"));
+      const parsed = JSON.parse(dataLine ? dataLine.slice(5) : raw);
+      const content = parsed?.result?.content;
+      const textOut = Array.isArray(content) ? content.find((c: { type: string }) => c.type === "text")?.text : null;
+      setMcpTestResult(textOut ?? JSON.stringify(parsed?.result ?? parsed, null, 2));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setMcpTesting(false);
+    }
+  };
+
   const previewBundle = async () => {
     setError(null);
     try {
@@ -1043,15 +1089,26 @@ function DeploymentTab({ token }: { token: string }) {
             <Stat label="Qdrant points" value={corpusStats.qdrant?.points ?? 0} />
           </div>
         )}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
           <Button onClick={startCuadIngest} disabled={ingesting} size="sm">
             {ingesting ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Play className="w-4 h-4 mr-2" />}
             {ingesting ? "Ingesting…" : "Ingest CUAD Corpus"}
+          </Button>
+          <Button onClick={runBackfill} disabled={backfilling} variant="outline" size="sm">
+            {backfilling ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Cpu className="w-4 h-4 mr-2" />}
+            {backfilling ? "Embedding…" : "Backfill Embeddings"}
           </Button>
           <Button onClick={loadCorpusStats} variant="outline" size="sm">
             <RefreshCw className="w-4 h-4 mr-2" /> Refresh
           </Button>
         </div>
+        {backfillResult && (
+          <div className="mt-3 border border-border rounded p-3 bg-muted/30 text-xs font-mono text-muted-foreground">
+            Backfill: {backfillResult.updated.toLocaleString()} embedded · {backfillResult.remaining.toLocaleString()} remaining
+            {backfillResult.failed != null && backfillResult.failed > 0 && ` · ${backfillResult.failed} failed`}
+            {backfillResult.qdrant_points != null && ` · ${backfillResult.qdrant_points.toLocaleString()} Qdrant points`}
+          </div>
+        )}
         {ingestJob && (
           <div className="mt-4 border border-border rounded p-3 bg-muted/30">
             <div className="flex items-center gap-2 mb-2">
@@ -1186,6 +1243,17 @@ function DeploymentTab({ token }: { token: string }) {
         ) : (
           <p className="text-xs font-mono text-muted-foreground">Querying /mcp tools/list…</p>
         )}
+        <div className="mt-4">
+          <Button onClick={runMcpTest} disabled={mcpTesting} variant="outline" size="sm">
+            {mcpTesting ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Play className="w-4 h-4 mr-2" />}
+            {mcpTesting ? "Calling…" : "Run Test Call (legal_corpus_stats)"}
+          </Button>
+          {mcpTestResult && (
+            <pre className="mt-3 border border-border rounded p-3 bg-muted/30 text-xs font-mono text-muted-foreground whitespace-pre-wrap overflow-auto max-h-64">
+              {mcpTestResult}
+            </pre>
+          )}
+        </div>
       </section>
     </div>
   );
