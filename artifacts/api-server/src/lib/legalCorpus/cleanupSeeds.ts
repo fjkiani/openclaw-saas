@@ -21,8 +21,8 @@ export async function cleanupBootSeedDocuments(): Promise<{
   const toDelete = await pool.query<{ id: number; slug: string }>(
     `SELECT id, slug FROM legal_corpus_documents WHERE source_type IN ('seed', 'texts')`,
   );
-  const docIds = toDelete.rows.map((r) => r.id);
-  const slugs = toDelete.rows.map((r) => r.slug);
+  const docIds = toDelete.rows.map((r: { id: number; slug: string }) => r.id);
+  const slugs = toDelete.rows.map((r: { id: number; slug: string }) => r.slug);
 
   // Delete Postgres rows (cascades to legal_corpus_chunks).
   const result = await pool.query<{ slug: string }>(
