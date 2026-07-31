@@ -99,6 +99,35 @@ if (process.env.CLERK_SECRET_KEY?.startsWith("sk_")) {
 
 app.use("/api", router);
 
+// TEMP DIAGNOSTIC: report whether the V2 routers resolved at import time.
+app.get("/api/_diag/v2", async (_req: Request, res: Response) => {
+  const probe: Record<string, unknown> = { buildMarker: "v2-diag-1" };
+  try {
+    const mod = await import("./routes/index.js");
+    const r = mod.default;
+    probe.routerType = typeof r;
+    // Express routers expose a `stack` of layers; count them.
+    probe.layerCount = Array.isArray((r as any)?.stack) ? (r as any).stack.length : null;
+    probe.mountedPaths = Array.isArray((r as any)?.stack)
+      ? (r as any).stack
+          .map((l: any) => l?.regexp?.source ?? l?.path ?? l?.route?.path ?? "?")
+          .filter((s: string) => typeof s === "string")
+          .slice(0, 60)
+      : null;
+  } catch (e) {
+    probe.routerImportError = e instanceof Error ? e.message : String(e);
+  }
+  for (const name of ["corpus", "sovereign", "localAuth"]) {
+    try {
+      await import(`./routes/${name}.js`);
+      probe[`import_${name}`] = "ok";
+    } catch (e) {
+      probe[`import_${name}`] = e instanceof Error ? e.message : String(e);
+    }
+  }
+  res.json(probe);
+});
+
 // MCP (Model Context Protocol) server — Streamable HTTP transport at /mcp.
 // Exposes OpenClaw capabilities as MCP tools for any MCP client. Stateless:
 // each request spins up a fresh server+transport pair.
