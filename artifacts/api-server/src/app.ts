@@ -7,6 +7,7 @@ import {
   clerkProxyMiddleware,
 } from "./middlewares/clerkProxyMiddleware";
 import router from "./routes";
+import { handleMcpRequest } from "./lib/mcp/server.js";
 import { logger } from "./lib/logger";
 
 const app: Express = express();
@@ -97,6 +98,19 @@ if (process.env.CLERK_SECRET_KEY?.startsWith("sk_")) {
 }
 
 app.use("/api", router);
+
+// MCP (Model Context Protocol) server — Streamable HTTP transport at /mcp.
+// Exposes OpenClaw capabilities as MCP tools for any MCP client. Stateless:
+// each request spins up a fresh server+transport pair.
+app.post("/mcp", (req: Request, res: Response) => {
+  void handleMcpRequest(req, res);
+});
+app.get("/mcp", (req: Request, res: Response) => {
+  void handleMcpRequest(req, res);
+});
+app.delete("/mcp", (req: Request, res: Response) => {
+  void handleMcpRequest(req, res);
+});
 
 // Global error handler
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
