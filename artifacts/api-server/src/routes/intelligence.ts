@@ -2,8 +2,9 @@
  * intelligence.ts — AACR 2026 Conference Intelligence API
  *
  * Exposes the AACR corpus stored in Supabase (project xfhiwodulrbbtfcqneqt)
- * via REST endpoints. Semantic search feeds the double-dip flywheel:
- * every reranked search generates a DPO preference pair for
+ * via REST endpoints. Semantic search uses Qdrant (openclaw_aacr collection)
+ * instead of Supabase pgvector. Rerank uses Gemini instead of dead OpenRouter.
+ * Every reranked search generates a DPO preference pair for
  * task_type='competitive_intel_extraction'.
  *
  * Routes:
@@ -11,19 +12,28 @@
  *   GET  /api/intelligence/speakers          — search speakers (filter by tumor_type, stage, novelty)
  *   GET  /api/intelligence/cd-hits           — cognitive dissonance hits (ranked)
  *   GET  /api/intelligence/crispro           — CrisPRO opportunities (filter by type, priority)
- *   POST /api/intelligence/search            — semantic search (proxies match_embeddings)
+ *   POST /api/intelligence/search            — semantic search (Qdrant + optional Gemini rerank)
  *   GET  /api/intelligence/stats             — corpus statistics
  *   GET  /api/intelligence/flywheel          — AACR domain flywheel status
  *
  * Auth: Clerk JWT required on all routes except /stats (public).
- * Supabase env vars: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
- * OpenRouter env var: OPENROUTER_API_KEY (for embedding generation)
+ * Supabase env vars: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (structured data)
+ * Qdrant env vars: QDRANT_URL, QDRANT_API_KEY (semantic search)
+ * Google env var: GOOGLE_API_KEY (embeddings + rerank)
  */
 
 import { Router, type Request, type Response } from "express";
 import { getAuth } from "@clerk/express";
 import { pool } from "@workspace/db";
 import { logger } from "../lib/logger.js";
+import { resolveApiKey } from "../lib/resolveApiKey.js";
+import {
+  search as qdrantSearch,
+  ensureCollection,
+  AACR_COLLECTION,
+  AACR_EMBED_DIM,
+  type QdrantSearchHit,
+} from "../lib/qdrantClient.js";
 
 const router = Router();
 
@@ -33,8 +43,8 @@ const router = Router();
 
 const SUPABASE_URL = (process.env.SUPABASE_URL ?? "").replace(/\/$/, "");
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
-const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY ?? "";
-const OPENROUTER_KEY_2 = process.env.OPENROUTER_API_KEY_2 ?? "";
+const GEMINI_OPENAI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
+const GEMINI_EMBED_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent";
 
 function getSupabaseHeaders(prefer?: string): Record<string, string> {
   const h: Record<string, string> = {
@@ -47,10 +57,18 @@ function getSupabaseHeaders(prefer?: string): Record<string, string> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Auth middleware
+// Auth middleware — supports Clerk JWT or admin token fallback
 // ─────────────────────────────────────────────────────────────────────────────
 
+function isAdminTokenRequest(req: Request): boolean {
+  const envToken = process.env.OPENCLAW_ADMIN_TOKEN;
+  if (!envToken) return false;
+  const headerToken = req.headers["x-openclaw-admin-token"] as string | undefined;
+  return !!headerToken && headerToken === envToken;
+}
+
 function requireAuth(req: Request, res: Response, next: () => void): void {
+  if (isAdminTokenRequest(req)) { next(); return; }
   const auth = getAuth(req);
   if (!auth?.userId) {
     res.status(401).json({ error: "Unauthorized" });
@@ -84,41 +102,36 @@ async function supabaseGet<T>(
   return { data, count };
 }
 
-async function supabaseRpc<T>(fn: string, body: Record<string, unknown>): Promise<T[]> {
-  if (!SUPABASE_URL || !SUPABASE_KEY) {
-    throw new Error("SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY not configured");
-  }
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${fn}`, {
-    method: "POST",
-    headers: getSupabaseHeaders(),
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const body2 = await res.text().catch(() => "");
-    throw new Error(`Supabase RPC ${fn}: HTTP ${res.status} — ${body2.slice(0, 200)}`);
-  }
-  return (await res.json()) as T[];
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
-// Embedding generation
+// Embedding generation — Gemini gemini-embedding-001 (3072-dim, truncated to 1536)
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function generateEmbedding(text: string): Promise<number[]> {
-  const key = OPENROUTER_KEY || OPENROUTER_KEY_2;
-  if (!key) throw new Error("OPENROUTER_API_KEY not configured");
+  const apiKey = resolveApiKey("GOOGLE_API_KEY");
+  if (!apiKey) throw new Error("GOOGLE_API_KEY not configured for embedding generation");
 
-  const res = await fetch("https://openrouter.ai/api/v1/embeddings", {
+  const res = await fetch(`${GEMINI_EMBED_ENDPOINT}?key=${apiKey}`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ model: "openai/text-embedding-3-small", input: text.slice(0, 8000) }),
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: "models/gemini-embedding-001",
+      content: { parts: [{ text: text.slice(0, 8192) }] },
+      taskType: "RETRIEVAL_QUERY",
+    }),
+    signal: AbortSignal.timeout(30_000),
   });
+
   if (!res.ok) {
     const body = await res.text().catch(() => "");
-    throw new Error(`Embedding generation failed: HTTP ${res.status} — ${body.slice(0, 200)}`);
+    throw new Error(`Gemini embedding failed: HTTP ${res.status} — ${body.slice(0, 200)}`);
   }
-  const data = (await res.json()) as { data: Array<{ embedding: number[] }> };
-  return data.data[0].embedding;
+
+  const data = (await res.json()) as { embedding?: { values?: number[] } };
+  const vec = data.embedding?.values;
+  if (!vec?.length) throw new Error("Gemini embedding returned empty vector");
+
+  // Truncate to 1536-dim to match the openclaw_aacr Qdrant collection
+  return vec.slice(0, AACR_EMBED_DIM);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -305,34 +318,43 @@ router.post(
         return;
       }
 
-      // Generate embedding
+      // Generate embedding via Gemini (1536-dim truncated)
       const embedding = await generateEmbedding(query.trim());
 
-      // Semantic search via match_embeddings RPC
-      const fastResults = await supabaseRpc<{
-        id: number;
-        source_table: string;
-        source_id: number;
-        talk_id: string;
-        speaker_name: string;
-        session_slug: string;
-        field_name: string;
-        chunk_text: string;
-        similarity: number;
-      }>("match_embeddings", {
-        query_embedding: embedding,
-        match_field: field ?? null,
-        match_count: Math.min(match_count, 50),
-        match_threshold,
+      // Ensure Qdrant collection exists
+      await ensureCollection(AACR_COLLECTION, AACR_EMBED_DIM, "Cosine");
+
+      // Semantic search via Qdrant
+      const qdrantFilter = field
+        ? { must: [{ key: "field_name", match: { value: field } }] }
+        : undefined;
+
+      const qdrantHits = await qdrantSearch(AACR_COLLECTION, embedding, {
+        limit: Math.min(match_count, 50),
+        scoreThreshold: match_threshold,
+        filter: qdrantFilter,
       });
+
+      // Convert Qdrant hits to the result format
+      const fastResults = qdrantHits.map((h) => ({
+        id: Number(h.payload.id ?? h.id),
+        source_table: String(h.payload.source_table ?? "aacr_embeddings"),
+        source_id: Number(h.payload.source_id ?? 0),
+        talk_id: String(h.payload.talk_id ?? ""),
+        speaker_name: String(h.payload.speaker_name ?? ""),
+        session_slug: String(h.payload.session_slug ?? ""),
+        field_name: String(h.payload.field_name ?? ""),
+        chunk_text: String(h.payload.chunk_text ?? ""),
+        similarity: h.score,
+      }));
 
       let finalResults = fastResults;
       let reranked = false;
 
-      // Slow path: GPT-4o re-ranking (feeds double-dip flywheel)
+      // Slow path: Gemini re-ranking (feeds double-dip flywheel)
       if (rerank && fastResults.length > 1) {
-        const key = OPENROUTER_KEY || OPENROUTER_KEY_2;
-        if (key) {
+        const geminiKey = resolveApiKey("GOOGLE_API_KEY");
+        if (geminiKey) {
           try {
             const candidates = fastResults.map((r, i) => ({
               index: i,
@@ -342,11 +364,14 @@ router.post(
               similarity: r.similarity,
             }));
 
-            const rerankRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+            const rerankRes = await fetch(GEMINI_OPENAI_ENDPOINT, {
               method: "POST",
-              headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+              headers: {
+                Authorization: `Bearer ${geminiKey}`,
+                "Content-Type": "application/json",
+              },
               body: JSON.stringify({
-                model: "openai/gpt-4o",
+                model: "gemini-2.5-flash",
                 messages: [
                   {
                     role: "system",
@@ -361,6 +386,7 @@ router.post(
                 temperature: 0,
                 max_tokens: 256,
               }),
+              signal: AbortSignal.timeout(30_000),
             });
 
             if (rerankRes.ok) {
@@ -386,7 +412,7 @@ router.post(
               }
             }
           } catch (rerankErr: unknown) {
-            logger.warn({ err: rerankErr }, "intelligence: rerank failed, using fast results");
+            logger.warn({ err: rerankErr }, "intelligence: Gemini rerank failed, using fast results");
           }
         }
       }
@@ -398,6 +424,7 @@ router.post(
         reranked,
         embedding_dims: embedding.length,
         match_count: finalResults.length,
+        vector_store: "qdrant",
       });
     } catch (err: unknown) {
       logger.error({ err }, "intelligence: POST /search failed");

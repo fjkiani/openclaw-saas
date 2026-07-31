@@ -17,14 +17,17 @@ import { archonConfig as config } from "../lib/archon/config";
 const router: IRouter = Router();
 
 router.get("/archon/health", (_req: Request, res: Response) => {
-  const hasKey = !!(process.env.OPENROUTER_API_KEY || process.env.OPENROUTER_API_KEY_2);
+  const hasGroqKey = !!process.env.GROQ_API_KEY;
+  const hasGeminiKey = !!process.env.GOOGLE_API_KEY;
   res.json({
     status: "ok",
     service: "archon-factory",
-    version: "1.2.0",
+    version: "1.3.0",
     mode: "in-process",
     run_store: "db-backed",
-    openrouter_key_set: hasKey,
+    groq_key_set: hasGroqKey,
+    gemini_key_set: hasGeminiKey,
+    providers: hasGroqKey || hasGeminiKey ? "active" : "no-keys",
   });
 });
 

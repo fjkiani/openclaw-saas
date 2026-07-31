@@ -1,7 +1,7 @@
 import { archonConfig as config } from "./config";
 
 // ── Gemini API (Google AI Studio) ─────────────────────────────────────────────
-// Used as final fallback when all OpenRouter free models are rate-limited.
+// Used for L1 judge and as fallback for code generation.
 // Gemini 2.5 Flash: 1M context, fast, free tier with AI Studio key.
 
 interface GeminiPart { text: string }
@@ -12,8 +12,8 @@ interface GeminiResponse {
 }
 
 /**
- * callGemini — calls Google Gemini API directly (not via OpenRouter).
- * Converts OpenRouter-style messages to Gemini's content format.
+ * callGemini — calls Google Gemini API directly (native format).
+ * Converts OpenAI-style messages to Gemini's content format.
  * System message is prepended as a user turn (Gemini doesn't have a system role in basic API).
  */
 async function callGemini(
@@ -21,7 +21,7 @@ async function callGemini(
   temperature = 0.2
 ): Promise<string> {
   const apiKey = config.geminiApiKey;
-  if (!apiKey) throw new Error("GOOGLE_AI_API_KEY not set — Gemini unavailable");
+  if (!apiKey) throw new Error("GOOGLE_API_KEY not set — Gemini unavailable");
 
   // Convert messages: system → prepend to first user message; assistant → model role
   const contents: Array<{ role: string; parts: GeminiPart[] }> = [];
@@ -54,6 +54,7 @@ ${msg.content}` : msg.content;
         contents,
         generationConfig: { temperature, maxOutputTokens: 8192 },
       }),
+      signal: AbortSignal.timeout(60_000),
     });
 
     const data = (await res.json()) as GeminiResponse;
@@ -73,20 +74,54 @@ ${msg.content}` : msg.content;
   throw new Error("Gemini error: max retries exceeded (503 high demand)");
 }
 
+/**
+ * callGroq — calls Groq API (OpenAI-compatible format).
+ */
+async function callGroq(
+  model: string,
+  messages: OpenRouterMessage[],
+  temperature: number,
+  maxTokens: number,
+): Promise<string> {
+  const apiKey = config.groqApiKey;
+  if (!apiKey) throw new Error("GROQ_API_KEY not set — Groq unavailable");
+
+  const res = await fetch(config.groqBaseUrl, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ model, messages, temperature, max_tokens: maxTokens }),
+    signal: AbortSignal.timeout(60_000),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    throw new Error(`Groq ${res.status} [${model}]: ${errText.slice(0, 200)}`);
+  }
+
+  const data = (await res.json()) as {
+    choices: Array<{ message: { content: string } }>;
+  };
+  return data.choices[0]?.message?.content ?? "";
+}
+
 interface OpenRouterMessage {
   role: "system" | "user" | "assistant";
   content: string;
 }
 
 const MAX_RETRIES_PER_MODEL = 2;
-const BASE_DELAY_MS = 4000; // 4s base
+const BASE_DELAY_MS = 2000; // 2s base for Groq
 
 /**
- * callOpenRouter — calls OpenRouter with retry + model fallback.
+ * callLLM — calls the LLM with retry + model fallback.
  *
- * If the primary model returns 429/503, retries up to MAX_RETRIES_PER_MODEL
- * times with exponential backoff, then falls through to the next model in
- * `fallbacks`. Throws only if all models are exhausted.
+ * Tries Groq models first (primary), then falls back to Gemini.
+ * Throws only if all models are exhausted.
+ *
+ * Kept as callOpenRouter for backward compatibility with existing callers.
  */
 export async function callOpenRouter(
   model: string,
@@ -96,6 +131,7 @@ export async function callOpenRouter(
 ): Promise<string> {
   const modelsToTry = [model, ...fallbacks];
 
+  // Try Groq models first
   for (const currentModel of modelsToTry) {
     let lastError: Error | null = null;
 
@@ -105,65 +141,46 @@ export async function callOpenRouter(
         await new Promise((r) => setTimeout(r, delay));
       }
 
-      const res = await fetch(config.openrouterBaseUrl, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${config.openrouterApiKey}`,
-          "Content-Type": "application/json",
-          "HTTP-Referer": "https://openclaw.ai",
-          "X-Title": "OpenClaw Archon Factory",
-        },
-        body: JSON.stringify({ model: currentModel, messages, temperature, max_tokens: 4096 }),
-      });
+      try {
+        const result = await callGroq(currentModel, messages, temperature, 4096);
+        if (result) return result;
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        lastError = err instanceof Error ? err : new Error(msg);
 
-      if (res.ok) {
-        const data = (await res.json()) as {
-          choices: Array<{ message: { content: string } }>;
-        };
-        return data.choices[0]?.message?.content ?? "";
+        // Retry on 429/503 within this model
+        if ((msg.includes("429") || msg.includes("503")) && attempt < MAX_RETRIES_PER_MODEL) {
+          continue;
+        }
+        break;
       }
-
-      const errText = await res.text();
-
-      // Retry on 429/503 within this model
-      if ((res.status === 429 || res.status === 503) && attempt < MAX_RETRIES_PER_MODEL) {
-        lastError = new Error(`OpenRouter ${res.status} [${currentModel}]: ${errText}`);
-        continue;
-      }
-
-      // Non-retryable error for this model — try next fallback
-      lastError = new Error(`OpenRouter ${res.status} [${currentModel}]: ${errText}`);
-      break;
     }
 
-    // If we get here, this model failed — try next
     if (lastError) {
       const msg = lastError.message;
       const isRateLimit = msg.includes("429") || msg.includes("503");
-      // 404 = model unavailable (e.g. free tier removed) — also try fallbacks
       const isModelUnavailable = msg.includes("404");
       if (!isRateLimit && !isModelUnavailable) {
-        // Hard error (400, 401, etc.) — don't try fallbacks
-        throw lastError;
+        throw lastError; // Hard error — don't try fallbacks
       }
       // Rate limit or model unavailable — continue to next model
     }
   }
 
-  // All OpenRouter models exhausted — try Gemini as final fallback
+  // All Groq models exhausted — try Gemini as final fallback
   if (config.geminiApiKey) {
     try {
       const geminiResult = await callGemini(messages, temperature);
       if (geminiResult) return geminiResult;
     } catch (geminiErr) {
       throw new Error(
-        `All models exhausted. OpenRouter tried: ${modelsToTry.join(", ")}. ` +
+        `All models exhausted. Groq tried: ${modelsToTry.join(", ")}. ` +
         `Gemini error: ${geminiErr instanceof Error ? geminiErr.message : String(geminiErr)}`
       );
     }
   }
 
-  throw new Error(`OpenRouter: all models exhausted (tried: ${modelsToTry.join(", ")})`);
+  throw new Error(`LLM: all models exhausted (tried Groq: ${modelsToTry.join(", ")}, Gemini fallback)`);
 }
 
 export function extractJson(text: string): unknown {

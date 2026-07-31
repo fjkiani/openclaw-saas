@@ -6,11 +6,11 @@ import { logger } from "./logger.js";
 import { resolveApiKey } from "./resolveApiKey.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Policy lookup — reads zie_router_policies to resolve the current fast-path
-// model for a given task_type. Falls back to the hardcoded default if the
-// table doesn't exist yet or has no row for this task_type.
-// After Modal completes a LoRA fine-tune, updateRoutingPolicy() writes here
-// and the next invocation automatically uses the trained model.
+// Provider configuration — Groq (fast) + Gemini (slow)
+//
+// Replaces the dead OpenRouter keys. Groq provides low-latency inference
+// for the fast path. Gemini provides higher-quality reasoning for the
+// slow path. Both use the OpenAI-compatible chat completions format.
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface FastPathPolicy {
@@ -22,12 +22,20 @@ interface FastPathPolicy {
 }
 
 const DEFAULT_FAST_POLICY: FastPathPolicy = {
-  fast_model_id: "liquid/lfm-2.5-1.2b-instruct:free",
-  fast_provider: "openrouter",
-  fast_api_key_env: "OPENROUTER_API_KEY",
+  fast_model_id: "llama-3.3-70b-versatile",
+  fast_provider: "groq",
+  fast_api_key_env: "GROQ_API_KEY",
   fast_max_tokens: 512,
   fast_timeout_ms: 8_000,
 };
+
+const SLOW_MODEL_ID = "gemini-2.5-flash";
+const SLOW_API_KEY_ENV = "GOOGLE_API_KEY";
+const SLOW_MAX_TOKENS = 1024;
+const SLOW_TIMEOUT_MS = 45_000;
+
+const GROQ_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions";
+const GEMINI_OPENAI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
 
 async function resolveFastPolicy(taskType: string): Promise<FastPathPolicy> {
   try {
@@ -39,7 +47,17 @@ async function resolveFastPolicy(taskType: string): Promise<FastPathPolicy> {
       [taskType],
     );
     if (res.rows.length > 0) {
-      return res.rows[0];
+      // Override the default with DB-stored policy, but ensure the provider
+      // is groq or gemini (not openrouter, which is dead).
+      const policy = res.rows[0];
+      if (policy.fast_provider === "openrouter") {
+        logger.warn(
+          { taskType, storedProvider: "openrouter" },
+          "doubleDipRouter: DB policy references dead openrouter provider — using groq default",
+        );
+        return DEFAULT_FAST_POLICY;
+      }
+      return policy;
     }
   } catch {
     // Table may not exist yet — fall through to default
@@ -81,10 +99,6 @@ export type SlopAnalysis = z.infer<typeof SlopSchema>;
 
 export const CONFIDENCE_THRESHOLD = 0.85;
 
-const OPENROUTER_BASE = "https://openrouter.ai/api/v1/chat/completions";
-const OPENROUTER_REFERER =
-  process.env.OPENROUTER_REFERER ?? "https://openclaw-api-k30t.onrender.com";
-
 const SLOP_SYSTEM_PROMPT = `You are a manuscript quality auditor. Analyze the provided text for scientific writing deficiencies.
 
 Return a JSON object with EXACTLY these fields and no others:
@@ -102,10 +116,11 @@ Hard rules:
 - Respond with valid JSON only. No markdown fences, no prose.`;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Low-level fetch — accepts an AbortSignal directly
+// Low-level fetch — provider-agnostic OpenAI-compatible completions
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function fetchCompletion(
+  endpoint: string,
   modelId: string,
   apiKey: string,
   userContent: string,
@@ -113,14 +128,12 @@ async function fetchCompletion(
   signal: AbortSignal,
   systemPromptOverride?: string,
 ): Promise<unknown> {
-  const response = await fetch(OPENROUTER_BASE, {
+  const response = await fetch(endpoint, {
     method: "POST",
     signal,
     headers: {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
-      "HTTP-Referer": OPENROUTER_REFERER,
-      "X-Title": "OpenClaw Double-Dip Router",
     },
     body: JSON.stringify({
       model: modelId,
@@ -135,7 +148,7 @@ async function fetchCompletion(
 
   if (!response.ok) {
     const body = await response.text().catch(() => "");
-    throw new Error(`OpenRouter ${response.status}: ${body.slice(0, 200)}`);
+    throw new Error(`${endpoint} ${response.status}: ${body.slice(0, 200)}`);
   }
 
   const data = (await response.json()) as {
@@ -233,6 +246,11 @@ export interface DoubleDipResult {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // executeDoubleDip — speculative concurrent execution (INV-02)
+//
+// Fast path: Groq (llama-3.3-70b-versatile) — low latency, 8s timeout.
+// Slow path: Gemini (gemini-2.5-flash) — higher quality, 45s timeout.
+// If fast path confidence >= threshold, slow path is aborted.
+// Otherwise slow path result is persisted to the vault as a DPO pair.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function executeDoubleDip(
@@ -249,18 +267,22 @@ export async function executeDoubleDip(
   const outputSchema: z.ZodTypeAny = vaultOpts.outputSchema ?? SlopSchema;
   const confidenceThreshold = vaultOpts.confidenceThreshold ?? CONFIDENCE_THRESHOLD;
 
-  // Resolve fast-path model from zie_router_policies.
+  // Resolve fast-path model from zie_router_policies (or default to Groq).
   const fastPolicy = await resolveFastPolicy(taskType);
   const fastApiKey = resolveApiKey(fastPolicy.fast_api_key_env);
-  const slowApiKey1 = resolveApiKey("OPENROUTER_API_KEY");
-  const slowApiKey2 = resolveApiKey("OPENROUTER_API_KEY_2");
+  const slowApiKey = resolveApiKey(SLOW_API_KEY_ENV);
+
+  // Determine fast-path endpoint based on provider
+  const fastEndpoint = fastPolicy.fast_provider === "groq"
+    ? GROQ_ENDPOINT
+    : GEMINI_OPENAI_ENDPOINT;
 
   if (!fastApiKey) {
-    throw new Error("OPENROUTER_API_KEY is not set");
+    throw new Error(`${fastPolicy.fast_api_key_env} is not set — cannot run fast path`);
   }
 
   logger.info(
-    { taskType, domain, fastModel: fastPolicy.fast_model_id, promptHash },
+    { taskType, domain, fastModel: fastPolicy.fast_model_id, fastProvider: fastPolicy.fast_provider, slowModel: SLOW_MODEL_ID, promptHash },
     "doubleDipRouter: executing double-dip",
   );
 
@@ -268,7 +290,7 @@ export async function executeDoubleDip(
   const fastSignal = AbortSignal.timeout(fastPolicy.fast_timeout_ms);
 
   const fastPromise: Promise<{ result: unknown; confidence: number; won: "fast" } | null> =
-    fetchCompletion(fastPolicy.fast_model_id, fastApiKey, userContent, fastPolicy.fast_max_tokens, fastSignal, systemPrompt)
+    fetchCompletion(fastEndpoint, fastPolicy.fast_model_id, fastApiKey, userContent, fastPolicy.fast_max_tokens, fastSignal, systemPrompt)
       .then((raw) => {
         const parsed = outputSchema.safeParse(raw);
         if (!parsed.success) {
@@ -288,12 +310,11 @@ export async function executeDoubleDip(
         return null;
       });
 
-  const slowTimeoutSignal = AbortSignal.timeout(45_000);
+  const slowTimeoutSignal = AbortSignal.timeout(SLOW_TIMEOUT_MS);
   const slowSignal = AbortSignal.any([slowAbort.signal, slowTimeoutSignal]);
-  const activeSlowKey = slowApiKey1 || slowApiKey2;
 
   const slowPromise: Promise<{ result: unknown; confidence: number; won: "slow" } | null> =
-    fetchCompletion("openai/gpt-4o", activeSlowKey, userContent, 1024, slowSignal, systemPrompt)
+    fetchCompletion(GEMINI_OPENAI_ENDPOINT, SLOW_MODEL_ID, slowApiKey, userContent, SLOW_MAX_TOKENS, slowSignal, systemPrompt)
       .then((raw) => {
         const parsed = outputSchema.safeParse(raw);
         if (!parsed.success) {
@@ -311,21 +332,6 @@ export async function executeDoubleDip(
             (err.name === "AbortError" || err.name === "TimeoutError"))
         ) {
           return null;
-        }
-        if (slowApiKey2 && slowApiKey2 !== slowApiKey1) {
-          const fallbackSignal = AbortSignal.any([slowAbort.signal, AbortSignal.timeout(45_000)]);
-          return fetchCompletion("openai/gpt-4o", slowApiKey2, userContent, 1024, fallbackSignal, systemPrompt)
-            .then((raw) => {
-              const parsed = outputSchema.safeParse(raw);
-              if (!parsed.success) return null;
-              const result = parsed.data as { confidence?: number };
-              const confidence = typeof result.confidence === "number" ? result.confidence : 1;
-              return { result: parsed.data, confidence, won: "slow" as const };
-            })
-            .catch((fallbackErr: unknown) => {
-              logger.warn({ err: fallbackErr }, "doubleDipRouter: slow path fallback also failed");
-              return null;
-            });
         }
         logger.warn({ err }, "doubleDipRouter: slow path failed");
         return null;

@@ -22,6 +22,7 @@ import VerticalPickerPage from "@/pages/onboarding/vertical-picker";
 import SetupPage from "@/pages/onboarding/setup";
 import StartupCounselPage from "@/pages/startup-counsel";
 import RigorGatePage from "@/pages/rigor-gate";
+import WorkflowsPage from "@/pages/workflows";
 
 const queryClient = new QueryClient();
 
@@ -237,6 +238,7 @@ function AppRoutes() {
         <Route path="/onboarding/setup"><ProtectedRoute component={SetupPage} /></Route>
         <Route path="/startup-counsel"><ProtectedRoute component={StartupCounselPage} /></Route>
         <Route path="/rigor-gate"><ProtectedRoute component={RigorGatePage} /></Route>
+        <Route path="/workflows"><ProtectedRoute component={WorkflowsPage} /></Route>
         <Route component={NotFound} />
       </Switch>
     </QueryClientProvider>

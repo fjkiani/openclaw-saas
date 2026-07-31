@@ -2,10 +2,20 @@ import { pool } from "@workspace/db";
 import { logger } from "../logger.js";
 import { chunkLegalText } from "./chunkText.js";
 import { LEGAL_CORPUS_SEED, LEGAL_CORPUS_VERSION } from "./documents.js";
+import { embedText } from "./embeddings.js";
+import {
+  ensureCollection,
+  upsertPoints,
+  deleteByFilter,
+  LEGAL_CORPUS_COLLECTION,
+  LEGAL_EMBED_DIM,
+  type QdrantPoint,
+} from "../qdrantClient.js";
 
 export async function migrateLegalCorpus(): Promise<void> {
   const client = await pool.connect();
   try {
+    // ── Postgres tables (BM25 + metadata) ──────────────────────────────────
     await client.query(`
       CREATE TABLE IF NOT EXISTS legal_corpus_documents (
         id serial PRIMARY KEY,
@@ -51,29 +61,20 @@ export async function migrateLegalCorpus(): Promise<void> {
         ON legal_corpus_documents(source_hash) WHERE source_hash IS NOT NULL
     `);
 
-    // ── pgvector column for ANN search (Supabase has vector ext enabled) ────
-    // pgvector may not be available (e.g. local dev Postgres without the extension,
-    // or Render free-tier Postgres). Wrap in try-catch so the migration can still
-    // seed the corpus — semantic retrieval will fall back to BM25-only.
-    try {
-      await client.query(`CREATE EXTENSION IF NOT EXISTS vector`);
-      await client.query(`
-        ALTER TABLE legal_corpus_chunks
-          ADD COLUMN IF NOT EXISTS embedding_vec vector(3072)
-      `);
-      logger.info("legalCorpus: pgvector extension available — semantic retrieval enabled");
-    } catch (vecErr) {
+    // ── Qdrant collection for semantic search ──────────────────────────────
+    // Replaces pgvector. Collection is prefixed openclaw_ to avoid contaminating
+    // existing Qdrant collections in the cluster.
+    const qdrantOk = await ensureCollection(LEGAL_CORPUS_COLLECTION, LEGAL_EMBED_DIM, "Cosine");
+    if (qdrantOk) {
+      logger.info(
+        { collection: LEGAL_CORPUS_COLLECTION, dims: LEGAL_EMBED_DIM },
+        "legalCorpus: Qdrant collection ready for semantic search",
+      );
+    } else {
       logger.warn(
-        { err: vecErr instanceof Error ? vecErr.message : String(vecErr) },
-        "legalCorpus: pgvector not available — semantic retrieval disabled, BM25-only fallback",
+        "legalCorpus: Qdrant not configured — semantic retrieval disabled, BM25-only fallback",
       );
     }
-
-    // Legacy embedding column (real[]) — always safe to add
-    await client.query(`
-      ALTER TABLE legal_corpus_chunks
-        ADD COLUMN IF NOT EXISTS embedding real[]
-    `);
 
     const ingestedCount = await client.query<{ n: number }>(
       `SELECT COUNT(*)::int AS n FROM legal_corpus_documents
@@ -127,6 +128,11 @@ export async function migrateLegalCorpus(): Promise<void> {
             [documentId, i, chunks[i]],
           );
         }
+
+        // ── Seed Qdrant with embeddings for this document's chunks ──────────
+        if (qdrantOk) {
+          await seedQdrantForDocument(documentId, doc.slug, doc.title, doc.citation, doc.domain, doc.priority, chunks);
+        }
       }
     }
 
@@ -135,10 +141,65 @@ export async function migrateLegalCorpus(): Promise<void> {
         documents: bootSeedEnabled || !hasIngestedCorpus ? LEGAL_CORPUS_SEED.length : 0,
         version: LEGAL_CORPUS_VERSION,
         skipped_boot_seed: hasIngestedCorpus && !bootSeedEnabled,
+        qdrant: qdrantOk,
       },
       "legalCorpus: migration complete",
     );
   } finally {
     client.release();
+  }
+}
+
+/**
+ * Embed each chunk and upsert into Qdrant.
+ * Point IDs are derived from document_id and chunk_index to be deterministic.
+ */
+async function seedQdrantForDocument(
+  documentId: number,
+  slug: string,
+  title: string,
+  citation: string,
+  domain: string,
+  priority: string,
+  chunks: string[],
+): Promise<void> {
+  // Delete existing points for this document (idempotent re-seed)
+  await deleteByFilter(LEGAL_CORPUS_COLLECTION, {
+    must: [{ key: "document_id", match: { value: documentId } }],
+  });
+
+  const points: QdrantPoint[] = [];
+
+  for (let i = 0; i < chunks.length; i++) {
+    const vec = await embedText(chunks[i]);
+    if (!vec) {
+      logger.warn({ documentId, chunkIndex: i, slug }, "legalCorpus: embed failed — skipping chunk in Qdrant");
+      continue;
+    }
+
+    // Deterministic point ID: documentId * 10000 + chunkIndex
+    // (supports up to 10k chunks per document, well within limits)
+    const pointId = documentId * 10000 + i;
+
+    points.push({
+      id: pointId,
+      vector: vec,
+      payload: {
+        document_id: documentId,
+        chunk_id: i,
+        chunk_index: i,
+        slug,
+        title,
+        citation,
+        domain,
+        priority,
+        content: chunks[i],
+      },
+    });
+  }
+
+  if (points.length > 0) {
+    const upserted = await upsertPoints(LEGAL_CORPUS_COLLECTION, points);
+    logger.info({ documentId, slug, chunks: chunks.length, upserted }, "legalCorpus: Qdrant seeded for document");
   }
 }

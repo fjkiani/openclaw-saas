@@ -3,6 +3,14 @@
  *
  * ZIE Factory — Forge dispatcher + routing policy updater.
  *
+ * SIMULATION NOTICE: The live Modal path requires @modal-labs/modal SDK to be
+ * installed and MODAL_TOKEN_ID + MODAL_TOKEN_SECRET env vars to be set.
+ * When DRY_RUN is set (current default), dispatchTraining() returns a stub
+ * functionCallId without calling Modal. The training_jobs row is still created
+ * in Postgres so the flywheel tracking is real — only the actual GPU training
+ * is deferred. To enable live training: install the SDK, set DRY_RUN=false,
+ * and provide Modal credentials.
+ *
  * checkThresholdsAndDispatch():
  *   Counts unused SFT/DPO rows per task_type.
  *   When a task_type hits 200 SFT + 100 DPO, creates a training_jobs row

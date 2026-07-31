@@ -5,6 +5,11 @@
  * Supabase project xfhiwodulrbbtfcqneqt as a named connector in the
  * openclaw-saas connector registry.
  *
+ * Structured data (speakers, CD hits, CrisPRO) comes from Supabase REST API.
+ * Semantic search uses Qdrant (openclaw_aacr collection, 1536-dim) instead of
+ * Supabase pgvector. Embeddings generated via Gemini gemini-embedding-001
+ * (3072-dim truncated to 1536-dim).
+ *
  * Connector slug: 'supabase-aacr'
  * Category: 'research_intelligence'
  *
@@ -14,10 +19,9 @@
  * Required credentials (stored per-tenant):
  *   supabase_url          — https://xfhiwodulrbbtfcqneqt.supabase.co
  *   service_role_key      — JWT for the project
- *   openrouter_api_key    — for embedding generation (optional — falls back to env)
  *
  * If credentials are not provided per-tenant, falls back to server-level env vars:
- *   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, OPENROUTER_API_KEY
+ *   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, GOOGLE_API_KEY, QDRANT_URL, QDRANT_API_KEY
  */
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -27,7 +31,6 @@
 export interface AACRConnectorCredentials {
   supabase_url?: string;
   service_role_key?: string;
-  openrouter_api_key?: string;
 }
 
 export interface AACRSpeakerSummary {
@@ -81,7 +84,6 @@ export interface AACRConnectorResult<T> {
 function resolveCredentials(creds?: AACRConnectorCredentials): {
   url: string;
   key: string;
-  orKey: string;
 } {
   const url = (
     creds?.supabase_url ??
@@ -94,15 +96,10 @@ function resolveCredentials(creds?: AACRConnectorCredentials): {
     process.env.SUPABASE_SERVICE_ROLE_KEY ??
     "";
 
-  const orKey =
-    creds?.openrouter_api_key ??
-    process.env.OPENROUTER_API_KEY ??
-    "";
-
   if (!url) throw new Error("supabase-aacr connector: supabase_url not configured");
   if (!key) throw new Error("supabase-aacr connector: service_role_key not configured");
 
-  return { url, key, orKey };
+  return { url, key };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -137,41 +134,39 @@ async function get<T>(
   return { data, count };
 }
 
-async function rpc<T>(
-  url: string,
-  key: string,
-  fn: string,
-  body: Record<string, unknown>,
-): Promise<T[]> {
-  const res = await fetch(`${url}/rest/v1/rpc/${fn}`, {
-    method: "POST",
-    headers: {
-      apikey: key,
-      Authorization: `Bearer ${key}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`supabase-aacr RPC ${fn}: HTTP ${res.status} — ${text.slice(0, 200)}`);
-  }
-  return (await res.json()) as T[];
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// Embedding generation — Gemini gemini-embedding-001 (3072-dim, truncated to 1536)
+// ─────────────────────────────────────────────────────────────────────────────
 
-async function generateEmbedding(text: string, orKey: string): Promise<number[]> {
-  if (!orKey) throw new Error("supabase-aacr connector: openrouter_api_key not configured for embedding");
-  const res = await fetch("https://openrouter.ai/api/v1/embeddings", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${orKey}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ model: "openai/text-embedding-3-small", input: text.slice(0, 8000) }),
-  });
+async function generateEmbedding(text: string): Promise<number[]> {
+  const apiKey = process.env.GOOGLE_API_KEY ?? "";
+  if (!apiKey) throw new Error("supabase-aacr connector: GOOGLE_API_KEY not configured for embedding");
+
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=${apiKey}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "models/gemini-embedding-001",
+        content: { parts: [{ text: text.slice(0, 8192) }] },
+        taskType: "RETRIEVAL_QUERY",
+      }),
+      signal: AbortSignal.timeout(30_000),
+    },
+  );
+
   if (!res.ok) {
     const body = await res.text().catch(() => "");
-    throw new Error(`Embedding generation failed: HTTP ${res.status} — ${body.slice(0, 200)}`);
+    throw new Error(`Gemini embedding failed: HTTP ${res.status} — ${body.slice(0, 200)}`);
   }
-  const data = (await res.json()) as { data: Array<{ embedding: number[] }> };
-  return data.data[0].embedding;
+
+  const data = (await res.json()) as { embedding?: { values?: number[] } };
+  const vec = data.embedding?.values;
+  if (!vec?.length) throw new Error("Gemini embedding returned empty vector");
+
+  // Truncate to 1536-dim to match the openclaw_aacr Qdrant collection
+  return vec.slice(0, 1536);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -270,8 +265,8 @@ export async function getCrisPROOpps(
 }
 
 /**
- * Semantic search across all embeddings.
- * Requires openrouter_api_key for embedding generation.
+ * Semantic search across all embeddings via Qdrant.
+ * Uses Gemini for query embedding, Qdrant openclaw_aacr collection for retrieval.
  */
 export async function semanticSearch(
   query: {
@@ -280,17 +275,35 @@ export async function semanticSearch(
     match_count?: number;
     match_threshold?: number;
   },
-  creds?: AACRConnectorCredentials,
+  _creds?: AACRConnectorCredentials,
 ): Promise<AACRConnectorResult<AACRSearchResult>> {
-  const { url, key, orKey } = resolveCredentials(creds);
-  const embedding = await generateEmbedding(query.text, orKey);
+  const embedding = await generateEmbedding(query.text);
 
-  const results = await rpc<AACRSearchResult>(url, key, "match_embeddings", {
-    query_embedding: embedding,
-    match_field: query.field ?? null,
-    match_count: query.match_count ?? 10,
-    match_threshold: query.match_threshold ?? 0.65,
+  // Import Qdrant client dynamically to avoid circular deps
+  const { search: qdrantSearch, ensureCollection, AACR_COLLECTION, AACR_EMBED_DIM } = await import("../lib/qdrantClient.js");
+
+  await ensureCollection(AACR_COLLECTION, AACR_EMBED_DIM, "Cosine");
+
+  const qdrantFilter = query.field
+    ? { must: [{ key: "field_name", match: { value: query.field } }] }
+    : undefined;
+
+  const hits = await qdrantSearch(AACR_COLLECTION, embedding, {
+    limit: query.match_count ?? 10,
+    scoreThreshold: query.match_threshold ?? 0.65,
+    filter: qdrantFilter,
   });
+
+  const results: AACRSearchResult[] = hits.map((h) => ({
+    id: Number(h.payload.id ?? h.id),
+    source_table: String(h.payload.source_table ?? "aacr_embeddings"),
+    talk_id: String(h.payload.talk_id ?? null),
+    speaker_name: String(h.payload.speaker_name ?? null),
+    session_slug: String(h.payload.session_slug ?? null),
+    field_name: String(h.payload.field_name ?? ""),
+    chunk_text: String(h.payload.chunk_text ?? ""),
+    similarity: h.score,
+  }));
 
   return {
     data: results,

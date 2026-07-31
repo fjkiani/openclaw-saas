@@ -22,6 +22,7 @@ import {
   Moon,
   Scale,
   ShieldCheck,
+  Workflow,
 } from "lucide-react";
 
 const navItems = [
@@ -31,6 +32,7 @@ const navItems = [
   { href: "/zoa", icon: Zap, label: "ZOA" },
   { href: "/forge", icon: FlaskConical, label: "Model Forge" },
   { href: "/startup-counsel", icon: Scale, label: "Counsel" },
+  { href: "/workflows", icon: Workflow, label: "Workflows" },
   { href: "/rigor-gate", icon: ShieldCheck, label: "Rigor Gate" },
   { href: "/billing", icon: CreditCard, label: "Billing" },
 ];

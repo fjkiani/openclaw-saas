@@ -607,7 +607,7 @@ async function runMigrations(): Promise<void> {
         "hyperparams" jsonb NOT NULL DEFAULT '{}',
         "status" text NOT NULL DEFAULT 'draft',
         "kairos_run_id" text,
-        "compute_backend" text NOT NULL DEFAULT 'stub',
+        "compute_backend" text NOT NULL DEFAULT 'modal',
         "reforge_suggested" boolean NOT NULL DEFAULT false,
         "error" text,
         "created_at" timestamptz NOT NULL DEFAULT now(),
@@ -686,7 +686,7 @@ async function runMigrations(): Promise<void> {
         "version_id" integer NOT NULL REFERENCES "model_versions"("id"),
         "endpoint_url" text,
         "status" text NOT NULL DEFAULT 'pending',
-        "compute_backend" text NOT NULL DEFAULT 'stub',
+        "compute_backend" text NOT NULL DEFAULT 'modal',
         "deployed_at" timestamptz,
         "retired_at" timestamptz,
         "created_at" timestamptz NOT NULL DEFAULT now()

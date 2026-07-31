@@ -22,6 +22,14 @@ services:
         sync: false
       - key: GOOGLE_API_KEY
         sync: false
+      - key: QDRANT_URL
+        sync: false
+      - key: QDRANT_API_KEY
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
       - key: JUDGE_NO_CACHE
         value: "1"
       - key: MCP_BENCH_DRY_RUN

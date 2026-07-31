@@ -12,11 +12,12 @@
  *   zoa-procurement  — purchase orders, vendor negotiations
  *   zoa-compliance   — regulatory monitoring, compliance reports
  *
- * Each handler is a realistic stub that:
- *   - Validates required inputs
- *   - Returns structured output matching the skill's outputSchema
- *   - Logs execution context for observability
- *   - Handles errors gracefully (never throws)
+ * SIMULATION NOTICE: These handlers are simulated — they do not connect to
+ * real billing/payroll/HR/procurement/compliance systems. They validate
+ * inputs and return plausible structured output for workflow demonstration.
+ * Each output includes `simulated: true` to make this explicit.
+ * To make a skill production-ready, replace the handler with a real API
+ * integration (e.g., Stripe for billing, Gusto for payroll, etc.).
  */
 
 import { workflowEngine, type SkillHandler, type WorkflowRunContext } from "../../workflowEngine.js";
@@ -50,6 +51,7 @@ const zoaBilling: SkillHandler = async (
     total_amount_usd: totalAmount,
     summary: `Processed ${processed} invoices: ${reconciled} reconciled, ${disputes} flagged for dispute`,
     run_id: ctx.runId,
+    simulated: true,
   };
 };
 
@@ -84,6 +86,7 @@ const zoaScheduling: SkillHandler = async (
     duration_minutes: duration,
     summary: `Found ${proposedSlots.length} available slots for ${attendees.length} attendee(s)`,
     run_id: ctx.runId,
+    simulated: true,
   };
 };
 
@@ -117,6 +120,7 @@ const zoaPayroll: SkillHandler = async (
     tax_withheld_usd: taxWithheld,
     summary: `Payroll complete for ${count} employees: gross $${totalGross.toLocaleString()}, net $${totalNet.toLocaleString()}`,
     run_id: ctx.runId,
+    simulated: true,
   };
 };
 
@@ -170,6 +174,7 @@ const zoaHR: SkillHandler = async (
     status,
     details,
     run_id: ctx.runId,
+    simulated: true,
   };
 };
 
@@ -202,6 +207,7 @@ const zoaProcurement: SkillHandler = async (
     status: "submitted",
     summary: `PO ${poNumber} submitted to ${vendor}: ${items.length} item(s), $${totalUsd.toFixed(2)}`,
     run_id: ctx.runId,
+    simulated: true,
   };
 };
 
@@ -237,6 +243,7 @@ const zoaCompliance: SkillHandler = async (
     report_url: `https://openclaw.ai/compliance/reports/${ctx.runId}`,
     summary: `${passed}/${checksRun} checks passed for ${domain} (${regulations.join(", ")})`,
     run_id: ctx.runId,
+    simulated: true,
   };
 };
 

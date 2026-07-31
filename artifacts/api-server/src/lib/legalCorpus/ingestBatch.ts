@@ -4,7 +4,7 @@
  * Extends the single-doc `ingestLegalDocument` pattern with:
  *   - source_type / source_url / source_hash columns
  *   - Skip-if-hash-matches (avoids re-embedding unchanged documents)
- *   - Writes to both `embedding real[]` and `embedding_vec vector(2048)`
+ *   - Writes embeddings to Qdrant (openclaw_legal_corpus collection)
  *
  * Used by the ingest CLI and can be called from the API server.
  */
@@ -14,6 +14,14 @@ import { chunkLegalText } from "./chunkText.js";
 import { embedText } from "./embeddings.js";
 import { LEGAL_CORPUS_VERSION } from "./documents.js";
 import { logger } from "../logger.js";
+import {
+  ensureCollection,
+  upsertPoints,
+  deleteByFilter,
+  LEGAL_CORPUS_COLLECTION,
+  LEGAL_EMBED_DIM,
+  type QdrantPoint,
+} from "../qdrantClient.js";
 
 export interface IngestBatchEntry {
   slug: string;
@@ -34,6 +42,7 @@ export interface IngestBatchResult {
   document_id: number;
   chunks: number;
   skipped: boolean;
+  qdrant_points: number;
 }
 
 /**
@@ -51,7 +60,8 @@ export async function computeSourceHash(content: string): Promise<string> {
 /**
  * Ingest a single document with source_hash idempotency.
  * If source_hash is provided and matches the stored hash, the document is skipped.
- * Otherwise, the document is upserted and all chunks are recreated.
+ * Otherwise, the document is upserted, chunks recreated in Postgres, and
+ * embeddings upserted to Qdrant.
  */
 export async function ingestBatchDocument(
   entry: IngestBatchEntry,
@@ -82,6 +92,7 @@ export async function ingestBatchDocument(
         document_id: 0,
         chunks: 0,
         skipped: true,
+        qdrant_points: 0,
       };
     }
   }
@@ -130,28 +141,64 @@ export async function ingestBatchDocument(
   // ── Chunk + embed ──────────────────────────────────────────────────────
   const chunks = chunkLegalText(content);
   for (let i = 0; i < chunks.length; i++) {
-    const vec = await embedText(chunks[i]);
-    // Write to both embedding (real[]) and embedding_vec (vector) columns
     await pool.query(
-      `INSERT INTO legal_corpus_chunks (document_id, chunk_index, content, embedding, embedding_vec)
-       VALUES ($1, $2, $3, $4, $5)`,
-      [
-        documentId,
-        i,
-        chunks[i],
-        vec ?? null,
-        vec ? JSON.stringify(vec) : null, // pgvector accepts JSON string for vector type
-      ],
+      `INSERT INTO legal_corpus_chunks (document_id, chunk_index, content)
+       VALUES ($1, $2, $3)`,
+      [documentId, i, chunks[i]],
     );
   }
 
-  logger.info({ slug, chunks: chunks.length }, "ingestBatch: document ingested");
+  // ── Embed and upsert to Qdrant ─────────────────────────────────────────
+  let qdrantPoints = 0;
+  const qdrantOk = await ensureCollection(LEGAL_CORPUS_COLLECTION, LEGAL_EMBED_DIM, "Cosine");
+
+  if (qdrantOk) {
+    // Delete existing points for this document (idempotent re-ingest)
+    await deleteByFilter(LEGAL_CORPUS_COLLECTION, {
+      must: [{ key: "document_id", match: { value: documentId } }],
+    });
+
+    const points: QdrantPoint[] = [];
+    for (let i = 0; i < chunks.length; i++) {
+      const vec = await embedText(chunks[i]);
+      if (!vec) {
+        logger.warn({ documentId, chunkIndex: i, slug }, "ingestBatch: embed failed — skipping chunk in Qdrant");
+        continue;
+      }
+
+      const pointId = documentId * 10000 + i;
+      points.push({
+        id: pointId,
+        vector: vec,
+        payload: {
+          document_id: documentId,
+          chunk_id: i,
+          chunk_index: i,
+          slug,
+          title,
+          citation: citation ?? "",
+          domain,
+          priority,
+          content: chunks[i],
+        },
+      });
+    }
+
+    if (points.length > 0) {
+      qdrantPoints = await upsertPoints(LEGAL_CORPUS_COLLECTION, points);
+    }
+  } else {
+    logger.warn({ slug }, "ingestBatch: Qdrant not configured — chunks stored in Postgres only (BM25-only retrieval)");
+  }
+
+  logger.info({ slug, chunks: chunks.length, qdrantPoints }, "ingestBatch: document ingested");
 
   return {
     slug,
     document_id: documentId,
     chunks: chunks.length,
     skipped: false,
+    qdrant_points: qdrantPoints,
   };
 }
 
@@ -163,7 +210,7 @@ export async function ingestBatch(
   entries: IngestBatchEntry[],
   opts?: { delayMs?: number },
 ): Promise<IngestBatchResult[]> {
-  const delayMs = opts?.delayMs ?? 1000; // 1s default for OpenRouter rate limit
+  const delayMs = opts?.delayMs ?? 1000; // 1s default for embedding rate limit
   const results: IngestBatchResult[] = [];
 
   for (const entry of entries) {

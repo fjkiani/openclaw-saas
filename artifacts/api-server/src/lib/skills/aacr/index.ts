@@ -8,7 +8,7 @@
  *   aacr-semantic-search  — semantic search over AACR 2026 corpus
  *   crispro-scorer        — fetch + score CrisPRO opportunities for matched speakers
  *   cd-hit-extractor      — fetch cognitive dissonance hits for matched speakers
- *   crm-push              — stub: log payload (real CRM push deferred until connector is live)
+ *   crm-push              — simulated: logs payload (real CRM push requires OAuth connector)
  *
  * Usage (in index.ts, after workflowEngine.init(pool)):
  *   import { registerAACRSkills } from './lib/skills/aacr/index.js';
@@ -444,9 +444,13 @@ const cdHitExtractor: SkillHandler = async (input) => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Skill 4: crm-push (stub — logs payload, returns receipt)
+// Skill 4: crm-push (SIMULATED — logs payload, returns receipt)
 // Input:  { opportunities?: CrisPROOpportunity[], cd_hits?: CDHit[], ... }
-// Output: { pushed: number, crm_record_ids: string[], status: 'stub' }
+// Output: { pushed: number, crm_record_ids: string[], status: 'simulated' }
+//
+// SIMULATION NOTICE: This skill does not push to a real CRM. It logs the
+// payload and returns a simulated receipt. To activate real CRM push,
+// implement a HubSpot/Salesforce OAuth connector and replace this handler.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const crmPush: SkillHandler = async (input) => {
@@ -457,18 +461,19 @@ const crmPush: SkillHandler = async (input) => {
     {
       opp_count: opps.length,
       cd_hit_count: cdHits.length,
-      note: "crm-push is a stub — real CRM push deferred until Crunchbase/HubSpot connector is live",
+      note: "crm-push is simulated — real CRM push requires HubSpot/Salesforce OAuth connector",
     },
-    "crm-push: stub invoked"
+    "crm-push: simulated invocation"
   );
 
-  // Return a stub receipt so the workflow run completes successfully
+  // Return a simulated receipt so the workflow run completes successfully
   return {
     pushed: opps.length,
-    crm_record_ids: opps.map((_, i) => `stub-crm-${Date.now()}-${i}`),
+    crm_record_ids: opps.map((_, i) => `sim-crm-${Date.now()}-${i}`),
     cd_hits_logged: cdHits.length,
-    status: "stub" as const,
-    message: "CRM push is a stub. Replace connectors/crunchbase.ts mock with real OAuth flow to activate.",
+    status: "simulated" as const,
+    simulated: true,
+    message: "CRM push is simulated. Implement a HubSpot/Salesforce OAuth connector to activate real push.",
   };
 };
 

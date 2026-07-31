@@ -2,6 +2,7 @@ import { pool } from "@workspace/db";
 import { logger } from "../logger.js";
 import { COFOUNDER_STATUTE_SLUGS } from "./cofounderSlugs.js";
 import { LEGAL_CORPUS_VERSION } from "./documents.js";
+import { collectionInfo, LEGAL_CORPUS_COLLECTION } from "../qdrantClient.js";
 
 export interface LegalCorpusHit {
   chunk_id: number;
@@ -221,12 +222,13 @@ export async function legalCorpusStatus(): Promise<LegalCorpusStatusResult> {
       by_source[r.source_type] = parseInt(r.n, 10);
     }
 
-    // ── embedding coverage ─────────────────────────────────────────────────
+    // ── embedding coverage (from Qdrant) ───────────────────────────────────
     const totalChunks = parseInt(chunks.rows[0]?.n ?? "0", 10);
-    const embeddedRows = await pool.query<{ n: string }>(
-      `SELECT COUNT(*) AS n FROM legal_corpus_chunks WHERE embedding_vec IS NOT NULL`,
-    );
-    const embeddedChunks = parseInt(embeddedRows.rows[0]?.n ?? "0", 10);
+    let embeddedChunks = 0;
+    const qdrantInfo = await collectionInfo(LEGAL_CORPUS_COLLECTION);
+    if (qdrantInfo) {
+      embeddedChunks = qdrantInfo.points_count;
+    }
     const embedded_pct = totalChunks > 0 ? embeddedChunks / totalChunks : 0;
 
     return {
