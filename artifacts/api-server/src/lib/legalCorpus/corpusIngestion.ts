@@ -199,7 +199,7 @@ async function ingestOneDoc(
       `INSERT INTO legal_corpus_documents
          (slug, title, citation, domain, tags, priority, corpus_version, content, source_type, source_url, source_hash, updated_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11, now())
-       ON CONFLICT (source_hash) DO UPDATE SET updated_at = now()
+       ON CONFLICT (slug) DO UPDATE SET updated_at = now()
        RETURNING id`,
       [
         slug,
