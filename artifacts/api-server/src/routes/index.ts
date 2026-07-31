@@ -22,6 +22,7 @@ import intelligenceRouter from "./intelligence.js";
 import workflowsRouter from "./workflows.js";
 import archonRouter from "./archon.js";
 import statusRouter from "./status.js";
+import sovereignRouter from "./sovereign.js";
 import rigorRouter from "./rigor.js";
 
 const router: IRouter = Router();
@@ -49,6 +50,7 @@ router.use(intelligenceRouter);
 router.use(workflowsRouter);
 router.use(archonRouter);
 router.use(statusRouter);
+router.use("/api/sovereign", sovereignRouter);
 router.use("/v1/rigor", rigorRouter);
 
 export default router;
