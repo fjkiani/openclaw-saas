@@ -7,6 +7,9 @@ import {
   clerkProxyMiddleware,
 } from "./middlewares/clerkProxyMiddleware";
 import router from "./routes";
+import corpusRouter from "./routes/corpus.js";
+import sovereignRouter from "./routes/sovereign.js";
+import localAuthRouter from "./routes/localAuth.js";
 import { handleMcpRequest } from "./lib/mcp/server.js";
 import { logger } from "./lib/logger";
 
@@ -100,32 +103,20 @@ if (process.env.CLERK_SECRET_KEY?.startsWith("sk_")) {
 app.use("/api", router);
 
 // TEMP DIAGNOSTIC: report whether the V2 routers resolved at import time.
-app.get("/api/_diag/v2", async (_req: Request, res: Response) => {
-  const probe: Record<string, unknown> = { buildMarker: "v2-diag-1" };
-  try {
-    const mod = await import("./routes/index.js");
-    const r = mod.default;
-    probe.routerType = typeof r;
-    // Express routers expose a `stack` of layers; count them.
-    probe.layerCount = Array.isArray((r as any)?.stack) ? (r as any).stack.length : null;
-    probe.mountedPaths = Array.isArray((r as any)?.stack)
-      ? (r as any).stack
-          .map((l: any) => l?.regexp?.source ?? l?.path ?? l?.route?.path ?? "?")
-          .filter((s: string) => typeof s === "string")
-          .slice(0, 60)
-      : null;
-  } catch (e) {
-    probe.routerImportError = e instanceof Error ? e.message : String(e);
-  }
-  for (const name of ["corpus", "sovereign", "localAuth"]) {
-    try {
-      await import(`./routes/${name}.js`);
-      probe[`import_${name}`] = "ok";
-    } catch (e) {
-      probe[`import_${name}`] = e instanceof Error ? e.message : String(e);
-    }
-  }
-  res.json(probe);
+const routePathsOf = (r: any): string[] =>
+  Array.isArray(r?.stack)
+    ? r.stack
+        .map((l: any) => (l?.route?.path ?? (l?.name === "router" ? "<mounted-router>" : null)))
+        .filter((s: any) => typeof s === "string")
+    : [];
+app.get("/api/_diag/v2", (_req: Request, res: Response) => {
+  res.json({
+    buildMarker: "v2-diag-2",
+    corpus: { type: typeof corpusRouter, routes: routePathsOf(corpusRouter) },
+    sovereign: { type: typeof sovereignRouter, routes: routePathsOf(sovereignRouter) },
+    localAuth: { type: typeof localAuthRouter, routes: routePathsOf(localAuthRouter) },
+    mainRouterLayers: Array.isArray((router as any)?.stack) ? (router as any).stack.length : null,
+  });
 });
 
 // MCP (Model Context Protocol) server — Streamable HTTP transport at /mcp.
