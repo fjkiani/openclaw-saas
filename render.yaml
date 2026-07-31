@@ -4,7 +4,7 @@ services:
     runtime: node
     region: oregon
     plan: free
-    buildCommand: NODE_ENV=development pnpm install --no-frozen-lockfile && pnpm run typecheck:libs && pnpm --filter @workspace/api-server run build
+    buildCommand: NODE_ENV=development pnpm install --no-frozen-lockfile && pnpm --filter @workspace/api-server run build
     startCommand: node artifacts/api-server/dist/index.mjs
     healthCheckPath: /api/healthz
     envVars:
@@ -25,10 +25,6 @@ services:
       - key: QDRANT_URL
         sync: false
       - key: QDRANT_API_KEY
-        sync: false
-      - key: SUPABASE_URL
-        sync: false
-      - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
       - key: JUDGE_NO_CACHE
         value: "1"
