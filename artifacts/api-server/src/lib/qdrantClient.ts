@@ -19,7 +19,14 @@ const QDRANT_API_KEY = process.env.QDRANT_API_KEY ?? "";
 export const LEGAL_CORPUS_COLLECTION = "openclaw_legal_corpus";
 export const AACR_COLLECTION = "openclaw_aacr";
 
-export const LEGAL_EMBED_DIM = 3072;
+/**
+ * Legal-corpus vector dimension. Env-overridable so the collection matches the
+ * active embedding provider: Cohere embed-english-v3.0 = 1024, Gemini
+ * gemini-embedding-001 = 3072. Default 1024 (Cohere is the default provider
+ * when COHERE_API_KEY is set). Changing this requires recreating the
+ * collection (see recreateCollection) — vectors of different dims cannot mix.
+ */
+export const LEGAL_EMBED_DIM = Number(process.env.LEGAL_EMBED_DIM ?? 1024);
 export const AACR_EMBED_DIM = 1536;
 
 function headers(): Record<string, string> {
@@ -122,6 +129,58 @@ export async function ensureCollection(
     return true;
   } catch (err: unknown) {
     logger.error({ err, collection: collectionName }, "qdrantClient: create collection failed");
+    return false;
+  }
+}
+
+/**
+ * Delete a collection and recreate it empty at the given dimension.
+ * Required when switching embedding providers (different vector dims) — Qdrant
+ * cannot change a collection's vector size in place, and ensureCollection is a
+ * no-op when the collection already exists. DESTRUCTIVE: all points are lost.
+ * Only use on collections this app owns (openclaw_*), never on shared ones.
+ */
+export async function recreateCollection(
+  collectionName: string,
+  dims: number,
+  distance: "Cosine" | "Dot" | "Euclid" = "Cosine",
+): Promise<boolean> {
+  if (!isConfigured()) return false;
+
+  // Delete if it exists (204/404 both fine).
+  try {
+    await fetch(`${QDRANT_URL}/collections/${collectionName}?timeout=30`, {
+      method: "DELETE",
+      headers: headers(),
+      signal: AbortSignal.timeout(30_000),
+    });
+    logger.warn({ collection: collectionName }, "qdrantClient: collection deleted for recreate");
+  } catch (err: unknown) {
+    logger.warn({ err, collection: collectionName }, "qdrantClient: delete during recreate failed (may not exist)");
+  }
+
+  // Recreate empty at the new dim.
+  try {
+    const res = await fetch(`${QDRANT_URL}/collections/${collectionName}?timeout=30`, {
+      method: "PUT",
+      headers: headers(),
+      body: JSON.stringify({
+        vectors: { size: dims, distance },
+        on_disk_payload: true,
+      }),
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      logger.error({ collection: collectionName, status: res.status, body: body.slice(0, 200) }, "qdrantClient: recreate create failed");
+      return false;
+    }
+    await createPayloadIndex(collectionName, "document_id", "integer");
+    await createPayloadIndex(collectionName, "domain", "keyword");
+    logger.info({ collection: collectionName, dims, distance }, "qdrantClient: collection recreated");
+    return true;
+  } catch (err: unknown) {
+    logger.error({ err, collection: collectionName }, "qdrantClient: recreate failed");
     return false;
   }
 }

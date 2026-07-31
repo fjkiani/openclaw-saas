@@ -6,6 +6,7 @@
  * POST /api/v1/legal/kb/ingest
  * POST /api/v1/legal/kb/embed-backfill
  * POST /api/v1/legal/kb/cleanup-seeds
+ * POST /api/v1/legal/kb/recreate-collection
  */
 
 import { Router, type Request, type Response } from "express";
@@ -15,6 +16,7 @@ import { backfillLegalCorpusEmbeddings } from "../lib/legalCorpus/backfillEmbedd
 import { cleanupBootSeedDocuments } from "../lib/legalCorpus/cleanupSeeds.js";
 import { legalCorpusStatus } from "../lib/legalCorpus/retrieve.js";
 import { ingestLegalDocument } from "../lib/legalCorpus/ingest.js";
+import { recreateCollection, collectionInfo, LEGAL_CORPUS_COLLECTION, LEGAL_EMBED_DIM } from "../lib/qdrantClient.js";
 
 const router = Router();
 
@@ -130,6 +132,34 @@ router.post("/v1/legal/kb/cleanup-seeds", async (_req: Request, res: Response): 
     chunks: status.chunks,
     by_source: status.by_source,
     embedded_pct: status.embedded_pct,
+  });
+});
+
+/**
+ * POST /v1/legal/kb/recreate-collection
+ * Drop + recreate the legal-corpus Qdrant collection at the active embedding
+ * dimension (LEGAL_EMBED_DIM). Required after switching embedding providers
+ * (e.g. Gemini 3072-dim -> Cohere 1024-dim). DESTRUCTIVE: wipes all vectors;
+ * run embed-backfill afterwards to re-vectorize. Same auth as embed-backfill.
+ */
+router.post("/v1/legal/kb/recreate-collection", async (req: Request, res: Response): Promise<void> => {
+  const secret = process.env.LEGAL_EMBED_BACKFILL_SECRET?.trim();
+  if (secret) {
+    const provided = req.header("x-embed-backfill-secret");
+    if (provided !== secret) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+  }
+
+  const ok = await recreateCollection(LEGAL_CORPUS_COLLECTION, LEGAL_EMBED_DIM, "Cosine");
+  const info = await collectionInfo(LEGAL_CORPUS_COLLECTION);
+  res.status(ok ? 200 : 500).json({
+    ok,
+    collection: LEGAL_CORPUS_COLLECTION,
+    dims: LEGAL_EMBED_DIM,
+    points: info?.points_count ?? null,
+    status: info?.status ?? null,
   });
 });
 
