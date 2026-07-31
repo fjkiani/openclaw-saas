@@ -115,8 +115,9 @@ export async function ensureCollection(
 
     logger.info({ collection: collectionName, dims, distance }, "qdrantClient: collection created");
 
-    // Create payload index for document_id (required for filter-based delete/search)
+    // Create payload indexes for fields used in filters
     await createPayloadIndex(collectionName, "document_id", "integer");
+    await createPayloadIndex(collectionName, "domain", "keyword");
 
     return true;
   } catch (err: unknown) {
