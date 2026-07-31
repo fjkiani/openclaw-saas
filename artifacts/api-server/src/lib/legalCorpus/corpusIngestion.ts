@@ -45,6 +45,7 @@ export interface IngestionJob {
   embed_failures: number;
   skipped: number;
   error?: string;
+  last_error?: string;
   started_at: string;
   finished_at?: string;
   qdrant_points?: number;
@@ -304,8 +305,10 @@ export async function startCorpusIngestion(opts: {
         try {
           await ingestOneDoc(doc, opts.source, corpusVersion, job);
         } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
           logger.error({ err, title: doc.title }, "corpusIngestion: doc failed");
           job.embed_failures++;
+          job.last_error = `${doc.title}: ${msg}`;
         }
       }
       const info = await collectionInfo(LEGAL_CORPUS_COLLECTION);
