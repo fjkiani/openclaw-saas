@@ -52,6 +52,30 @@ export async function embedText(text: string): Promise<number[] | null> {
   }
 }
 
+/**
+ * Embed with exponential-backoff retry on transient failures (rate limits,
+ * network errors). embedText returns null on any failure; this retries up to
+ * maxAttempts with backoff before giving up. Returns null only after all
+ * attempts fail — so callers can distinguish "permanently failed" from
+ * "transiently rate-limited" and keep making progress on a long backfill.
+ */
+export async function embedTextWithRetry(
+  text: string,
+  opts: { maxAttempts?: number; baseDelayMs?: number } = {},
+): Promise<number[] | null> {
+  const maxAttempts = opts.maxAttempts ?? 6;
+  const baseDelayMs = opts.baseDelayMs ?? 1000;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const vec = await embedText(text);
+    if (vec) return vec;
+    const delay = baseDelayMs * Math.pow(2, attempt) + Math.floor(Math.random() * 500);
+    logger.warn({ attempt: attempt + 1, maxAttempts, delayMs: delay }, "legalCorpus embed: retrying after failure");
+    await new Promise((r) => setTimeout(r, delay));
+  }
+  logger.error({ maxAttempts }, "legalCorpus embed: all retry attempts failed");
+  return null;
+}
+
 export function cosineSimilarity(a: number[], b: number[]): number {
   if (a.length !== b.length || a.length === 0) return 0;
   let dot = 0;

@@ -1,6 +1,6 @@
 import { pool } from "@workspace/db";
 import { logger } from "../logger.js";
-import { embedText } from "./embeddings.js";
+import { embedTextWithRetry } from "./embeddings.js";
 import {
   ensureCollection,
   upsertPoints,
@@ -13,6 +13,7 @@ import {
 export interface EmbedBackfillResult {
   updated: number;
   remaining: number;
+  failed?: number;
   stopped_early: boolean;
 }
 
@@ -80,7 +81,7 @@ export async function backfillLegalCorpusEmbeddings(
     );
 
     // Filter to chunks not yet in Qdrant
-    const toEmbed = allRows.rows.filter((row) => {
+    const toEmbed = allRows.rows.filter((row: (typeof allRows.rows)[number]) => {
       const pointId = row.document_id * 10000 + row.chunk_index;
       return !existingIds.has(pointId);
     });
@@ -93,6 +94,7 @@ export async function backfillLegalCorpusEmbeddings(
     logger.info({ toEmbed: toEmbed.length }, "legalCorpus: backfill — chunks needing embedding");
 
     let totalUpdated = 0;
+    let failed = 0;
     let stoppedEarly = false;
 
     const points: QdrantPoint[] = [];
@@ -102,10 +104,13 @@ export async function backfillLegalCorpusEmbeddings(
         break;
       }
 
-      const vec = await embedText(row.content);
+      // Retry with backoff; skip only after all attempts fail so one bad chunk
+      // (or a transient rate limit) does not halt the entire backfill.
+      const vec = await embedTextWithRetry(row.content);
       if (!vec) {
-        stoppedEarly = true;
-        break;
+        failed++;
+        logger.warn({ documentId: row.document_id, chunkIndex: row.chunk_index }, "legalCorpus: backfill — chunk embed failed after retries, skipping");
+        continue;
       }
 
       const pointId = row.document_id * 10000 + row.chunk_index;
@@ -136,13 +141,13 @@ export async function backfillLegalCorpusEmbeddings(
       await upsertPoints(LEGAL_CORPUS_COLLECTION, points);
     }
 
-    const remaining = toEmbed.length - totalUpdated;
+    const remaining = toEmbed.length - totalUpdated - failed;
 
-    if (totalUpdated > 0) {
-      logger.info({ updated: totalUpdated, remaining }, "legalCorpus: embeddings backfilled to Qdrant");
+    if (totalUpdated > 0 || failed > 0) {
+      logger.info({ updated: totalUpdated, failed, remaining }, "legalCorpus: embeddings backfilled to Qdrant");
     }
 
-    return { updated: totalUpdated, remaining, stopped_early: stoppedEarly };
+    return { updated: totalUpdated, remaining, failed, stopped_early: stoppedEarly };
   } catch (err: unknown) {
     logger.warn({ err }, "legalCorpus: embedding backfill failed");
     return { updated: 0, remaining: -1, stopped_early: true };

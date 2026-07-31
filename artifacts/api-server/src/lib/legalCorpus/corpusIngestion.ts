@@ -20,7 +20,7 @@ import crypto from "node:crypto";
 import { pool } from "@workspace/db";
 import { logger } from "../logger.js";
 import { chunkLegalText } from "./chunkText.js";
-import { embedText } from "./embeddings.js";
+import { embedTextWithRetry } from "./embeddings.js";
 import {
   ensureCollection,
   upsertPoints,
@@ -248,7 +248,7 @@ async function ingestOneDoc(
   const points: QdrantPoint[] = [];
   for (let b = 0; b < chunks.length; b += EMBED_BATCH) {
     const batch = chunks.slice(b, b + EMBED_BATCH);
-    const vecs = await Promise.all(batch.map((c) => embedText(c)));
+    const vecs = await Promise.all(batch.map((c) => embedTextWithRetry(c)));
     for (let k = 0; k < batch.length; k++) {
       const vec = vecs[k];
       const idx = b + k;
