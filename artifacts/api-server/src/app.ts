@@ -102,6 +102,11 @@ if (process.env.CLERK_SECRET_KEY?.startsWith("sk_")) {
 
 app.use("/api", router);
 
+// TEMP DIAGNOSTIC: mount corpus router directly in app.ts to isolate the issue.
+app.use("/api/_direct/corpus", corpusRouter);
+app.use("/api/_direct/sovereign", sovereignRouter);
+app.use("/api/_direct/auth", localAuthRouter);
+
 // TEMP DIAGNOSTIC: report whether the V2 routers resolved at import time.
 const routePathsOf = (r: any): string[] =>
   Array.isArray(r?.stack)
