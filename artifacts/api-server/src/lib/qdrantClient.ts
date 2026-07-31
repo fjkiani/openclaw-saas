@@ -114,9 +114,49 @@ export async function ensureCollection(
     }
 
     logger.info({ collection: collectionName, dims, distance }, "qdrantClient: collection created");
+
+    // Create payload index for document_id (required for filter-based delete/search)
+    await createPayloadIndex(collectionName, "document_id", "integer");
+
     return true;
   } catch (err: unknown) {
     logger.error({ err, collection: collectionName }, "qdrantClient: create collection failed");
+    return false;
+  }
+}
+
+/**
+ * Create a payload index on a field (required for filtering).
+ * Qdrant requires indexes on fields used in filters.
+ */
+export async function createPayloadIndex(
+  collectionName: string,
+  fieldName: string,
+  fieldSchema: "integer" | "keyword" | "float" | "bool" | "datetime" | "text" | "geo" = "keyword",
+): Promise<boolean> {
+  if (!isConfigured()) return false;
+
+  try {
+    const res = await fetch(`${QDRANT_URL}/collections/${collectionName}/index?wait=true`, {
+      method: "PUT",
+      headers: headers(),
+      body: JSON.stringify({ field_name: fieldName, field_schema: fieldSchema }),
+      signal: AbortSignal.timeout(15_000),
+    });
+
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      // Index may already exist — that's fine
+      if (res.status !== 409) {
+        logger.warn({ collection: collectionName, fieldName, status: res.status, body: body.slice(0, 200) }, "qdrantClient: createPayloadIndex failed");
+      }
+      return false;
+    }
+
+    logger.info({ collection: collectionName, fieldName, fieldSchema }, "qdrantClient: payload index created");
+    return true;
+  } catch (err: unknown) {
+    logger.warn({ err, collection: collectionName, fieldName }, "qdrantClient: createPayloadIndex error");
     return false;
   }
 }
