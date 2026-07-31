@@ -3,7 +3,7 @@
  *
  * Returns a comprehensive health summary of all subsystems:
  *   - database connectivity
- *   - archon (OpenRouter key presence)
+ *   - LLM providers (cloud Groq/Gemini and/or local Ollama)
  *   - workflow engine
  *   - forge (DRY_RUN mode)
  *   - env var checklist
@@ -32,12 +32,21 @@ router.get("/status", async (_req: Request, res: Response) => {
     checks.database = { ok: false, detail: err.message };
   }
 
-  // 2. Archon / OpenRouter
-  const hasOrKey = !!(process.env.OPENROUTER_API_KEY || process.env.OPENROUTER_API_KEY_2);
-  checks.archon = {
-    ok: hasOrKey,
-    detail: hasOrKey ? "OPENROUTER_API_KEY set" : "OPENROUTER_API_KEY missing — skill generation disabled",
-  };
+  // 2. LLM providers (cloud Groq/Gemini and/or local Ollama)
+  try {
+    const { providerStatus } = await import("../lib/providers/index.js");
+    const ps = await providerStatus();
+    const cloudOk = ps.cloud.groq_key_set || ps.cloud.gemini_key_set;
+    const localOk = ps.local.configured && ps.local.reachable;
+    checks.providers = {
+      ok: cloudOk || localOk,
+      detail:
+        `backend=${ps.llm_backend} | cloud(groq=${ps.cloud.groq_key_set}, gemini=${ps.cloud.gemini_key_set})` +
+        (ps.local.configured ? ` | local(reachable=${ps.local.reachable}, chat=${ps.local.chat_model})` : ""),
+    };
+  } catch (err: any) {
+    checks.providers = { ok: false, detail: err.message };
+  }
 
   // 3. Workflow engine
   try {
@@ -61,7 +70,6 @@ router.get("/status", async (_req: Request, res: Response) => {
   // 5. Env var checklist
   const requiredVars = [
     "DATABASE_URL",
-    "OPENROUTER_API_KEY",
     "OPENCLAW_SERVICE_TOKEN",
     "NODE_ENV",
   ];
