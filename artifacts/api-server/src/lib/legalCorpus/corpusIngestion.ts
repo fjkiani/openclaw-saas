@@ -191,6 +191,15 @@ async function ingestOneDoc(
   const slug = `${sourceType}-` + slugify(doc.title) + "-" + sourceHash.slice(0, 8);
   const domain = doc.domain ?? "contract";
 
+  // Idempotency: identical content already ingested (same source_hash) → skip.
+  // The partial unique index on source_hash rejects duplicate content, so check
+  // first and treat re-ingestion of identical content as a no-op rather than an error.
+  const existing = await pool.query(
+    `SELECT id FROM legal_corpus_documents WHERE source_hash = $1 LIMIT 1`,
+    [sourceHash],
+  );
+  if (existing.rows.length > 0) { job.skipped++; return; }
+
   const client = await pool.connect();
   let documentId: number;
   try {
