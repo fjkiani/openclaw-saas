@@ -34,6 +34,11 @@ import {
   XCircle,
   AlertTriangle,
   Info,
+  Server,
+  Database,
+  Download,
+  Cpu,
+  Globe,
 } from "lucide-react";
 
 // ── Admin token management ───────────────────────────────────────────────────
@@ -120,13 +125,14 @@ interface FlywheelDomain {
 
 // ── Tab definitions ──────────────────────────────────────────────────────────
 
-type TabId = "builder" | "forge" | "intelligence" | "flywheel";
+type TabId = "builder" | "forge" | "intelligence" | "flywheel" | "deployment";
 
 const TABS: Array<{ id: TabId; label: string; icon: React.ComponentType<{ className?: string }> }> = [
   { id: "builder", label: "Workflow Builder", icon: WorkflowIcon },
   { id: "forge", label: "Skill Forge", icon: FlaskConical },
   { id: "intelligence", label: "Intelligence", icon: Search },
   { id: "flywheel", label: "Flywheel", icon: TrendingUp },
+  { id: "deployment", label: "Deployment", icon: Server },
 ];
 
 // ── Main component ───────────────────────────────────────────────────────────
@@ -191,6 +197,7 @@ export default function WorkflowsPage() {
         {token && activeTab === "forge" && <SkillForgeTab token={token} />}
         {token && activeTab === "intelligence" && <IntelligenceTab token={token} />}
         {token && activeTab === "flywheel" && <FlywheelTab token={token} />}
+        {token && activeTab === "deployment" && <DeploymentTab token={token} />}
       </div>
     </Layout>
   );
@@ -416,7 +423,11 @@ function SkillForgeTab({ token }: { token: string }) {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ArchonRun | null>(null);
   const [runs, setRuns] = useState<ArchonRun[]>([]);
-  const [health, setHealth] = useState<Record<string, unknown> | null>(null);
+  const [health, setHealth] = useState<{
+    providers?: string;
+    groq_key_set?: boolean;
+    gemini_key_set?: boolean;
+  } | null>(null);
 
   const checkHealth = useCallback(async () => {
     try {
@@ -476,7 +487,7 @@ function SkillForgeTab({ token }: { token: string }) {
         {health && (
           <div className="flex items-center gap-2">
             <Badge variant="outline" className="text-[10px] font-mono">
-              {String(health.providers ?? "unknown")}
+              {health.providers ?? "unknown"}
             </Badge>
             {health.groq_key_set && (
               <Badge variant="default" className="text-[10px]">Groq</Badge>
@@ -834,6 +845,366 @@ function FlywheelTab({ token }: { token: string }) {
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+// ── Tab 5: Deployment ────────────────────────────────────────────────────────
+// Corpus ingestion, sovereign (on-prem) bundle generation, provider status,
+// and MCP server info — the V2 capabilities, all driven from the front-end.
+
+interface CorpusStats {
+  documents: number;
+  cuad_documents: number;
+  chunks: number;
+  by_source: Array<{ source_type: string; n: number }>;
+  qdrant: { collection: string; points: number; dims: number; status: string } | null;
+}
+
+interface IngestJob {
+  id: string;
+  source: string;
+  status: "queued" | "running" | "done" | "error";
+  docs_total: number;
+  docs_ingested: number;
+  chunks_ingested: number;
+  embed_failures: number;
+  error?: string;
+  qdrant_points?: number;
+}
+
+interface ProviderStatus {
+  llm_backend: string;
+  embed_backend: string;
+  local: { configured: boolean; reachable: boolean; chat_model: string; embed_model: string; models?: string[] };
+  cloud: { gemini_key_set: boolean; groq_key_set: boolean };
+  effective: { chat: string; embed: string };
+}
+
+interface SovereignFile {
+  path: string;
+  executable: boolean;
+  bytes: number;
+}
+
+function DeploymentTab({ token }: { token: string }) {
+  const [corpusStats, setCorpusStats] = useState<CorpusStats | null>(null);
+  const [ingestJob, setIngestJob] = useState<IngestJob | null>(null);
+  const [ingesting, setIngesting] = useState(false);
+  const [providers, setProviders] = useState<ProviderStatus | null>(null);
+  const [tenantName, setTenantName] = useState("my-tenant");
+  const [llmBackend, setLlmBackend] = useState<"local" | "hybrid">("local");
+  const [enableGpu, setEnableGpu] = useState(false);
+  const [bundleFiles, setBundleFiles] = useState<SovereignFile[] | null>(null);
+  const [downloading, setDownloading] = useState(false);
+  const [mcpTools, setMcpTools] = useState<Array<{ name: string; description?: string }> | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadCorpusStats = useCallback(async () => {
+    try {
+      const res = await apiCall("/api/corpus/stats", token);
+      if (res.ok) setCorpusStats(await res.json());
+    } catch { /* ignore */ }
+  }, [token]);
+
+  const loadProviders = useCallback(async () => {
+    try {
+      const res = await apiCall("/api/status", token);
+      if (res.ok) {
+        const data = await res.json();
+        // provider status is nested under checks.providers detail; also try direct
+        if (data.providers) setProviders(data.providers);
+      }
+    } catch { /* ignore */ }
+  }, [token]);
+
+  const loadMcpTools = useCallback(async () => {
+    try {
+      const apiBase = ((import.meta.env.VITE_API_URL as string | undefined) ?? "").replace(/\/+$/, "");
+      const res = await fetch(`${apiBase}/mcp`, {
+        method: "POST",
+        headers: { "content-type": "application/json", accept: "application/json, text/event-stream" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const tools = data?.result?.tools ?? data?.tools;
+        if (Array.isArray(tools)) setMcpTools(tools.map((t: { name: string; description?: string }) => ({ name: t.name, description: t.description })));
+      }
+    } catch { /* MCP may not be reachable from browser; non-fatal */ }
+  }, []);
+
+  useEffect(() => {
+    loadCorpusStats();
+    loadProviders();
+    loadMcpTools();
+  }, [loadCorpusStats, loadProviders, loadMcpTools]);
+
+  // Poll an active ingestion job.
+  useEffect(() => {
+    if (!ingestJob || (ingestJob.status !== "running" && ingestJob.status !== "queued")) return;
+    const t = setInterval(async () => {
+      try {
+        const res = await apiCall(`/api/corpus/ingest/${ingestJob.id}`, token);
+        if (res.ok) {
+          const j = await res.json();
+          setIngestJob(j);
+          if (j.status === "done" || j.status === "error") {
+            setIngesting(false);
+            loadCorpusStats();
+          }
+        }
+      } catch { /* ignore */ }
+    }, 3000);
+    return () => clearInterval(t);
+  }, [ingestJob, token, loadCorpusStats]);
+
+  const startCuadIngest = async () => {
+    setIngesting(true);
+    setError(null);
+    try {
+      const res = await apiCall("/api/corpus/ingest", token, {
+        method: "POST",
+        body: JSON.stringify({ source: "cuad" }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+      const job = await res.json();
+      setIngestJob(job);
+      if (job.status === "error") setIngesting(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setIngesting(false);
+    }
+  };
+
+  const previewBundle = async () => {
+    setError(null);
+    try {
+      const res = await apiCall("/api/sovereign/bundle/preview", token, {
+        method: "POST",
+        body: JSON.stringify({ tenantName, llmBackend, enableGpu }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+      const data = await res.json();
+      setBundleFiles(data.files ?? []);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const downloadBundle = async () => {
+    setDownloading(true);
+    setError(null);
+    try {
+      const apiBase = ((import.meta.env.VITE_API_URL as string | undefined) ?? "").replace(/\/+$/, "");
+      const res = await fetch(`${apiBase}/api/sovereign/bundle`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-openclaw-admin-token": token },
+        body: JSON.stringify({ tenantName, llmBackend, enableGpu }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${tenantName}-sovereign.tar.gz`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setDownloading(false);
+    }
+  };
+
+  return (
+    <div className="space-y-8 max-w-5xl">
+      {error && (
+        <div className="border border-red-500/40 bg-red-500/10 rounded p-3 flex items-start gap-2">
+          <XCircle className="w-4 h-4 text-red-400 mt-0.5" />
+          <p className="text-xs font-mono text-red-300">{error}</p>
+        </div>
+      )}
+
+      {/* ── Corpus ingestion ── */}
+      <section className="border border-border rounded-lg p-5">
+        <div className="flex items-center gap-2 mb-1">
+          <Database className="w-4 h-4 text-primary" />
+          <h3 className="text-sm font-mono font-semibold">Legal Corpus</h3>
+        </div>
+        <p className="text-xs font-mono text-muted-foreground mb-4">
+          Real contract corpus (CUAD — 510 attorney-labeled commercial contracts) ingested into Postgres BM25 + Qdrant vectors.
+        </p>
+        {corpusStats && (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+            <Stat label="Documents" value={corpusStats.documents} />
+            <Stat label="CUAD docs" value={corpusStats.cuad_documents} />
+            <Stat label="Chunks" value={corpusStats.chunks} />
+            <Stat label="Qdrant points" value={corpusStats.qdrant?.points ?? 0} />
+          </div>
+        )}
+        <div className="flex items-center gap-3">
+          <Button onClick={startCuadIngest} disabled={ingesting} size="sm">
+            {ingesting ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Play className="w-4 h-4 mr-2" />}
+            {ingesting ? "Ingesting…" : "Ingest CUAD Corpus"}
+          </Button>
+          <Button onClick={loadCorpusStats} variant="outline" size="sm">
+            <RefreshCw className="w-4 h-4 mr-2" /> Refresh
+          </Button>
+        </div>
+        {ingestJob && (
+          <div className="mt-4 border border-border rounded p-3 bg-muted/30">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-xs font-mono">Job {ingestJob.id}</span>
+              <Badge variant={ingestJob.status === "done" ? "default" : ingestJob.status === "error" ? "destructive" : "secondary"}>
+                {ingestJob.status}
+              </Badge>
+            </div>
+            <div className="text-xs font-mono text-muted-foreground">
+              {ingestJob.docs_ingested}/{ingestJob.docs_total} docs · {ingestJob.chunks_ingested} chunks
+              {ingestJob.embed_failures > 0 && ` · ${ingestJob.embed_failures} embed failures`}
+              {ingestJob.qdrant_points != null && ` · ${ingestJob.qdrant_points} Qdrant points`}
+            </div>
+            {ingestJob.status === "running" && ingestJob.docs_total > 0 && (
+              <div className="mt-2 h-1.5 bg-muted rounded overflow-hidden">
+                <div
+                  className="h-full bg-primary transition-all"
+                  style={{ width: `${Math.round((ingestJob.docs_ingested / ingestJob.docs_total) * 100)}%` }}
+                />
+              </div>
+            )}
+            {ingestJob.error && <p className="text-xs font-mono text-red-400 mt-2">{ingestJob.error}</p>}
+          </div>
+        )}
+      </section>
+
+      {/* ── Sovereign deployment ── */}
+      <section className="border border-border rounded-lg p-5">
+        <div className="flex items-center gap-2 mb-1">
+          <Server className="w-4 h-4 text-primary" />
+          <h3 className="text-sm font-mono font-semibold">Sovereign Deployment</h3>
+        </div>
+        <p className="text-xs font-mono text-muted-foreground mb-4">
+          Generate a self-contained on-prem / air-gapped bundle: Postgres + Qdrant + local LLM (Ollama) + API + Web, with local auth. No public-cloud dependency.
+        </p>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+          <div>
+            <label className="text-xs font-mono text-muted-foreground block mb-1">Tenant name</label>
+            <Input value={tenantName} onChange={(e) => setTenantName(e.target.value)} className="font-mono text-xs" />
+          </div>
+          <div>
+            <label className="text-xs font-mono text-muted-foreground block mb-1">LLM backend</label>
+            <select
+              value={llmBackend}
+              onChange={(e) => setLlmBackend(e.target.value as "local" | "hybrid")}
+              className="w-full bg-background border border-border rounded px-2 py-2 text-xs font-mono"
+            >
+              <option value="local">local (air-gapped)</option>
+              <option value="hybrid">hybrid (local + cloud fallback)</option>
+            </select>
+          </div>
+          <div className="flex items-end">
+            <label className="flex items-center gap-2 text-xs font-mono text-muted-foreground cursor-pointer">
+              <input type="checkbox" checked={enableGpu} onChange={(e) => setEnableGpu(e.target.checked)} className="accent-primary" />
+              Enable GPU for local LLM
+            </label>
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          <Button onClick={previewBundle} variant="outline" size="sm">Preview files</Button>
+          <Button onClick={downloadBundle} disabled={downloading} size="sm">
+            {downloading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Download className="w-4 h-4 mr-2" />}
+            Download bundle (.tar.gz)
+          </Button>
+        </div>
+        {bundleFiles && (
+          <div className="mt-4 border border-border rounded p-3 bg-muted/30">
+            <p className="text-xs font-mono text-muted-foreground mb-2">{bundleFiles.length} files:</p>
+            <div className="space-y-1">
+              {bundleFiles.map((f) => (
+                <div key={f.path} className="flex items-center justify-between text-xs font-mono">
+                  <span>{f.path}{f.executable && <span className="text-primary ml-1">(exec)</span>}</span>
+                  <span className="text-muted-foreground">{f.bytes}b</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </section>
+
+      {/* ── Providers ── */}
+      <section className="border border-border rounded-lg p-5">
+        <div className="flex items-center gap-2 mb-1">
+          <Cpu className="w-4 h-4 text-primary" />
+          <h3 className="text-sm font-mono font-semibold">LLM Providers</h3>
+        </div>
+        <p className="text-xs font-mono text-muted-foreground mb-4">
+          Active chat + embedding backends. Sovereign deploys use a locally-hosted model; cloud uses Groq/Gemini.
+        </p>
+        {providers ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="border border-border rounded p-3">
+              <p className="text-xs font-mono font-semibold mb-2">Cloud</p>
+              <StatusRow label="Groq" ok={providers.cloud.groq_key_set} />
+              <StatusRow label="Gemini" ok={providers.cloud.gemini_key_set} />
+            </div>
+            <div className="border border-border rounded p-3">
+              <p className="text-xs font-mono font-semibold mb-2">Local (Ollama)</p>
+              <StatusRow label="Configured" ok={providers.local.configured} />
+              <StatusRow label="Reachable" ok={providers.local.reachable} />
+              <p className="text-xs font-mono text-muted-foreground mt-2">
+                chat: {providers.local.chat_model} · embed: {providers.local.embed_model}
+              </p>
+            </div>
+            <div className="md:col-span-2 text-xs font-mono text-muted-foreground">
+              backend: {providers.llm_backend} · effective chat: {providers.effective.chat} · effective embed: {providers.effective.embed}
+            </div>
+          </div>
+        ) : (
+          <p className="text-xs font-mono text-muted-foreground">Loading provider status…</p>
+        )}
+      </section>
+
+      {/* ── MCP server ── */}
+      <section className="border border-border rounded-lg p-5">
+        <div className="flex items-center gap-2 mb-1">
+          <Globe className="w-4 h-4 text-primary" />
+          <h3 className="text-sm font-mono font-semibold">MCP Server</h3>
+        </div>
+        <p className="text-xs font-mono text-muted-foreground mb-4">
+          OpenClaw exposes its capabilities as Model Context Protocol tools at <span className="text-foreground">/mcp</span> (Streamable HTTP). Connect any MCP client — Claude Desktop, Cloudflare AI Playground, MCP Inspector.
+        </p>
+        {mcpTools ? (
+          <div className="space-y-1">
+            {mcpTools.map((t) => (
+              <div key={t.name} className="border border-border rounded p-2">
+                <p className="text-xs font-mono font-semibold">{t.name}</p>
+                <p className="text-xs font-mono text-muted-foreground">{t.description}</p>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-xs font-mono text-muted-foreground">Querying /mcp tools/list…</p>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="border border-border rounded p-3">
+      <p className="text-lg font-mono font-semibold">{value.toLocaleString()}</p>
+      <p className="text-xs font-mono text-muted-foreground">{label}</p>
+    </div>
+  );
+}
+
+function StatusRow({ label, ok }: { label: string; ok: boolean }) {
+  return (
+    <div className="flex items-center gap-2 text-xs font-mono">
+      {ok ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> : <XCircle className="w-3.5 h-3.5 text-red-400" />}
+      <span>{label}</span>
     </div>
   );
 }
