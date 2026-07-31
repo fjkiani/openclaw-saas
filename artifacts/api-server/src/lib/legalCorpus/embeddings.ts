@@ -22,11 +22,11 @@
 import { resolveApiKey } from "../resolveApiKey.js";
 import { logger } from "../logger.js";
 
-type EmbedProvider = "cohere" | "gemini";
+type EmbedProvider = "cohere" | "gemini" | "ollama";
 
 function selectProvider(): EmbedProvider {
   const explicit = process.env.LEGAL_EMBED_PROVIDER?.trim().toLowerCase();
-  if (explicit === "cohere" || explicit === "gemini") return explicit;
+  if (explicit === "cohere" || explicit === "gemini" || explicit === "ollama") return explicit;
   if (resolveApiKey("COHERE_API_KEY")) return "cohere";
   return "gemini";
 }
@@ -35,13 +35,18 @@ const PROVIDER: EmbedProvider = selectProvider();
 
 const COHERE_MODEL = process.env.LEGAL_EMBED_MODEL ?? "embed-english-v3.0";
 const GEMINI_MODEL = process.env.LEGAL_EMBED_MODEL ?? "gemini-embedding-001";
+/** Ollama / local model — EmbeddingGemma (google/embeddinggemma-300m) is 768-dim. */
+const OLLAMA_MODEL = process.env.LEGAL_EMBED_MODEL ?? "embeddinggemma";
+/** Base URL of the Ollama server (no trailing slash). */
+const OLLAMA_BASE = (process.env.OLLAMA_BASE_URL ?? process.env.LOCAL_LLM_BASE_URL ?? "http://localhost:11434").replace(/\/$/, "");
 
 /** Active model name (informational). */
-export const EMBED_MODEL = PROVIDER === "cohere" ? COHERE_MODEL : GEMINI_MODEL;
+export const EMBED_MODEL =
+  PROVIDER === "cohere" ? COHERE_MODEL : PROVIDER === "ollama" ? OLLAMA_MODEL : GEMINI_MODEL;
 /** Output dimension of the active provider. */
-export const EMBED_DIM = PROVIDER === "cohere" ? 1024 : 3072;
+export const EMBED_DIM = PROVIDER === "cohere" ? 1024 : PROVIDER === "ollama" ? 768 : 3072;
 /** Max texts per batch request for the active provider. */
-const BATCH_CAP = PROVIDER === "cohere" ? 96 : 100;
+const BATCH_CAP = PROVIDER === "cohere" ? 96 : PROVIDER === "ollama" ? 64 : 100;
 
 // ── Cohere ────────────────────────────────────────────────────────────────────
 
@@ -144,15 +149,54 @@ async function geminiEmbedBatch(texts: string[]): Promise<(number[] | null)[] | 
   }
 }
 
+// ── Ollama (local / sovereign — EmbeddingGemma) ───────────────────────────────
+
+/**
+ * Embed a batch of texts via Ollama's `/api/embed` endpoint, which accepts an
+ * array of inputs and returns one embedding per input in a single HTTP call.
+ * No API key and no per-request quota — the model runs locally, so this is the
+ * sovereign path that can embed the full corpus without rate limits.
+ */
+async function ollamaEmbedBatch(texts: string[]): Promise<(number[] | null)[] | null> {
+  if (texts.length === 0) return [];
+  try {
+    const res = await fetch(`${OLLAMA_BASE}/api/embed`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: OLLAMA_MODEL,
+        input: texts.map((t) => t.slice(0, 8192)),
+      }),
+      signal: AbortSignal.timeout(120_000),
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      logger.warn({ status: res.status, count: texts.length, base: OLLAMA_BASE, body: body.slice(0, 200) }, "legalCorpus ollamaEmbed: API error");
+      return null;
+    }
+    const data = (await res.json()) as { embeddings?: number[][] };
+    const embs = data.embeddings;
+    if (!embs?.length) return null;
+    return embs.map((e) => (e?.length ? e : null));
+  } catch (err: unknown) {
+    logger.warn({ err, base: OLLAMA_BASE }, "legalCorpus ollamaEmbed: failed");
+    return null;
+  }
+}
+
 // ── Public API (provider-agnostic) ────────────────────────────────────────────
 
 /**
  * Embed a single text. Returns the vector or null on failure.
- * For Cohere this is a 1-text batch; for Gemini a single embedContent call.
+ * For Cohere/Ollama this is a 1-text batch; for Gemini a single embedContent call.
  */
 export async function embedText(text: string): Promise<number[] | null> {
   if (PROVIDER === "cohere") {
     const out = await cohereEmbedBatch([text], "search_document");
+    return out?.[0] ?? null;
+  }
+  if (PROVIDER === "ollama") {
+    const out = await ollamaEmbedBatch([text]);
     return out?.[0] ?? null;
   }
   return geminiEmbedOne(text);
@@ -190,6 +234,9 @@ export async function embedBatch(texts: string[]): Promise<(number[] | null)[] |
   const slice = texts.slice(0, BATCH_CAP);
   if (PROVIDER === "cohere") {
     return cohereEmbedBatch(slice, "search_document");
+  }
+  if (PROVIDER === "ollama") {
+    return ollamaEmbedBatch(slice);
   }
   return geminiEmbedBatch(slice);
 }
