@@ -18,6 +18,79 @@ export interface EmbedBackfillResult {
 }
 
 /**
+ * In-process tracker for a fire-and-forget full backfill. Lets the route kick
+ * off the job detached (so the host's HTTP proxy timeout never applies) and
+ * lets a status endpoint report progress. Single-process (Render runs one
+ * instance), so a module-level flag is sufficient.
+ */
+export interface BackfillJobState {
+  running: boolean;
+  startedAt: string | null;
+  updated: number;
+  failed: number;
+  finishedAt: string | null;
+  error: string | null;
+}
+
+const jobState: BackfillJobState = {
+  running: false,
+  startedAt: null,
+  updated: 0,
+  failed: 0,
+  finishedAt: null,
+  error: null,
+};
+
+export function getBackfillJobState(): BackfillJobState {
+  return { ...jobState };
+}
+
+/**
+ * Start a full backfill (all remaining chunks) as a detached in-process task.
+ * Returns immediately. Idempotent: if a job is already running, returns false
+ * and does not start a second one. The task loops backfillLegalCorpusEmbeddings
+ * until no chunks remain, accumulating progress into jobState.
+ */
+export function startFullBackfillInBackground(opts: { delayMs?: number; batchSize?: number; chunkPerCall?: number } = {}): boolean {
+  if (jobState.running) return false;
+  jobState.running = true;
+  jobState.startedAt = new Date().toISOString();
+  jobState.updated = 0;
+  jobState.failed = 0;
+  jobState.finishedAt = null;
+  jobState.error = null;
+
+  const delayMs = opts.delayMs ?? 50;
+  const batchSize = opts.batchSize ?? 96;
+  const chunkPerCall = opts.chunkPerCall ?? 2000;
+
+  void (async () => {
+    try {
+      // Loop until a pass reports zero remaining (all chunks vectorized).
+      // Each pass is resumable via existing-ID skip, so this is safe to re-run.
+      for (;;) {
+        const r = await backfillLegalCorpusEmbeddings({ maxChunks: chunkPerCall, delayMs, batchSize });
+        jobState.updated += r.updated;
+        jobState.failed += r.failed ?? 0;
+        logger.info({ passUpdated: r.updated, passRemaining: r.remaining, totalUpdated: jobState.updated }, "legalCorpus: background backfill pass complete");
+        if (r.remaining <= 0 || (r.updated === 0 && (r.failed ?? 0) === 0)) {
+          break;
+        }
+      }
+      jobState.finishedAt = new Date().toISOString();
+      logger.info({ updated: jobState.updated, failed: jobState.failed }, "legalCorpus: background backfill FINISHED");
+    } catch (err: unknown) {
+      jobState.error = err instanceof Error ? err.message : String(err);
+      logger.error({ err }, "legalCorpus: background backfill failed");
+    } finally {
+      jobState.running = false;
+    }
+  })();
+
+  return true;
+}
+
+/**
  * Backfill chunk embeddings into Qdrant.
  * Reads chunks from Postgres (where content lives), embeds them, and upserts
  * to the Qdrant openclaw_legal_corpus collection.

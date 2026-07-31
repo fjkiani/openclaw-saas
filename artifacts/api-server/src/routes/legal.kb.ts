@@ -12,7 +12,7 @@
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import { legalCorpusHybridRetrieve } from "../lib/legalCorpus/hybridRetrieve.js";
-import { backfillLegalCorpusEmbeddings } from "../lib/legalCorpus/backfillEmbeddings.js";
+import { backfillLegalCorpusEmbeddings, startFullBackfillInBackground, getBackfillJobState } from "../lib/legalCorpus/backfillEmbeddings.js";
 import { cleanupBootSeedDocuments } from "../lib/legalCorpus/cleanupSeeds.js";
 import { legalCorpusStatus } from "../lib/legalCorpus/retrieve.js";
 import { ingestLegalDocument } from "../lib/legalCorpus/ingest.js";
@@ -131,6 +131,61 @@ router.post("/v1/legal/kb/cleanup-seeds", async (_req: Request, res: Response): 
     documents: status.documents,
     chunks: status.chunks,
     by_source: status.by_source,
+    embedded_pct: status.embedded_pct,
+  });
+});
+
+/**
+ * POST /v1/legal/kb/embed-backfill-full
+ * Kick off a FULL backfill (all remaining chunks) as a detached in-process
+ * task and return immediately. This decouples the job from the host's HTTP
+ * proxy timeout (Render free tier kills long requests at ~15 min), so the
+ * backfill runs to completion server-side. Idempotent: 409 if already running.
+ * Poll GET /v1/legal/kb/embed-backfill-status for progress.
+ */
+router.post("/v1/legal/kb/embed-backfill-full", async (req: Request, res: Response): Promise<void> => {
+  const secret = process.env.LEGAL_EMBED_BACKFILL_SECRET?.trim();
+  if (secret) {
+    const provided = req.header("x-embed-backfill-secret");
+    if (provided !== secret) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+  }
+
+  const BodySchema = z.object({
+    delay_ms: z.number().int().min(0).max(5000).optional(),
+    batch_size: z.number().int().min(1).max(100).optional(),
+    chunk_per_call: z.number().int().min(100).max(5000).optional(),
+  });
+  const body = BodySchema.safeParse(req.body ?? {});
+  const params = body.success ? body.data : {};
+
+  const started = startFullBackfillInBackground({
+    delayMs: params.delay_ms ?? 50,
+    batchSize: params.batch_size ?? 96,
+    chunkPerCall: params.chunk_per_call ?? 2000,
+  });
+
+  if (!started) {
+    res.status(409).json({ ok: false, error: "backfill already running", state: getBackfillJobState() });
+    return;
+  }
+  res.status(202).json({ ok: true, started: true, state: getBackfillJobState() });
+});
+
+/**
+ * GET /v1/legal/kb/embed-backfill-status
+ * Report progress of the in-process full backfill plus live corpus counts.
+ */
+router.get("/v1/legal/kb/embed-backfill-status", async (_req: Request, res: Response): Promise<void> => {
+  const status = await legalCorpusStatus();
+  const info = await collectionInfo(LEGAL_CORPUS_COLLECTION);
+  res.json({
+    ok: true,
+    job: getBackfillJobState(),
+    qdrant_points: info?.points_count ?? null,
+    chunks: status.chunks,
     embedded_pct: status.embedded_pct,
   });
 });
