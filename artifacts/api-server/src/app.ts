@@ -116,6 +116,14 @@ app.get("/api/_diag/v2", (_req: Request, res: Response) => {
     sovereign: { type: typeof sovereignRouter, routes: routePathsOf(sovereignRouter) },
     localAuth: { type: typeof localAuthRouter, routes: routePathsOf(localAuthRouter) },
     mainRouterLayers: Array.isArray((router as any)?.stack) ? (router as any).stack.length : null,
+    mainRouterMounts: Array.isArray((router as any)?.stack)
+      ? (router as any).stack.map((l: any) => ({
+          isRouter: l?.name === "router",
+          routePath: l?.route?.path ?? null,
+          regexp: l?.regexp?.source ?? null,
+          childRoutes: l?.name === "router" ? routePathsOf(l?.handle) : undefined,
+        }))
+      : null,
   });
 });
 
