@@ -7,9 +7,6 @@ import {
   clerkProxyMiddleware,
 } from "./middlewares/clerkProxyMiddleware";
 import router from "./routes";
-import corpusRouter from "./routes/corpus.js";
-import sovereignRouter from "./routes/sovereign.js";
-import localAuthRouter from "./routes/localAuth.js";
 import { handleMcpRequest } from "./lib/mcp/server.js";
 import { logger } from "./lib/logger";
 
@@ -101,36 +98,6 @@ if (process.env.CLERK_SECRET_KEY?.startsWith("sk_")) {
 }
 
 app.use("/api", router);
-
-// TEMP DIAGNOSTIC: mount corpus router directly in app.ts to isolate the issue.
-app.use("/api/_direct/corpus", corpusRouter);
-app.use("/api/_direct/sovereign", sovereignRouter);
-app.use("/api/_direct/auth", localAuthRouter);
-
-// TEMP DIAGNOSTIC: report whether the V2 routers resolved at import time.
-const routePathsOf = (r: any): string[] =>
-  Array.isArray(r?.stack)
-    ? r.stack
-        .map((l: any) => (l?.route?.path ?? (l?.name === "router" ? "<mounted-router>" : null)))
-        .filter((s: any) => typeof s === "string")
-    : [];
-app.get("/api/_diag/v2", (_req: Request, res: Response) => {
-  res.json({
-    buildMarker: "v2-diag-2",
-    corpus: { type: typeof corpusRouter, routes: routePathsOf(corpusRouter) },
-    sovereign: { type: typeof sovereignRouter, routes: routePathsOf(sovereignRouter) },
-    localAuth: { type: typeof localAuthRouter, routes: routePathsOf(localAuthRouter) },
-    mainRouterLayers: Array.isArray((router as any)?.stack) ? (router as any).stack.length : null,
-    mainRouterMounts: Array.isArray((router as any)?.stack)
-      ? (router as any).stack.map((l: any) => ({
-          isRouter: l?.name === "router",
-          routePath: l?.route?.path ?? null,
-          regexp: l?.regexp?.source ?? null,
-          childRoutes: l?.name === "router" ? routePathsOf(l?.handle) : undefined,
-        }))
-      : null,
-  });
-});
 
 // MCP (Model Context Protocol) server — Streamable HTTP transport at /mcp.
 // Exposes OpenClaw capabilities as MCP tools for any MCP client. Stateless:

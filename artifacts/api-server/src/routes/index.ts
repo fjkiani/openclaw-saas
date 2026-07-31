@@ -52,9 +52,9 @@ router.use(intelligenceRouter);
 router.use(workflowsRouter);
 router.use(archonRouter);
 router.use(statusRouter);
-router.use("/api/auth", localAuthRouter);
-router.use("/api/sovereign", sovereignRouter);
-router.use("/api/corpus", corpusRouter);
+router.use("/auth", localAuthRouter);
+router.use("/sovereign", sovereignRouter);
+router.use("/corpus", corpusRouter);
 router.use("/v1/rigor", rigorRouter);
 
 export default router;
