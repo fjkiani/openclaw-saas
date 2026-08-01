@@ -60,8 +60,12 @@ export function startFullBackfillInBackground(opts: { delayMs?: number; batchSiz
   jobState.finishedAt = null;
   jobState.error = null;
 
-  const delayMs = opts.delayMs ?? 50;
-  const batchSize = opts.batchSize ?? 96;
+  // Pace batches to stay under Gemini's free-tier per-minute embed limit
+  // (~100 req/min). batchEmbedContents counts 1 request per batch, so a
+  // 1200ms gap caps throughput at ~50 batches/min — safely under the cap
+  // while still embedding ~5,000 chunks/min (100 texts/batch).
+  const delayMs = opts.delayMs ?? 1200;
+  const batchSize = opts.batchSize ?? 100;
   const chunkPerCall = opts.chunkPerCall ?? 2000;
 
   void (async () => {
