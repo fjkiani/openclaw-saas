@@ -74,3 +74,8 @@ export function getLedger(): Ledger {
   if (!_ledger) _ledger = new Ledger();
   return _ledger;
 }
+
+/** Test-only: drop all in-process contracts so cases cannot leak into each other. */
+export function __resetLedgerForTest(): void {
+  _ledger = null;
+}

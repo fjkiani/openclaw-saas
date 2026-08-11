@@ -35,6 +35,9 @@ class EvmOracle {
     const a = this.attestations.get(entityHash);
     if (a) a.revoked = true;
   }
+  has(entityHash: string): boolean {
+    return this.attestations.has(entityHash);
+  }
   isCleared(entityHash: string): boolean {
     const a = this.attestations.get(entityHash);
     if (!a) return false;
@@ -46,6 +49,11 @@ let _oracle: EvmOracle | null = null;
 function getOracle(): EvmOracle {
   if (!_oracle) _oracle = new EvmOracle();
   return _oracle;
+}
+
+/** Test-only: drop all posted attestations so cases cannot leak into each other. */
+export function __resetOracleForTest(): void {
+  _oracle = null;
 }
 
 /** Read Canton attestation -> post to EVM oracle. Returns the on-chain entity key. */
@@ -67,4 +75,25 @@ export async function relayToEvm(cantonContractId: string, relyingParty: string)
 /** The permissioned-pool gate: is this entity cleared to trade right now? */
 export async function evmIsCleared(legalEntityHash: string): Promise<boolean> {
   return getOracle().isCleared(toBytes32(legalEntityHash));
+}
+
+/**
+ * Tear the on-chain clearance bit down.
+ *
+ * Revoking on Canton alone is not enough: the oracle entry written by an
+ * earlier relayToEvm keeps revoked=false, so isCleared stays true and a
+ * permissioned pool gating on that bit still accepts deposits from a revoked
+ * entity. The identical defect was found live in the Python engine
+ * (POST /zeta/revoke) before this one; both implementations shipped a
+ * docstring claiming propagation that neither performed.
+ *
+ * Returns whether an on-chain entry existed to revoke, plus the resulting bit
+ * so the caller can assert the teardown instead of assuming it.
+ */
+export async function evmRevoke(legalEntityHash: string): Promise<{ entityHash: string; revoked: boolean; isCleared: boolean }> {
+  const entityHash = toBytes32(legalEntityHash);
+  const oracle = getOracle();
+  const known = oracle.has(entityHash);
+  if (known) oracle.revoke(entityHash, oracle.relayer);
+  return { entityHash, revoked: known, isCleared: oracle.isCleared(entityHash) };
 }

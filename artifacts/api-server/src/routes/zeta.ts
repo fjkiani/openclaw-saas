@@ -36,7 +36,7 @@ import * as engine from "../lib/zeta/engineClient.js";
 import { getVault } from "../lib/zeta/vaultClient.js";
 import { getLedger } from "../lib/zeta/ledgerClient.js";
 import { issueKyBVC } from "../lib/zeta/vcClient.js";
-import { relayToEvm, evmIsCleared } from "../lib/zeta/relayerClient.js";
+import { relayToEvm, evmIsCleared, evmRevoke } from "../lib/zeta/relayerClient.js";
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
@@ -246,7 +246,21 @@ router.post("/api/zeta/entities/:id/revoke", requireAuth, async (req: Request, r
   await ledger.revoke(att.cantonContractId, "zeta_agent");
   await db.update(zetaAttestationsTable).set({ revoked: true }).where(eq(zetaAttestationsTable.id, att.id));
   await db.update(zetaEntitiesTable).set({ status: "rejected" }).where(eq(zetaEntitiesTable.id, id));
-  res.json({ revoked: true, cantonContractId: att.cantonContractId });
+
+  // Revoking on Canton alone leaves the EVM oracle entry posted at attest time
+  // with revoked=false, so isCleared stays true and POST /api/zeta/verify would
+  // keep telling a permissioned pool this entity is cleared. Tear it down and
+  // assert the bit is actually off before reporting success.
+  const [entity] = await db.select().from(zetaEntitiesTable).where(eq(zetaEntitiesTable.id, id));
+  const evm = entity?.legalEntityHash ? await evmRevoke(entity.legalEntityHash)
+                                      : { entityHash: null, revoked: false, isCleared: false };
+  if (evm.isCleared) {
+    logger.error({ entityId: id, entityHash: evm.entityHash }, "zeta: on-chain clearance survived revocation");
+    res.status(500).json({ error: "revocation did not clear the on-chain allowlist", evm });
+    return;
+  }
+  logger.info({ entityId: id, contractId: att.cantonContractId, evm }, "zeta: revoked");
+  res.json({ revoked: true, cantonContractId: att.cantonContractId, evm });
 });
 
 export default router;
