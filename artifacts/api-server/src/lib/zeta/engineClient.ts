@@ -10,7 +10,13 @@
  * failed engine call.
  */
 
-const ENGINE_BASE = (process.env.ZETA_ENGINE_URL || "").replace(/\/$/, "");
+// Zeta engine runs as the /zeta router on the live Tessera FastAPI service.
+// Modal was dropped: its workspace hit a spend limit and the proxy-auth keys
+// issued are webhook credentials, not CLI deploy tokens. Render already hosts
+// this service, so the engine ships there with no new infrastructure.
+const ENGINE_BASE = (
+  process.env.ZETA_ENGINE_URL || "https://agentic-text-to-sql-44f2.onrender.com/zeta"
+).replace(/\/$/, "");
 const ENGINE_TOKEN = process.env.ZETA_ENGINE_TOKEN || "";
 
 export interface OwnershipEdge {
@@ -35,7 +41,7 @@ export interface UBOResult {
 
 function assertConfigured(): void {
   if (!ENGINE_BASE) {
-    throw new Error("ZETA_ENGINE_URL not configured — zeta-kyb-engine Modal service URL is required");
+    throw new Error("ZETA_ENGINE_URL not configured and no default engine base available");
   }
 }
 
