@@ -40,4 +40,7 @@ export * from "./zieModelPromotionGates";
 export * from "./manuscriptSubmissions";
 export * from "./manuscriptReviewRuns";
 export * from "./manuscriptReviewAttempts";
-export * from "./manuscriptAnalyses";export * from "./zetaClearance";
+export * from "./manuscriptAnalyses";
+
+// Zeta Clearance — institutional KYB (L1-L4)
+export * from "./zetaClearance";
