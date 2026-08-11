@@ -40,4 +40,4 @@ export * from "./zieModelPromotionGates";
 export * from "./manuscriptSubmissions";
 export * from "./manuscriptReviewRuns";
 export * from "./manuscriptReviewAttempts";
-export * from "./manuscriptAnalyses";
+export * from "./manuscriptAnalyses";export * from "./zetaClearance";

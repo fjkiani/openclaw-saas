@@ -23,6 +23,7 @@ import SetupPage from "@/pages/onboarding/setup";
 import StartupCounselPage from "@/pages/startup-counsel";
 import RigorGatePage from "@/pages/rigor-gate";
 import WorkflowsPage from "@/pages/workflows";
+import ZetaPage from "@/pages/zeta";
 
 const queryClient = new QueryClient();
 
@@ -239,6 +240,7 @@ function AppRoutes() {
         <Route path="/startup-counsel"><ProtectedRoute component={StartupCounselPage} /></Route>
         <Route path="/rigor-gate"><ProtectedRoute component={RigorGatePage} /></Route>
         <Route path="/workflows"><ProtectedRoute component={WorkflowsPage} /></Route>
+        <Route path="/zeta"><ProtectedRoute component={ZetaPage} /></Route>
         <Route component={NotFound} />
       </Switch>
     </QueryClientProvider>

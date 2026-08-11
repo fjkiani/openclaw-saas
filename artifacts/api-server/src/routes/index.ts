@@ -26,6 +26,7 @@ import localAuthRouter from "./localAuth.js";
 import sovereignRouter from "./sovereign.js";
 import corpusRouter from "./corpus.js";
 import rigorRouter from "./rigor.js";
+import zetaRouter from "./zeta.js";
 
 const router: IRouter = Router();
 
@@ -56,5 +57,6 @@ router.use("/auth", localAuthRouter);
 router.use("/sovereign", sovereignRouter);
 router.use("/corpus", corpusRouter);
 router.use("/v1/rigor", rigorRouter);
+router.use(zetaRouter);
 
 export default router;
